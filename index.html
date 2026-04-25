@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tower Defence</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: #1a1a2e; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; font-family: 'Segoe UI', sans-serif; gap: 4px; }
+      #game-container { position: relative; }
+
+      /* ── Developer panel ────────────────────────────────────────────────────── */
+      #dev-panel {
+        width: 1248px;
+        background: rgba(6, 6, 18, 0.92);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 0 0 8px 8px;
+        padding: 6px 14px;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 0;
+        font-family: 'Courier New', monospace;
+        font-size: 11px;
+        color: #555;
+      }
+      .dev-tag {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        color: #444;
+        text-transform: uppercase;
+        padding-right: 14px;
+        margin-right: 14px;
+        border-right: 1px solid rgba(255,255,255,0.07);
+        white-space: nowrap;
+      }
+      .dev-items {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 24px;
+        flex: 1;
+      }
+      .dev-item {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+      }
+      .dev-item-label {
+        font-size: 9px;
+        color: #444;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        white-space: nowrap;
+      }
+      .dev-item-value {
+        font-size: 12px;
+        font-weight: 700;
+        color: #e63946;
+        min-width: 36px;
+      }
+      .dev-strategy {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        border-left: 1px solid rgba(255,255,255,0.07);
+        padding-left: 14px;
+        margin-left: 10px;
+      }
+      .dev-score-block {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .dev-score-main {
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .dev-score-sub {
+        font-size: 9px;
+        color: #555;
+        letter-spacing: 0.04em;
+      }
+      .dev-char-badge {
+        display: inline-block;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-size: 10px;
+        color: #bbb;
+        white-space: nowrap;
+      }
+
+      /* ── Countdown timer (top-centre) ──────────────────────────────────────── */
+      #countdown {
+        position: absolute;
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 25;
+        font-size: 22px;
+        font-weight: 900;
+        letter-spacing: 0.06em;
+        color: #e0e0e0;
+        text-shadow: 0 1px 8px rgba(0,0,0,0.85);
+        pointer-events: none;
+        user-select: none;
+        font-variant-numeric: tabular-nums;
+      }
+      #countdown.countdown-urgent {
+        color: #e63946;
+        text-shadow: 0 0 14px rgba(230,57,70,0.55), 0 1px 6px rgba(0,0,0,0.8);
+        animation: countdown-pulse 0.5s ease-in-out infinite alternate;
+      }
+      @keyframes countdown-pulse {
+        from { opacity: 1;    }
+        to   { opacity: 0.55; }
+      }
+
+      /* ── Coin counter (top-right) ───────────────────────────────────────────── */
+      #coin-counter {
+        position: absolute;
+        top: 8px; right: 10px;
+        z-index: 25;
+        color: #ffd166;
+        font-size: 17px;
+        font-weight: 800;
+        letter-spacing: 0.03em;
+        text-shadow: 0 0 10px rgba(255,209,102,0.55);
+        pointer-events: none;
+        user-select: none;
+      }
+
+      /* ── Character HUD (top strip) ─────────────────────────────────────────── */
+      #char-hud {
+        position: absolute;
+        top: 0; left: 0; right: 80px; /* leave room for coin counter */
+        height: 84px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        pointer-events: none;
+        z-index: 20;
+        scrollbar-width: none;
+      }
+      #char-hud::-webkit-scrollbar { display: none; }
+
+      .char-card {
+        pointer-events: all;
+        flex-shrink: 0;
+        width: 76px;
+        background: rgba(10, 10, 24, 0.8);
+        border: 1.5px solid var(--card-color, #00b4d8);
+        border-radius: 8px;
+        padding: 4px 6px 0;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 2px;
+        box-shadow: 0 0 6px rgba(0,0,0,0.6);
+        color: #e0e0e0;
+        font-family: inherit;
+        transition: box-shadow 0.15s;
+        user-select: none;
+      }
+      .char-card:hover {
+        box-shadow: 0 0 10px var(--card-color, #00b4d8), 0 4px 14px rgba(0,0,0,0.5);
+      }
+
+      .char-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        line-height: 1;
+      }
+      .char-card-icon { font-size: 15px; line-height: 1; }
+      .char-card-id   { font-size: 9px; color: var(--card-color, #00b4d8); font-weight: 700; }
+
+      .char-card-label {
+        font-size: 9px;
+        font-weight: 600;
+        color: #aaa;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .char-card-hp-track {
+        height: 4px;
+        background: rgba(255,255,255,0.12);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .char-card-hp-bar {
+        height: 100%;
+        background: var(--card-color, #00b4d8);
+        border-radius: 2px;
+        transition: width 0.1s linear;
+      }
+
+      .char-card-hp-num {
+        font-size: 9px;
+        color: #777;
+        text-align: right;
+      }
+
+      .char-card-rank {
+        font-size: 8px;
+        font-weight: 700;
+        text-align: center;
+        letter-spacing: 0.04em;
+      }
+
+      /* Behavior toggle button — sits at bottom of card */
+      .char-card-behavior {
+        pointer-events: all;
+        margin: 2px -6px 0;  /* flush with card sides */
+        padding: 3px 0;
+        font-size: 9px;
+        font-weight: 700;
+        text-align: center;
+        border: none;
+        border-top: 1px solid rgba(255,255,255,0.08);
+        border-radius: 0 0 7px 7px;
+        background: rgba(0,0,0,0.3);
+        color: #ccc;
+        cursor: pointer;
+        letter-spacing: 0.04em;
+        transition: background 0.15s, color 0.15s;
+      }
+      .char-card-behavior:hover {
+        background: rgba(255,255,255,0.08);
+        color: #fff;
+      }
+      .char-card-behavior.char-card-behavior-collect {
+        background: rgba(255,209,102,0.15);
+        color: #ffd166;
+      }
+      .char-card-behavior.char-card-behavior-collect:hover {
+        background: rgba(255,209,102,0.25);
+      }
+      .char-card-behavior.char-card-behavior-harass {
+        background: rgba(244,162,97,0.15);
+        color: #f4a261;
+      }
+      .char-card-behavior.char-card-behavior-harass:hover {
+        background: rgba(244,162,97,0.25);
+      }
+
+      /* Death fade-out */
+      @keyframes card-die {
+        from { opacity: 1; transform: scale(1) translateY(0); }
+        to   { opacity: 0; transform: scale(0.8) translateY(-6px); }
+      }
+      .char-card-dying {
+        animation: card-die 0.3s ease-in forwards;
+        pointer-events: none;
+      }
+
+      /* ── Bottom UI overlay ──────────────────────────────────────────────────── */
+      #ui-overlay {
+        position: absolute;
+        bottom: 0; left: 0; right: 0;
+        display: flex;
+        justify-content: flex-start;
+        align-items: flex-end;
+        padding: 8px 12px;
+        gap: 8px;
+        pointer-events: none;
+      }
+      .spawn-btn {
+        pointer-events: all;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        transition: transform 0.1s, box-shadow 0.1s, opacity 0.15s;
+        line-height: 1.2;
+      }
+      .spawn-btn .btn-cost {
+        font-size: 10px;
+        font-weight: 600;
+        opacity: 0.85;
+      }
+      #spawn-warrior-btn  { background: linear-gradient(135deg, #00b4d8, #0077b6); box-shadow: 0 4px 12px rgba(0,180,216,0.45); }
+      #spawn-archer-btn   { background: linear-gradient(135deg, #43aa8b, #2d7a60); box-shadow: 0 4px 12px rgba(67,170,139,0.45); }
+      #spawn-rifleman-btn { background: linear-gradient(135deg, #e07b39, #a8521a); box-shadow: 0 4px 12px rgba(224,123,57,0.45); }
+      #spawn-medic-btn    { background: linear-gradient(135deg, #9b5de5, #6a29b0); box-shadow: 0 4px 12px rgba(155,93,229,0.45); }
+      #spawn-heavy-btn    { background: linear-gradient(135deg, #5c6a8a, #2d3558); box-shadow: 0 4px 12px rgba(92,106,138,0.45); }
+      .spawn-btn:active    { transform: scale(0.95); }
+      .spawn-btn:disabled  { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+      /* ── Game over screen ───────────────────────────────────────────────────── */
+      #game-over { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+      #game-over h1 { font-size: 48px; font-weight: 900; text-shadow: 0 0 20px currentColor; }
+      #game-over p  { font-size: 18px; margin-top: 8px; color: #ccc; }
+      #restart-btn { margin-top: 16px; pointer-events: all; background: #e63946; color: #fff; border: none; border-radius: 8px; padding: 10px 28px; font-size: 16px; font-weight: 700; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div id="game-container">
+      <div id="char-hud"></div>
+      <div id="countdown">3:00</div>
+      <div id="coin-counter">💰 <span id="coin-amount">150</span></div>
+
+      <div id="ui-overlay">
+        <button id="spawn-warrior-btn"  class="spawn-btn">
+          <span>⚔ Warrior</span>
+          <span class="btn-cost" id="warrior-cost"></span>
+        </button>
+        <button id="spawn-archer-btn"   class="spawn-btn">
+          <span>🏹 Archer</span>
+          <span class="btn-cost" id="archer-cost"></span>
+        </button>
+        <button id="spawn-rifleman-btn" class="spawn-btn">
+          <span>🎯 Rifleman</span>
+          <span class="btn-cost" id="rifleman-cost"></span>
+        </button>
+        <button id="spawn-medic-btn" class="spawn-btn">
+          <span>➕ Medic</span>
+          <span class="btn-cost" id="medic-cost"></span>
+        </button>
+        <button id="spawn-heavy-btn" class="spawn-btn">
+          <span>🔨 Heavy</span>
+          <span class="btn-cost" id="heavy-cost"></span>
+        </button>
+      </div>
+
+      <div id="game-over">
+        <h1 id="game-over-title"></h1>
+        <p id="game-over-sub"></p>
+        <button id="restart-btn">Play Again</button>
+      </div>
+    </div>
+    <div id="dev-panel">
+      <span class="dev-tag">Dev</span>
+      <div class="dev-items">
+        <div class="dev-item">
+          <span class="dev-item-label">CPU Coins</span>
+          <span class="dev-item-value" id="cpu-coin-amount">150</span>
+        </div>
+        <div class="dev-item" style="gap:8px; flex-wrap:wrap;">
+          <span class="dev-item-label">CPU Units</span>
+          <span id="cpu-chars-list" style="display:flex;gap:4px;flex-wrap:wrap;">—</span>
+        </div>
+
+        <div class="dev-strategy">
+          <div class="dev-item">
+            <span class="dev-item-label">Stance</span>
+            <span class="dev-item-value" id="cpu-stance" style="min-width:52px;">—</span>
+          </div>
+          <div class="dev-item">
+            <span class="dev-item-label">Score</span>
+            <div class="dev-score-block">
+              <span class="dev-score-main" id="cpu-score">—</span>
+              <span class="dev-score-sub" id="cpu-breakdown">U:— T:— C:—</span>
+            </div>
+          </div>
+          <div class="dev-item" style="flex-direction:column; align-items:flex-start; gap:2px; max-width:220px;">
+            <span class="dev-item-label">Last Decision</span>
+            <span id="cpu-decision" style="font-size:10px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px;">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
