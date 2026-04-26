@@ -9,15 +9,17 @@ const cpuCharsListEl   = document.getElementById('cpu-chars-list')!;
 const spawnWarriorBtn  = document.getElementById('spawn-warrior-btn')  as HTMLButtonElement;
 const spawnArcherBtn   = document.getElementById('spawn-archer-btn')   as HTMLButtonElement;
 const spawnRiflemanBtn = document.getElementById('spawn-rifleman-btn') as HTMLButtonElement;
+const spawnSniperBtn   = document.getElementById('spawn-sniper-btn')   as HTMLButtonElement;
 const spawnMedicBtn    = document.getElementById('spawn-medic-btn')    as HTMLButtonElement;
 const spawnHeavyBtn    = document.getElementById('spawn-heavy-btn')    as HTMLButtonElement;
 
 // Populate costs from config so the HTML never goes stale
-(document.getElementById('warrior-cost')  as HTMLElement).textContent = `${CHAR_COST.warrior} 💰`;
-(document.getElementById('archer-cost')   as HTMLElement).textContent = `${CHAR_COST.archer} 💰`;
+(document.getElementById('warrior-cost')  as HTMLElement).textContent = `${CHAR_COST.warrior}  💰`;
+(document.getElementById('archer-cost')   as HTMLElement).textContent = `${CHAR_COST.archer}   💰`;
 (document.getElementById('rifleman-cost') as HTMLElement).textContent = `${CHAR_COST.rifleman} 💰`;
-(document.getElementById('medic-cost')    as HTMLElement).textContent = `${CHAR_COST.medic} 💰`;
-(document.getElementById('heavy-cost')    as HTMLElement).textContent = `${CHAR_COST.heavy} 💰`;
+(document.getElementById('sniper-cost')   as HTMLElement).textContent = `${CHAR_COST.sniper}   💰`;
+(document.getElementById('medic-cost')    as HTMLElement).textContent = `${CHAR_COST.medic}    💰`;
+(document.getElementById('heavy-cost')    as HTMLElement).textContent = `${CHAR_COST.heavy}    💰`;
 const countdownEl    = document.getElementById('countdown')!;
 const gameOverEl     = document.getElementById('game-over')!;
 const goTitle        = document.getElementById('game-over-title')!;
@@ -34,6 +36,7 @@ let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpu
 spawnWarriorBtn.addEventListener ('click', () => game.spawnPlayer('warrior'));
 spawnArcherBtn.addEventListener  ('click', () => game.spawnPlayer('archer'));
 spawnRiflemanBtn.addEventListener('click', () => game.spawnPlayer('rifleman'));
+spawnSniperBtn.addEventListener  ('click', () => game.spawnPlayer('sniper'));
 spawnMedicBtn.addEventListener   ('click', () => game.spawnPlayer('medic'));
 spawnHeavyBtn.addEventListener   ('click', () => game.spawnPlayer('heavy'));
 
@@ -50,7 +53,8 @@ function handleCpuCoinsChanged(coins: number) {
 const TYPE_ICON: Record<string, string> = {
   warrior:  '⚔',
   archer:   '🏹',
-  rifleman: '🎯',
+  rifleman: '🔫',
+  sniper:   '🎯',
   medic:    '➕',
   heavy:    '🔨',
 };
@@ -105,6 +109,7 @@ function handleCoinsChanged(coins: number) {
   spawnWarriorBtn.disabled  = gameOver || coins < CHAR_COST.warrior;
   spawnArcherBtn.disabled   = gameOver || coins < CHAR_COST.archer;
   spawnRiflemanBtn.disabled = gameOver || coins < CHAR_COST.rifleman;
+  spawnSniperBtn.disabled   = gameOver || coins < CHAR_COST.sniper;
   spawnMedicBtn.disabled    = gameOver || coins < CHAR_COST.medic;
   spawnHeavyBtn.disabled    = gameOver || coins < CHAR_COST.heavy;
 }

@@ -9,7 +9,7 @@ export interface CpuStrategyInfo {
   decision: string;   // most recent significant action
 }
 import { Physics } from './Physics';
-import { buildBackground } from './Background';
+import { buildBackground, buildTowerRangeMarkers } from './Background';
 import { Tower } from './Tower';
 import type { TowerShot } from './Tower';
 import { Character, RANK_NAMES, type FireRequest, type UpdateContext } from './Character';
@@ -21,16 +21,16 @@ import { Platform } from './Platform';
 import type { PlatformData } from './Platform';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
-  GAME_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
+  VIEWPORT_WIDTH, GAME_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
   PLAYER_TOWER_X, ENEMY_TOWER_X,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  WARRIOR, ARCHER, RIFLEMAN, MEDIC, HEAVY,
+  WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY,
   CPU_SPAWN_MIN_MS, CPU_SPAWN_MAX_MS, CPU_FIRST_SPAWN_MAX,
   STARTING_COINS, CHAR_COST,
   PASSIVE_INCOME_RATE, LOW_BALANCE_THRESHOLD, LOW_BALANCE_INCOME_MULT,
   COIN_VALUE, KILL_REWARD, TOWER_KILL_REWARD, COIN_DROP_MIN_MS, COIN_DROP_MAX_MS,
   COIN_LIFETIME_S, COIN_DROP_X_MIN, COIN_DROP_X_MAX,
-  COIN_DROP_VX_MIN, COIN_DROP_VX_MAX, COIN_DROP_VY_MIN, COIN_DROP_VY_MAX,
+  COIN_DROP_VX_MIN, COIN_DROP_VX_MAX, COIN_DROP_VY_MIN, COIN_DROP_VY_MAX, COIN_DROP_START_Y,
   SILVER_COIN_VALUE, SILVER_DROP_MIN_MS, SILVER_DROP_MAX_MS,
   PLATFORM_X, PLATFORM_Y, PLATFORM_WIDTH, PLATFORM_HEIGHT,
   CPU_PRESSURE_THRESHOLD,
@@ -54,6 +54,18 @@ export class Game {
   private platform!:     Platform;
   private readonly platformData: PlatformData[] = [];
   private physics!:      Physics;
+
+  private world!:     PIXI.Container;
+  private cameraX  = 0;
+  private readonly keysDown = new Set<string>();
+
+  private readonly onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      this.keysDown.add(e.key);
+    }
+  };
+  private readonly onKeyUp = (e: KeyboardEvent) => { this.keysDown.delete(e.key); };
 
   private nextCharId  = 1;
   private freeCharIds: number[] = [];
@@ -109,13 +121,15 @@ export class Game {
 
     this.app = new PIXI.Application({
       view: canvas,
-      width:  GAME_WIDTH,
+      width:  VIEWPORT_WIDTH,
       height: GAME_HEIGHT,
       backgroundColor: 0x1a1a2e,
       antialias: true,
     });
 
     this.build();
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup',   this.onKeyUp);
     this.resetCpuTimerFirst();
     this.resetCoinDropTimer();
     this.resetSilverDropTimer();
@@ -129,7 +143,10 @@ export class Game {
   // ── Scene construction ───────────────────────────────────────────────────────
 
   private build() {
-    buildBackground(this.app.stage);
+    this.world = new PIXI.Container();
+
+    buildBackground(this.world);
+    buildTowerRangeMarkers(this.world);
 
     this.platform = new Platform({
       x: PLATFORM_X, y: PLATFORM_Y,
@@ -137,7 +154,7 @@ export class Game {
     });
     this.platformData.length = 0;
     this.platformData.push(this.platform.data);
-    this.app.stage.addChild(this.platform.container);
+    this.world.addChild(this.platform.container);
 
     this.physics = new Physics({
       x: PLATFORM_X, y: PLATFORM_Y,
@@ -148,21 +165,23 @@ export class Game {
     this.projLayer  = new PIXI.Container();
     this.unitLayer  = new PIXI.Container();
     this.labelLayer = new PIXI.Container();
-    this.app.stage.addChild(this.coinLayer);
-    this.app.stage.addChild(this.projLayer);
-    this.app.stage.addChild(this.unitLayer);
-    this.app.stage.addChild(this.labelLayer);
+    this.world.addChild(this.coinLayer);
+    this.world.addChild(this.projLayer);
+    this.world.addChild(this.unitLayer);
+    this.world.addChild(this.labelLayer);
 
     this.playerTower = new Tower('player', PLAYER_TOWER_X);
     this.enemyTower  = new Tower('enemy',  ENEMY_TOWER_X);
-    this.app.stage.addChild(this.playerTower.container);
-    this.app.stage.addChild(this.enemyTower.container);
+    this.world.addChild(this.playerTower.container);
+    this.world.addChild(this.enemyTower.container);
+
+    this.app.stage.addChild(this.world);
   }
 
   // ── Spawn ────────────────────────────────────────────────────────────────────
 
   /** Returns false if the player cannot afford this unit. */
-  spawnPlayer(type: 'warrior' | 'archer' | 'rifleman' | 'medic' | 'heavy'): boolean {
+  spawnPlayer(type: 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy'): boolean {
     if (this.isOver) return false;
     const cost = CHAR_COST[type];
     if (this.coinBalance < cost) return false;
@@ -170,7 +189,7 @@ export class Game {
     this.coinBalance -= cost;
     this.notifyCoins();
 
-    const configs = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, medic: MEDIC, heavy: HEAVY };
+    const configs = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, sniper: SNIPER, medic: MEDIC, heavy: HEAVY };
     const config = configs[type];
     const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), this.physics);
     this.characters.push(c);
@@ -187,7 +206,8 @@ export class Game {
 
     const typeWeight = (type: string) =>
       type === 'heavy'    ? 1.8 :
-      type === 'rifleman' ? 1.4 :
+      type === 'sniper'   ? 1.4 :
+      type === 'rifleman' ? 1.3 :
       type === 'archer'   ? 1.2 :
       type === 'medic'    ? 0.5 : 1.0;
     const threat = (chars: Character[], discountCollecting: boolean) =>
@@ -233,7 +253,7 @@ export class Game {
     const hurting  = cpuChars.filter(c => c.hp / c.config.hp < 0.5).length;
     const hasMedic = cpuChars.some(c => c.config.type === 'medic');
 
-    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'medic' | 'heavy';
+    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy';
     let order: UnitType[];
 
     if (stance === 'push') {
@@ -243,26 +263,28 @@ export class Game {
       // Get a medic early — 1 hurting unit is enough to justify it when squad exists
       const needMedic = hurting >= 1 && !hasMedic && cpuChars.length >= 2;
       if (needMedic) {
-        order = ['medic', 'warrior', 'archer', 'rifleman'];
+        order = ['medic', 'warrior', 'archer', 'sniper'];
       } else if (pressure >= 3) {
         // Severely outnumbered — flood cheap units to plug the gap immediately
-        order = ['warrior', 'heavy', 'archer', 'rifleman'];
+        order = ['warrior', 'heavy', 'archer', 'sniper'];
       } else {
         // Steady defence: archers for harassment, warriors as frontline wall
-        order = ['archer', 'warrior', 'rifleman', 'medic'];
+        order = ['archer', 'warrior', 'sniper', 'medic'];
       }
     } else {
       // Economy: invest in better units; get a medic if the squad is hurting
       if (hurting >= 2 && !hasMedic) {
         order = ['medic', 'archer', 'warrior'];
-      } else if (this.cpuCoinBalance >= CHAR_COST.rifleman && cpuChars.length >= 3) {
+      } else if (this.cpuCoinBalance >= CHAR_COST.sniper && cpuChars.length >= 3) {
+        order = ['sniper', 'rifleman', 'archer', 'heavy', 'warrior'];
+      } else if (this.cpuCoinBalance >= CHAR_COST.rifleman) {
         order = ['rifleman', 'archer', 'heavy', 'warrior'];
       } else {
         order = ['archer', 'heavy', 'warrior'];
       }
     }
 
-    const cfgMap = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, medic: MEDIC, heavy: HEAVY };
+    const cfgMap = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, sniper: SNIPER, medic: MEDIC, heavy: HEAVY };
     for (const type of order) {
       if (this.cpuCoinBalance < CHAR_COST[type]) continue;
       this.cpuCoinBalance -= CHAR_COST[type];
@@ -290,7 +312,7 @@ export class Game {
 
   private spawnCoin(value: number, kind: CoinKind, dt = 1 / 60) {
     const x    = COIN_DROP_X_MIN + Math.random() * (COIN_DROP_X_MAX - COIN_DROP_X_MIN);
-    const coin = new Coin(x, COIN_LIFETIME_S, value, kind, 0, 0, -20, this.physics, dt);
+    const coin = new Coin(x, COIN_LIFETIME_S, value, kind, 0, 0, COIN_DROP_START_Y, this.physics, dt);
     this.coins.push(coin);
     this.coinLayer.addChild(coin.container);
   }
@@ -328,10 +350,17 @@ export class Game {
   // ── Tick ─────────────────────────────────────────────────────────────────────
 
   private tick() {
-    if (this.isOver) return;
-
     const ticker = this.app.ticker;
     const dt     = ticker.deltaMS / 1000;
+
+    // Camera — runs even when the game is over so the player can review the field
+    const CAMERA_SPEED = 500; // px/s
+    if (this.keysDown.has('ArrowLeft'))  this.cameraX -= CAMERA_SPEED * dt;
+    if (this.keysDown.has('ArrowRight')) this.cameraX += CAMERA_SPEED * dt;
+    this.cameraX     = Math.max(0, Math.min(GAME_WIDTH - VIEWPORT_WIDTH, this.cameraX));
+    this.world.x     = -this.cameraX;
+
+    if (this.isOver) return;
 
     const playerRate = this.coinBalance    < LOW_BALANCE_THRESHOLD ? PASSIVE_INCOME_RATE * LOW_BALANCE_INCOME_MULT : PASSIVE_INCOME_RATE;
     const cpuRate    = this.cpuCoinBalance < LOW_BALANCE_THRESHOLD ? PASSIVE_INCOME_RATE * LOW_BALANCE_INCOME_MULT : PASSIVE_INCOME_RATE;
@@ -405,6 +434,7 @@ export class Game {
 
     // Physics step: push AI positions → engine → read results back
     for (const c of liveChars) c.syncToBody(dt);
+    for (const coin of this.coins) if (!coin.isDead && !coin.isPickedUp) this.physics.updatePlatformPassthrough(coin.body);
     this.physics.step(dt);
     for (const c of liveChars) c.syncFromBody(this.platformData);
 
@@ -416,24 +446,27 @@ export class Game {
     const shotE = this.enemyTower.tryFire(dt, liveChars.filter(c => c.side === 'player'));
     if (shotE) fireShot(shotE, 'enemy');
 
-    // Spawn coins dropped by hit characters (scan all — some may have just died)
+    // Spawn coins dropped or thrown by characters (scan all — some may have just died)
     for (const c of this.characters) {
       if (!c.pendingCoinDrop) continue;
-      const { x, y, value: dropValue, kind: dropKind } = c.pendingCoinDrop;
+      const { x, y, value: dropValue, kind: dropKind, vx: throwVx, vy: throwVy } = c.pendingCoinDrop;
+      const isThrow = throwVx !== undefined;
       c.pendingCoinDrop = null;
-      const vx   = (Math.random() < 0.5 ? 1 : -1) * (COIN_DROP_VX_MIN + Math.random() * (COIN_DROP_VX_MAX - COIN_DROP_VX_MIN));
-      const vy   = -(COIN_DROP_VY_MIN + Math.random() * (COIN_DROP_VY_MAX - COIN_DROP_VY_MIN));
+      const vx   = throwVx  ?? (Math.random() < 0.5 ? 1 : -1) * (COIN_DROP_VX_MIN + Math.random() * (COIN_DROP_VX_MAX - COIN_DROP_VX_MIN));
+      const vy   = throwVy  ?? -(COIN_DROP_VY_MIN + Math.random() * (COIN_DROP_VY_MAX - COIN_DROP_VY_MIN));
       const coin = new Coin(x, COIN_LIFETIME_S, dropValue, dropKind, vx, vy, y, this.physics, dt);
       this.coins.push(coin);
       this.coinLayer.addChild(coin.container);
-      if (!c.isDead) c.recoverCoin(coin);
+      if (!c.isDead && !isThrow) c.recoverCoin(coin);
     }
 
     // Spawn damage labels from pending events
     for (const c of liveChars) {
       const color = c.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
       for (const ev of c.pendingDamages) {
-        const label = new DamageLabel(ev.x, ev.y, ev.amount, color);
+        const label = ev.amount === 0
+          ? new DamageLabel(ev.x, ev.y, 0, 0x999999, 'Miss')
+          : new DamageLabel(ev.x, ev.y, ev.amount, color);
         this.damageLabels.push(label);
         this.labelLayer.addChild(label.container);
       }
@@ -654,6 +687,7 @@ export class Game {
     this.timeRemaining         = GAME_DURATION_SEC;
     this.lastNotifiedTime      = -1;
 
+    this.cameraX = 0;
     this.hud.clear();
     this.app.stage.removeChildren();
     this.build();
@@ -669,6 +703,8 @@ export class Game {
 
   destroy() {
     this.app.ticker.remove(this.tickFn);
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup',   this.onKeyUp);
     this.hud.clear();
     this.app.destroy(false, { children: true });
   }

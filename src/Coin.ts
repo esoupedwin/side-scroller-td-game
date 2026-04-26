@@ -30,7 +30,7 @@ export class Coin {
 
   get isOnPlatform() { return this.isOnGround && this.floorY < GROUND_Y; }
 
-  private body:    Matter.Body;
+  body:    Matter.Body;
   private physics: Physics;
   private timer             = 0;
   private lifetimeRemaining: number;
@@ -80,7 +80,7 @@ export class Coin {
     this.gfx.beginFill(hi, 0.85);   this.gfx.drawCircle(-3, -3, 2.5);  this.gfx.endFill();
   }
 
-  update(dt: number, _platforms: PlatformData[] = []) {
+  update(dt: number, platforms: PlatformData[] = []) {
     if (this.isDead || this.isPickedUp) return;
 
     this.timer += dt;
@@ -95,13 +95,20 @@ export class Coin {
         this.body.velocity.y * this.body.velocity.y,
       );
 
-      // Settle when nearly stopped and near a surface
-      if (speed < 0.05 && this.y >= LAND_Y - 20) {
-        this.isOnGround = true;
-        this.floorY     = this.y >= LAND_Y - 4 ? GROUND_Y : GROUND_Y - 140;
-        Matter.Body.setStatic(this.body, true);
-        // Snap visual to flat rest position
-        this.y = this.floorY === GROUND_Y ? LAND_Y : this.floorY - 14;
+      // Settle when nearly stopped and close to a surface (ground or platform).
+      if (speed < 0.05) {
+        const platBelow = platforms.find(
+          p => this.x >= p.x && this.x <= p.x + p.width &&
+               this.y >= p.y - 35 && this.y <= p.y + 5,
+        );
+        const nearGround = this.y >= GROUND_Y - 35;
+
+        if (platBelow || nearGround) {
+          this.isOnGround = true;
+          this.floorY     = platBelow ? platBelow.y : GROUND_Y;
+          Matter.Body.setStatic(this.body, true);
+          this.y = this.floorY === GROUND_Y ? LAND_Y : this.floorY - 14;
+        }
       }
 
       this.container.x = this.x;

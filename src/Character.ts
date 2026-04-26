@@ -6,7 +6,9 @@ import {
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
   CHAR_HEAL_RANGE, CHAR_HEAL_RATE,
+  PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, RANGED_KITE_THRESHOLD,
+  COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
 } from './constants';
@@ -19,12 +21,13 @@ import { COIN_PALETTE } from './Coin';
 import type { PlatformData } from './Platform';
 
 export interface CharacterConfig {
-  type:        'warrior' | 'archer' | 'rifleman' | 'medic' | 'heavy';
+  type:        'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy';
   hp:          number;
   speed:       number;
   attackRange: number;
   attackPower: number;
   fireRate:    number;
+  critical:    number;  // miss probability [0, 1] — roll each attack
   width:       number;
   height:      number;
 }
@@ -78,8 +81,9 @@ export class Character {
 
   /** Damage events emitted this tick; Game.ts reads and clears each frame. */
   readonly pendingDamages: { amount: number; x: number; y: number }[] = [];
-  /** Set when the character drops a carried coin; Game.ts spawns the coin. */
-  pendingCoinDrop: { x: number; y: number; value: number; kind: CoinKind } | null = null;
+  /** Set when the character drops or throws a carried coin; Game.ts spawns the coin.
+   *  vx/vy present → deliberate throw (directed velocity, no recovery chase). */
+  pendingCoinDrop: { x: number; y: number; value: number; kind: CoinKind; vx?: number; vy?: number } | null = null;
 
   rank:              0 | 1 | 2 | 3 = 0;
   pendingPromotion = false;
@@ -90,7 +94,14 @@ export class Character {
   private promoAnimTimer = -1;
 
   private attackTimer        = 0;
+  private randomJumpTimer    = Math.random() * 3;  // stagger across characters
+  private evasiveJumpTimer   = 0;
+  private lastMoveDir:         1 | -1 = 1;
+  private legL:     PIXI.Container | null = null;
+  private legR:     PIXI.Container | null = null;
+  private legPhase: number = Math.random() * Math.PI * 2;  // stagger across characters
   private coinPickupCooldown = 0;
+  private coinThrowTimer     = -1;  // countdown before throw; -1 = not winding up
   private _behavior:    'attacking' | 'collecting' | 'harass' = 'attacking';
   private carryingCoin  = false;
   private coinCarryValue: number   = 0;
@@ -113,7 +124,7 @@ export class Character {
 
     this.barBg = new PIXI.Graphics();
     this.barBg.beginFill(0x333333);
-    this.barBg.drawRect(-CHAR_HP_BAR_W / 2, -this.config.height * 0.15, CHAR_HP_BAR_W, CHAR_HP_BAR_H);
+    this.barBg.drawRect(-CHAR_HP_BAR_W / 2, -this.config.height * 0.55, CHAR_HP_BAR_W, CHAR_HP_BAR_H);
     this.barBg.endFill();
     this.container.addChild(this.barBg);
 
@@ -134,7 +145,7 @@ export class Character {
     });
     idLabel.anchor.set(0.5, 1);
     idLabel.x = 0;
-    idLabel.y = -this.config.height * 0.15 - 1;
+    idLabel.y = -this.config.height * 0.55 - 2;
     this.container.addChild(idLabel);
 
     this.syncPosition();
@@ -158,21 +169,38 @@ export class Character {
   private buildSprite() {
     if      (this.config.type === 'archer')   this.buildArcherSprite();
     else if (this.config.type === 'rifleman') this.buildRiflemanSprite();
+    else if (this.config.type === 'sniper')   this.buildSniperSprite();
     else if (this.config.type === 'medic')    this.buildMedicSprite();
     else if (this.config.type === 'heavy')    this.buildHeavySprite();
     else                                       this.buildWarriorSprite();
   }
 
+  // Creates two animated leg containers (added to container before body, so legs render behind).
+  private buildAnimLegs(lx: number, rx: number, legW: number, legH: number, alpha: number) {
+    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const hipY  = this.config.height * 0.55;
+    const make  = (cx: number): PIXI.Container => {
+      const c = new PIXI.Container();
+      c.x = cx; c.y = hipY;
+      const g = new PIXI.Graphics();
+      g.beginFill(color, alpha);
+      g.drawRect(-legW / 2, 0, legW, legH);
+      g.endFill();
+      c.addChild(g);
+      this.container.addChild(c);
+      return c;
+    };
+    this.legL = make(lx);
+    this.legR = make(rx);
+  }
+
   private buildWarriorSprite() {
-    const g     = new PIXI.Graphics();
     const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const w = this.config.width, h = this.config.height;
     const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.325, w * 0.325, w * 0.35, h * 0.45, 0.6);
 
-    g.beginFill(color, 0.6);
-    g.drawRect(-w / 2,    h * 0.55, w * 0.35, h * 0.45);
-    g.drawRect( w * 0.15, h * 0.55, w * 0.35, h * 0.45);
-    g.endFill();
+    const g = new PIXI.Graphics();
     g.beginFill(color);
     g.drawRoundedRect(-w / 2, h * 0.2, w, h * 0.4, 4);
     g.endFill();
@@ -194,15 +222,12 @@ export class Character {
   }
 
   private buildArcherSprite() {
-    const g     = new PIXI.Graphics();
     const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const w = this.config.width, h = this.config.height;
     const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.15, w * 0.15, w * 0.26, h * 0.45, 0.55);
 
-    g.beginFill(color, 0.55);
-    g.drawRect(-w * 0.28, h * 0.55, w * 0.26, h * 0.45);
-    g.drawRect( w * 0.02, h * 0.55, w * 0.26, h * 0.45);
-    g.endFill();
+    const g = new PIXI.Graphics();
     g.beginFill(color, 0.85);
     g.drawRoundedRect(-w * 0.38, h * 0.2, w * 0.76, h * 0.4, 3);
     g.endFill();
@@ -243,15 +268,70 @@ export class Character {
   }
 
   private buildRiflemanSprite() {
-    const g     = new PIXI.Graphics();
     const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const w = this.config.width, h = this.config.height;
     const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.31, w * 0.31, w * 0.38, h * 0.45, 0.5);
 
-    g.beginFill(color, 0.5);
-    g.drawRect(-w / 2,    h * 0.55, w * 0.38, h * 0.45);
-    g.drawRect( w * 0.12, h * 0.55, w * 0.38, h * 0.45);
+    const g = new PIXI.Graphics();
+    // Torso with combat vest
+    g.beginFill(color, 0.9);
+    g.drawRoundedRect(-w * 0.46, h * 0.18, w * 0.92, h * 0.42, 3);
     g.endFill();
+    g.lineStyle(1, color, 0.4);
+    g.moveTo(-w * 0.12, h * 0.22); g.lineTo(-w * 0.12, h * 0.58);
+    g.moveTo( w * 0.12, h * 0.22); g.lineTo( w * 0.12, h * 0.58);
+    g.lineStyle(0);
+
+    // Head
+    g.beginFill(color, 0.85);
+    g.drawCircle(0, h * 0.1, w * 0.36);
+    g.endFill();
+    // Wide infantry helmet
+    g.beginFill(color);
+    g.drawRoundedRect(-w * 0.42, h * 0.02 - 9, w * 0.84, 11, 3);
+    g.endFill();
+
+    // Assault rifle (shorter barrel than sniper)
+    const ry = h * 0.30;
+    // Stock
+    const stockL = Math.min(-dir * 12, -dir * 2);
+    const stockW = Math.abs(-dir * 12 - (-dir * 2));
+    g.beginFill(0x5c3d1e);
+    g.drawRoundedRect(stockL, ry, stockW, 8, 2);
+    g.endFill();
+    // Receiver
+    const recvL = Math.min(-dir * 2, dir * 14);
+    const recvW = Math.abs(-dir * 2 - dir * 14);
+    g.beginFill(0x3a3a3a);
+    g.drawRect(recvL, ry, recvW, 6);
+    g.endFill();
+    // Magazine hanging below receiver
+    const magX = dir > 0 ? 4 : -10;
+    g.beginFill(0x2a2a2a);
+    g.drawRoundedRect(magX, ry + 6, 6, 9, 1);
+    g.endFill();
+    // Barrel (14→26 px; sniper is 16→38)
+    const barlL = Math.min(dir * 14, dir * 26);
+    const barlW = Math.abs(dir * 14 - dir * 26);
+    g.beginFill(0x2a2a2a);
+    g.drawRect(barlL, ry + 1, barlW, 4);
+    g.endFill();
+    // Muzzle
+    g.beginFill(0x1a1a1a);
+    g.drawRect(dir > 0 ? dir * 26 : dir * 26 - 3, ry, 3, 6);
+    g.endFill();
+
+    this.container.addChild(g);
+  }
+
+  private buildSniperSprite() {
+    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const w = this.config.width, h = this.config.height;
+    const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.31, w * 0.31, w * 0.38, h * 0.45, 0.5);
+
+    const g = new PIXI.Graphics();
     g.beginFill(color, 0.9);
     g.drawRoundedRect(-w * 0.48, h * 0.18, w * 0.96, h * 0.42, 3);
     g.endFill();
@@ -308,17 +388,12 @@ export class Character {
   }
 
   private buildHeavySprite() {
-    const g     = new PIXI.Graphics();
     const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const w = this.config.width, h = this.config.height;
     const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.25, w * 0.25, w * 0.38, h * 0.45, 0.7);
 
-    // Thick legs
-    g.beginFill(color, 0.7);
-    g.drawRect(-w * 0.44, h * 0.55, w * 0.38, h * 0.45);
-    g.drawRect( w * 0.06, h * 0.55, w * 0.38, h * 0.45);
-    g.endFill();
-
+    const g = new PIXI.Graphics();
     // Armored torso
     g.beginFill(color);
     g.drawRoundedRect(-w / 2, h * 0.18, w, h * 0.42, 6);
@@ -369,16 +444,11 @@ export class Character {
   }
 
   private buildMedicSprite() {
-    const g     = new PIXI.Graphics();
     const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const w = this.config.width, h = this.config.height;
+    this.buildAnimLegs(-w * 0.325, w * 0.325, w * 0.35, h * 0.45, 0.6);
 
-    // Legs
-    g.beginFill(color, 0.6);
-    g.drawRect(-w / 2,    h * 0.55, w * 0.35, h * 0.45);
-    g.drawRect( w * 0.15, h * 0.55, w * 0.35, h * 0.45);
-    g.endFill();
-
+    const g = new PIXI.Graphics();
     // White coat
     g.beginFill(0xffffff, 0.95);
     g.drawRoundedRect(-w / 2, h * 0.2, w, h * 0.4, 4);
@@ -416,7 +486,7 @@ export class Character {
     const ratio = Math.max(0, this.hp / this.maxHp);
     this.bar.clear();
     this.bar.beginFill(this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR);
-    this.bar.drawRect(-CHAR_HP_BAR_W / 2, -this.config.height * 0.15, CHAR_HP_BAR_W * ratio, CHAR_HP_BAR_H);
+    this.bar.drawRect(-CHAR_HP_BAR_W / 2, -this.config.height * 0.55, CHAR_HP_BAR_W * ratio, CHAR_HP_BAR_H);
     this.bar.endFill();
   }
 
@@ -472,6 +542,50 @@ export class Character {
       this.container.addChild(this.promoAnimGfx);
     }
     this.promoAnimTimer = 0;
+  }
+
+  private tickRandomJump(dt: number, homeTowerFrontX: number) {
+    if (this.isAirborne || this.state === 'fighting') return;
+    if (this.isOnPlatform) return;   // stay on platform; horizontal movement is the right action
+    this.randomJumpTimer -= dt;
+    if (this.randomJumpTimer > 0) return;
+    this.randomJumpTimer = 1.5 + Math.random() * 2;  // next check in 1.5–3.5 s
+
+    const sideDir = this.side === 'player' ? 1 : -1;
+    if (sideDir * (this.x - homeTowerFrontX) < 120) return;  // too close to home
+    if (Math.random() < 0.20) this.jump(this.lastMoveDir, dt);
+  }
+
+  private tickLegs(dt: number) {
+    if (!this.legL || !this.legR) return;
+
+    const MAX_SWING = 0.42;   // radians ≈ 24°
+    const WALK_FREQ = 7.0;    // phase advance per second
+
+    if (this.isAirborne) {
+      // Tuck back on ascent, extend forward on descent — direction-aware
+      const vy  = this.body.velocity.y;
+      const dir = this.lastMoveDir;
+      const tL  = vy < 0 ? -dir * 0.50 :  dir * 0.30;
+      const tR  = vy < 0 ? -dir * 0.30 :  dir * 0.20;
+      this.legL.rotation += (tL - this.legL.rotation) * 0.22;
+      this.legR.rotation += (tR - this.legR.rotation) * 0.22;
+      return;
+    }
+
+    const walking = this.state === 'marching'   ||
+                    this.state === 'collecting' ||
+                    this.state === 'returning';
+
+    if (walking) {
+      this.legPhase += WALK_FREQ * dt;
+      this.legL.rotation = Math.sin(this.legPhase)           * MAX_SWING;
+      this.legR.rotation = Math.sin(this.legPhase + Math.PI) * MAX_SWING;
+    } else {
+      // Idle: decay toward neutral stance
+      this.legL.rotation *= 0.85;
+      this.legR.rotation *= 0.85;
+    }
   }
 
   private tickPromoAnim(dt: number) {
@@ -564,21 +678,33 @@ export class Character {
 
   private dropCarriedCoin() {
     this.carryingCoin       = false;
+    this.coinThrowTimer     = -1;
     this.removeCoinCarry();
     this.pendingCoinDrop    = { x: this.x, y: this.y - this.config.height * 0.5, value: this.coinCarryValue, kind: this.coinCarryKind };
     this.coinPickupCooldown = CHAR_COIN_RECOVERY_COOLDOWN;
   }
 
+  private throwCarriedCoin(towardX: number) {
+    const dir          = Math.sign(towardX - this.x);
+    this.carryingCoin  = false;
+    this.removeCoinCarry();
+    this.pendingCoinDrop = {
+      x: this.x, y: this.y - this.config.height * 0.5,
+      value: this.coinCarryValue, kind: this.coinCarryKind,
+      vx: dir * COIN_THROW_VX, vy: -COIN_THROW_VY,  // 60° — vy ≈ vx × √3
+    };
+    // No cooldown — character stays active in the field immediately
+  }
+
   // ── Public API ───────────────────────────────────────────────────────────────
 
   takeDamage(dmg: number, killer?: Character) {
+    // Always queue a label event (amount=0 → "Miss" in Game.ts)
+    this.pendingDamages.push({ amount: dmg, x: this.x, y: this.y - this.config.height - 6 });
+    if (dmg <= 0) return;  // miss — no HP change, no coin drop, no kill
+
     this.hp = Math.max(0, this.hp - dmg);
     this.drawBar();
-    this.pendingDamages.push({
-      amount: dmg,
-      x: this.x,
-      y: this.y - this.config.height - 6,
-    });
     if (this.carryingCoin) this.dropCarriedCoin();
     if (this.hp <= 0) {
       this.state = 'dead';
@@ -612,7 +738,8 @@ export class Character {
   update(ctx: UpdateContext) {
     if (this.isDead) return;
 
-    this.attackTimer = Math.max(0, this.attackTimer - ctx.dt);
+    this.attackTimer      = Math.max(0, this.attackTimer      - ctx.dt);
+    this.evasiveJumpTimer = Math.max(0, this.evasiveJumpTimer - ctx.dt);
 
     if (this.config.type === 'medic') this.tickHeal(ctx.dt, ctx.allChars);
 
@@ -625,6 +752,7 @@ export class Character {
 
     this.syncFromBody(ctx.platforms);
 
+    const preX = this.x;
     if (this._behavior === 'collecting') {
       this.updateCollecting(ctx);
     } else if (this._behavior === 'harass') {
@@ -632,8 +760,18 @@ export class Character {
     } else {
       this.updateAttacking(ctx);
     }
+    if (this.x !== preX) this.lastMoveDir = (this.x > preX ? 1 : -1);
 
+    this.tickRandomJump(ctx.dt, ctx.homeTowerFrontX);
+    this.tickLegs(ctx.dt);
     this.tickPromoAnim(ctx.dt);
+
+    // Hard boundary: characters cannot pass behind either tower
+    const boundL = PLAYER_TOWER_X - TOWER_WIDTH / 2;
+    const boundR = ENEMY_TOWER_X  + TOWER_WIDTH / 2;
+    if (this.x < boundL) { this.x = boundL; this.jumpVx = 0; }
+    if (this.x > boundR) { this.x = boundR; this.jumpVx = 0; }
+
     this.syncPosition();
   }
 
@@ -651,29 +789,49 @@ export class Character {
 
   syncToBody(dt: number) {
     if (this.isAirborne) this.x += this.jumpVx * dt;
-    Matter.Body.setPosition(this.body, { x: this.x, y: this.body.position.y });
-    Matter.Body.setVelocity(this.body, { x: 0, y: this.body.velocity.y });
+    // Character bodies have no Matter.js platform collision (mask: CAT_GROUND only).
+    // Without pinning, gravity pulls the body through the platform to the ground,
+    // making char.y drift to GROUND_Y while floorY stays stale at platform height.
+    const onPlatform = !this.isAirborne && this.floorY < GROUND_Y;
+    Matter.Body.setPosition(this.body, {
+      x: this.x,
+      y: onPlatform ? this.floorY - this.config.height / 2 : this.body.position.y,
+    });
+    Matter.Body.setVelocity(this.body, { x: 0, y: onPlatform ? 0 : this.body.velocity.y });
   }
 
   syncFromBody(platforms: PlatformData[]) {
-    const halfH = this.config.height / 2;
-    this.y = this.body.position.y + halfH;
+    const halfH     = this.config.height / 2;
+    const prevFeetY = (this.body as unknown as { positionPrev: { y: number } }).positionPrev.y + halfH;
+    this.y          = this.body.position.y + halfH;
 
-    const onSurface = this.physics.isOnSurface(this.body);
-    if (onSurface && this.isAirborne) {
-      this.isAirborne = false;
-      this.jumpVx     = 0;
-    } else if (!onSurface && !this.isAirborne) {
-      // Walked off an edge
-      this.isAirborne = true;
-    }
+    if (this.isAirborne) {
+      // Platform landing: detect feet crossing the surface while falling (tunneling-safe).
+      if (this.body.velocity.y >= 0) {
+        for (const p of platforms) {
+          if (this.x >= p.x && this.x <= p.x + p.width && prevFeetY <= p.y && this.y >= p.y) {
+            this.y = p.y;
+            Matter.Body.setPosition(this.body, { x: this.body.position.x, y: p.y - halfH });
+            Matter.Body.setVelocity(this.body, { x: 0, y: 0 });
+            this.isAirborne = false;
+            this.jumpVx     = 0;
+            this.floorY     = p.y;
+            return;
+          }
+        }
+      }
 
-    // Derive floorY from which surface we landed on
-    if (!this.isAirborne) {
-      const onPlat = platforms.find(
-        p => this.x >= p.x && this.x <= p.x + p.width && Math.abs(this.y - p.y) < 8,
-      );
-      this.floorY = onPlat ? onPlat.y : GROUND_Y;
+      // Ground landing: position-based (more reliable than collision events).
+      if (this.y >= GROUND_Y - 1) {
+        this.isAirborne = false;
+        this.jumpVx     = 0;
+        this.floorY     = GROUND_Y;
+        this.y          = GROUND_Y;
+      }
+    } else if (this.floorY < GROUND_Y) {
+      // On platform — detect walking off edge horizontally.
+      const onPlat = platforms.some(p => this.x >= p.x && this.x <= p.x + p.width);
+      if (!onPlat) this.isAirborne = true;
     }
   }
 
@@ -694,7 +852,7 @@ export class Character {
       return;
     }
 
-    const isRanged    = this.config.type === 'archer' || this.config.type === 'rifleman';
+    const isRanged    = this.config.type === 'archer' || this.config.type === 'rifleman' || this.config.type === 'sniper';
     const dir         = this.side === 'player' ? 1 : -1;
     const nearest     = this.nearestEnemy(allChars, this.config.attackRange);
     const distToTower = Math.abs(this.x - enemyTowerFrontX);
@@ -733,6 +891,25 @@ export class Character {
       if (nearest) this.attackEnemy(nearest, onFire);
     }
 
+    // Evasive jump: 80% chance to leap over a blocking enemy while en route
+    // Suppressed on platform — jumping from height would throw the character off
+    if (!this.isAirborne && !this.isOnPlatform && this.evasiveJumpTimer <= 0) {
+      const dirToTarget = this.carryingCoin
+        ? Math.sign(homeTowerFrontX - this.x)
+        : this.targetCoin ? Math.sign(this.targetCoin.x - this.x) : 0;
+      if (dirToTarget !== 0) {
+        const blocking = allChars.find(c =>
+          !c.isDead && c.side !== this.side &&
+          Math.sign(c.x - this.x) === dirToTarget &&
+          Math.abs(c.x - this.x) < 60,
+        );
+        if (blocking) {
+          this.evasiveJumpTimer = 2.0;
+          if (Math.random() < 0.80) this.jump(dirToTarget, dt);
+        }
+      }
+    }
+
     if (this.carryingCoin) {
       if (this.isAirborne) return;   // wait until landed
       const distToTower = Math.abs(this.x - homeTowerFrontX);
@@ -742,11 +919,24 @@ export class Character {
         this.state = 'marching';
         onDepositCoin(this.coinCarryValue);
         this.earnAP(PROMO_COIN_AP);
+        return;
+      } else if (distToTower > COIN_THROW_MIN_DIST) {
+        // Hold coin for COIN_THROW_HOLD_SEC before releasing the 45° throw
+        if (this.coinThrowTimer < 0) this.coinThrowTimer = COIN_THROW_HOLD_SEC;
+        this.coinThrowTimer -= dt;
+        this.state = 'returning';   // stand still while winding up
+        if (this.coinThrowTimer > 0) return;
+        // Timer expired — release throw, scan nearby for a new coin, fall through
+        this.coinThrowTimer = -1;
+        this.throwCarriedCoin(homeTowerFrontX);
+        this.targetCoin = this.nearestCoin(coins, COIN_THROW_SCAN_RANGE);
+        // carryingCoin is now false — fall through to pickup logic
       } else {
+        this.coinThrowTimer = -1;  // moved close enough — cancel any pending windup
         this.state = 'returning';
         this.x += Math.sign(homeTowerFrontX - this.x) * this.moveSpeed * dt;
+        return;
       }
-      return;
     }
 
     if (this.targetCoin && (this.targetCoin.isDead || this.targetCoin.isPickedUp)) {
@@ -754,11 +944,20 @@ export class Character {
     }
 
     if (!this.targetCoin) {
-      this.targetCoin = this.nearestCoin(coins);
+      this.targetCoin = this.coinClosestToTower(coins, homeTowerFrontX);
     }
 
     if (this.targetCoin) {
-      const coinOnPlatform = this.targetCoin.isOnPlatform;
+      // Also treat as "on platform" when the coin is still bouncing (isOnGround=false)
+      // but is already within the platform's x-range and at/above its surface.
+      // Without this, the character walks to coin.x on the ground, can't pick up
+      // (isOnGround=false), and freezes because Math.sign(0) gives no movement.
+      const coinOnPlatform = this.targetCoin.isOnPlatform ||
+        platforms.some(p =>
+          !this.targetCoin!.isOnGround &&
+          this.targetCoin!.x >= p.x && this.targetCoin!.x <= p.x + p.width &&
+          this.targetCoin!.y <= p.y + 5,
+        );
       const charOnPlatform = this.floorY < GROUND_Y;
 
       // ── Pathfinding: jump onto platform ──────────────────────────────────────
@@ -780,9 +979,16 @@ export class Character {
 
       // ── Same-floor pickup ────────────────────────────────────────────────────
       const dist       = Math.abs(this.x - this.targetCoin.x);
-      const sameSurface = Math.abs(this.floorY - this.targetCoin.floorY) < 30;
+      const sameSurface = Math.abs(this.floorY - this.targetCoin.floorY) < 30
+        || (charOnPlatform && coinOnPlatform);  // both on platform even if coin still settling
 
-      if (dist <= CHAR_PICKUP_DIST && sameSurface && this.targetCoin.isOnGround && this.coinPickupCooldown <= 0) {
+      // Allow pickup if fully settled OR near resting surface OR both on platform.
+      // The platform fallback prevents Math.sign(0)=0 freeze when a bouncing coin
+      // and the character share the platform but isOnGround is still false.
+      const coinReachable = this.targetCoin.isOnGround
+        || this.targetCoin.y >= GROUND_Y - 30   // near ground (existing fallback)
+        || (charOnPlatform && coinOnPlatform);   // near platform surface
+      if (dist <= CHAR_PICKUP_DIST && sameSurface && coinReachable && this.coinPickupCooldown <= 0) {
         this.coinCarryValue = this.targetCoin.value;
         this.coinCarryKind  = this.targetCoin.kind;
         this.targetCoin.pickup();
@@ -810,7 +1016,7 @@ export class Character {
     const { dt, allChars, enemyTowerFrontX, homeTowerFrontX, onFire, platforms } = ctx;
     if (this.isAirborne) return;
 
-    const isRanged = this.config.type === 'archer' || this.config.type === 'rifleman';
+    const isRanged = this.config.type === 'archer' || this.config.type === 'rifleman' || this.config.type === 'sniper';
     const dir   = this.side === 'player' ? 1 : -1;
     const safeX = enemyTowerFrontX - dir * (TOWER_ATTACK_RANGE + HARASS_SAFETY_BUFFER);
 
@@ -883,10 +1089,21 @@ export class Character {
       }
       // else: enemy is ahead and within attack range — hold position
     } else {
-      // No enemies — drift to the safe line at reduced speed
-      if (dir * (safeX - this.x) > 5) {
-        this.x = clamp(this.x + dir * this.moveSpeed * 0.4 * dt);
-        this.state = 'marching';
+      // No enemies — group up with the nearest teammate, or rally near own tower if alone
+      const mate = this.nearestAlly(allChars);
+      if (mate) {
+        const distToMate = Math.abs(this.x - mate.x);
+        if (distToMate > 55) {
+          this.x += Math.sign(mate.x - this.x) * this.moveSpeed * 0.5 * dt;
+          this.state = 'marching';
+        }
+      } else {
+        // No allies on field — return to just in front of own tower
+        const rallyX = homeTowerFrontX + dir * 80;
+        if (Math.abs(this.x - rallyX) > 20) {
+          this.x += Math.sign(rallyX - this.x) * this.moveSpeed * 0.5 * dt;
+          this.state = 'marching';
+        }
       }
     }
   }
@@ -914,19 +1131,21 @@ export class Character {
   }
 
   private get projectileKind(): 'arrow' | 'bullet' {
-    return this.config.type === 'rifleman' ? 'bullet' : 'arrow';
+    return (this.config.type === 'rifleman' || this.config.type === 'sniper') ? 'bullet' : 'arrow';
   }
 
   private attackEnemy(target: Character, onFire?: (r: FireRequest) => void) {
     if (this.attackTimer > 0) return;
+    const miss   = Math.random() < this.config.critical;
+    const damage = miss ? 0 : this.effectiveAtk;
     if (this.config.type === 'warrior' || this.config.type === 'heavy') {
-      target.takeDamage(this.effectiveAtk, this);
+      target.takeDamage(damage, miss ? undefined : this);
     } else if (onFire) {
       onFire({
         side: this.side, sx: this.x, sy: this.bowY,
         tx: target.x,   ty: target.bowY,
-        damage: this.effectiveAtk, projectileKind: this.projectileKind,
-        shooter: this,
+        damage, projectileKind: this.projectileKind,
+        shooter: miss ? undefined : this,
       });
     }
     this.attackTimer = this.config.fireRate;
@@ -938,6 +1157,8 @@ export class Character {
     onDamageTower?: (dmg: number) => void,
   ) {
     if (this.attackTimer > 0) return;
+    this.attackTimer = this.config.fireRate;
+    if (Math.random() < this.config.critical) return;  // miss — silent, towers have no label system
     if (this.config.type === 'warrior' || this.config.type === 'heavy') {
       onDamageTower?.(this.effectiveAtk);
     } else if (onFire) {
@@ -947,7 +1168,6 @@ export class Character {
         damage: this.effectiveAtk, projectileKind: this.projectileKind,
       });
     }
-    this.attackTimer = this.config.fireRate;
   }
 
   private nearestEnemy(chars: Character[], range: number): Character | null {
@@ -964,13 +1184,37 @@ export class Character {
     return best;
   }
 
-  private nearestCoin(coins: Coin[]): Coin | null {
+  private nearestAlly(chars: Character[]): Character | null {
+    let best: Character | null = null;
+    let minDist = Infinity;
+    for (const c of chars) {
+      if (c === this || c.isDead || c.side !== this.side) continue;
+      const dist = Math.abs(this.x - c.x);
+      if (dist < minDist) { minDist = dist; best = c; }
+    }
+    return best;
+  }
+
+  /** Nearest coin to this character, optionally filtered to within `maxRange` px. */
+  private nearestCoin(coins: Coin[], maxRange = Infinity): Coin | null {
     let best: Coin | null = null;
     let minDist = Infinity;
     for (const c of coins) {
       if (c.isDead || c.isPickedUp) continue;
       const dist = Math.abs(this.x - c.x);
-      if (dist < minDist) { minDist = dist; best = c; }
+      if (dist <= maxRange && dist < minDist) { minDist = dist; best = c; }
+    }
+    return best;
+  }
+
+  /** Coin closest to own tower front — prioritises easy-to-deposit coins. */
+  private coinClosestToTower(coins: Coin[], homeTowerFrontX: number): Coin | null {
+    let best: Coin | null = null;
+    let minDistToTower = Infinity;
+    for (const c of coins) {
+      if (c.isDead || c.isPickedUp) continue;
+      const distToTower = Math.abs(c.x - homeTowerFrontX);
+      if (distToTower < minDistToTower) { minDistToTower = distToTower; best = c; }
     }
     return best;
   }

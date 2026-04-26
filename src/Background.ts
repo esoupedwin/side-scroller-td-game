@@ -1,5 +1,9 @@
 import * as PIXI from 'pixi.js';
-import { GAME_WIDTH, GAME_HEIGHT, GROUND_Y } from './constants';
+import {
+  GAME_WIDTH, GAME_HEIGHT, GROUND_Y,
+  PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH, TOWER_ATTACK_RANGE,
+  PLAYER_COLOR, ENEMY_COLOR,
+} from './constants';
 
 export function buildBackground(stage: PIXI.Container) {
   const g = new PIXI.Graphics();
@@ -44,6 +48,59 @@ export function buildBackground(stage: PIXI.Container) {
   g.endFill();
 
   stage.addChild(g);
+}
+
+export function buildTowerRangeMarkers(stage: PIXI.Container) {
+  const playerFrontX = PLAYER_TOWER_X + TOWER_WIDTH / 2;
+  const enemyFrontX  = ENEMY_TOWER_X  - TOWER_WIDTH / 2;
+  const playerRangeX = playerFrontX + TOWER_ATTACK_RANGE;
+  const enemyRangeX  = enemyFrontX  - TOWER_ATTACK_RANGE;
+  const lineH = 30;
+
+  const g = new PIXI.Graphics();
+
+  // Player (blue) ground strip
+  g.beginFill(PLAYER_COLOR, 0.35);
+  g.drawRect(playerFrontX, GROUND_Y, TOWER_ATTACK_RANGE, 6);
+  g.endFill();
+
+  // Player boundary line + tick
+  g.lineStyle(2, PLAYER_COLOR, 0.90);
+  g.moveTo(playerRangeX, GROUND_Y + 6);
+  g.lineTo(playerRangeX, GROUND_Y - lineH);
+  g.moveTo(playerRangeX - 5, GROUND_Y - lineH);
+  g.lineTo(playerRangeX + 5, GROUND_Y - lineH);
+
+  // Enemy (red) ground strip
+  g.lineStyle(0);
+  g.beginFill(ENEMY_COLOR, 0.35);
+  g.drawRect(enemyRangeX, GROUND_Y, TOWER_ATTACK_RANGE, 6);
+  g.endFill();
+
+  // Enemy boundary line + tick
+  g.lineStyle(2, ENEMY_COLOR, 0.90);
+  g.moveTo(enemyRangeX, GROUND_Y + 6);
+  g.lineTo(enemyRangeX, GROUND_Y - lineH);
+  g.moveTo(enemyRangeX - 5, GROUND_Y - lineH);
+  g.lineTo(enemyRangeX + 5, GROUND_Y - lineH);
+
+  stage.addChild(g);
+
+  const labelStyle = (color: number): Partial<PIXI.ITextStyle> => ({
+    fontSize: 8, fill: color, fontWeight: 'bold',
+  });
+
+  const pLabel = new PIXI.Text('RANGE', labelStyle(PLAYER_COLOR));
+  pLabel.anchor.set(0.5, 1);
+  pLabel.x = playerRangeX;
+  pLabel.y = GROUND_Y - lineH - 3;
+  stage.addChild(pLabel);
+
+  const eLabel = new PIXI.Text('RANGE', labelStyle(ENEMY_COLOR));
+  eLabel.anchor.set(0.5, 1);
+  eLabel.x = enemyRangeX;
+  eLabel.y = GROUND_Y - lineH - 3;
+  stage.addChild(eLabel);
 }
 
 function mulberry32(seed: number) {

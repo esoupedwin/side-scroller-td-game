@@ -6,7 +6,8 @@ const proj  = GameConfig.projectiles;
 const ui    = GameConfig.ui;
 const promo = GameConfig.promotions;
 
-export const GAME_WIDTH       = canvas.width;
+export const VIEWPORT_WIDTH   = canvas.width;        // visible canvas width (1248 px)
+export const GAME_WIDTH       = GameConfig.worldWidth; // scrollable world width (2246 px)
 export const GAME_HEIGHT      = canvas.height;
 export const GAME_DURATION_SEC = canvas.durationSec;
 
@@ -76,6 +77,10 @@ export const COIN_BOUNCE_X_FRICTION  = economy.coinBounceXFriction;
 export const COIN_BOUNCE_SETTLE_VY   = economy.coinBounceSettleVy;
 export const COIN_BOUNCE_INIT_VX_MIN = economy.coinBounceInitVxMin;
 export const COIN_BOUNCE_INIT_VX_MAX = economy.coinBounceInitVxMax;
+export const COIN_DROP_START_Y       = economy.coinDropStartY;
+export const COIN_FRICTION           = economy.coinFriction;
+export const COIN_FRICTION_AIR       = economy.coinFrictionAir;
+export const SURFACE_FRICTION        = economy.surfaceFriction;
 
 // ── Projectiles ──────────────────────────────────────────────────────────────
 export const BULLET_SPEED        = proj.bulletSpeed;
@@ -106,11 +111,17 @@ export const CHAR_HEAL_RANGE        = ch.healRange;
 export const CHAR_HEAL_RATE         = ch.healRate;
 export const HARASS_SAFETY_BUFFER   = ch.harassSafetyBuffer;
 export const RANGED_KITE_THRESHOLD  = ch.rangedKiteThreshold;
+export const COIN_THROW_SCAN_RANGE  = ch.coinThrowScanRange;
+export const COIN_THROW_HOLD_SEC    = ch.coinThrowHoldSec;
+export const COIN_THROW_VX          = GameConfig.economy.coinThrowVx;
+export const COIN_THROW_VY          = GameConfig.economy.coinThrowVy;
+export const COIN_THROW_MIN_DIST    = GameConfig.towers.attackRange + 50;
 
 export const CHAR_COST = {
   warrior:  ch.warrior.cost,
   archer:   ch.archer.cost,
   rifleman: ch.rifleman.cost,
+  sniper:   ch.sniper.cost,
   medic:    ch.medic.cost,
   heavy:    ch.heavy.cost,
 } as const;
@@ -125,6 +136,7 @@ export const WARRIOR = {
   attackRange: ch.warrior.attackRange,
   attackPower: ch.warrior.attackPower,
   fireRate:    ch.warrior.fireRate,
+  critical:    ch.warrior.critical,
   width:       ch.width,
   height:      ch.height,
 };
@@ -136,6 +148,7 @@ export const ARCHER = {
   attackRange: ch.archer.attackRange,
   attackPower: ch.archer.attackPower,
   fireRate:    ch.archer.fireRate,
+  critical:    ch.archer.critical,
   width:       ch.width,
   height:      ch.height,
 };
@@ -147,6 +160,19 @@ export const RIFLEMAN = {
   attackRange: ch.rifleman.attackRange,
   attackPower: ch.rifleman.attackPower,
   fireRate:    ch.rifleman.fireRate,
+  critical:    ch.rifleman.critical,
+  width:       ch.width,
+  height:      ch.height,
+};
+
+export const SNIPER = {
+  type:        ch.sniper.type,
+  hp:          ch.sniper.hp,
+  speed:       ch.sniper.speed,
+  attackRange: ch.sniper.attackRange,
+  attackPower: ch.sniper.attackPower,
+  fireRate:    ch.sniper.fireRate,
+  critical:    ch.sniper.critical,
   width:       ch.width,
   height:      ch.height,
 };
@@ -158,6 +184,7 @@ export const MEDIC = {
   attackRange: ch.medic.attackRange,
   attackPower: ch.medic.attackPower,
   fireRate:    ch.medic.fireRate,
+  critical:    ch.medic.critical,
   width:       ch.width,
   height:      ch.height,
 };
@@ -169,6 +196,7 @@ export const HEAVY = {
   attackRange: ch.heavy.attackRange,
   attackPower: ch.heavy.attackPower,
   fireRate:    ch.heavy.fireRate,
+  critical:    ch.heavy.critical,
   width:       ch.heavy.width,
   height:      ch.heavy.height,
 };
