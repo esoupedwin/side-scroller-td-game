@@ -34,10 +34,14 @@ Units earn Achievement Points (AP) for kills and coin deposits. Enough AP promot
 
 ## Tech Stack
 
-- **Renderer** — PixiJS v7 (imperative `Graphics` API, no sprites)
-- **Physics** — Matter.js v0.19 (hybrid: AI drives character X, Matter.js owns Y + full coin simulation)
-- **Build** — Vite
-- **Language** — TypeScript (strict)
+| Technology | Version | Role |
+|---|---|---|
+| [PixiJS](https://pixijs.com/) | v7 | 2D renderer — all visuals drawn with the imperative `Graphics` API, no sprites or textures |
+| [Matter.js](https://brm.io/matter-js/) | v0.19 | Physics engine — gravity, ground/platform collision, and full rigid-body coin simulation |
+| [Vite](https://vitejs.dev/) | latest | Build tool and dev server with hot module replacement |
+| [TypeScript](https://www.typescriptlang.org/) | 5.x | Language — strict mode, `noUnusedLocals`, `noUnusedParameters` |
+
+**Physics model:** characters use a hybrid approach — AI teleports the X axis each tick while Matter.js simulates Y (gravity and landing). Coins are fully simulated in both axes with restitution-based bouncing and surface friction.
 
 ## Getting Started
 
