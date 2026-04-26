@@ -1,7 +1,8 @@
 import * as PIXI from 'pixi.js';
+import Matter from 'matter-js';
 import {
   GROUND_Y, PLAYER_COLOR, ENEMY_COLOR, GAME_WIDTH,
-  CHAR_GRAVITY, JUMP_VELOCITY,
+  JUMP_VELOCITY,
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
   CHAR_HEAL_RANGE, CHAR_HEAL_RATE,
@@ -9,6 +10,7 @@ import {
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
 } from './constants';
+import type { Physics } from './Physics';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
 import type { Side } from './Tower';
@@ -67,10 +69,11 @@ export class Character {
   private bar:    PIXI.Graphics;
   private barBg:  PIXI.Graphics;
 
-  private vy         = 0;
-  private jumpVx     = 0;   // horizontal velocity carried through a jump arc
+  private body:      Matter.Body;
+  private physics:   Physics;
+  private jumpVx     = 0;
   private isAirborne = false;
-  private floorY     = GROUND_Y;   // surface character is standing on
+  private floorY     = GROUND_Y;
   get isOnPlatform(): boolean { return this.floorY < GROUND_Y; }
 
   /** Damage events emitted this tick; Game.ts reads and clears each frame. */
@@ -95,13 +98,15 @@ export class Character {
   private targetCoin:   Coin | null = null;
   private coinCarryGfx: PIXI.Graphics | null = null;
 
-  constructor(side: Side, startX: number, config: CharacterConfig, id: number) {
-    this.side   = side;
-    this.id     = id;
-    this.config = { ...config };
-    this.hp     = config.hp;
-    this.x      = startX;
-    this.y      = GROUND_Y;
+  constructor(side: Side, startX: number, config: CharacterConfig, id: number, physics: Physics) {
+    this.side    = side;
+    this.id      = id;
+    this.config  = { ...config };
+    this.hp      = config.hp;
+    this.x       = startX;
+    this.y       = GROUND_Y;
+    this.physics = physics;
+    this.body    = physics.createCharBody(startX, GROUND_Y, config.width, config.height);
 
     this.container = new PIXI.Container();
     this.buildSprite();
@@ -618,7 +623,7 @@ export class Character {
         : 1;
     }
 
-    this.applyPhysics(ctx.dt, ctx.platforms);
+    this.syncFromBody(ctx.platforms);
 
     if (this._behavior === 'collecting') {
       this.updateCollecting(ctx);
@@ -634,51 +639,41 @@ export class Character {
 
   // ── Physics ──────────────────────────────────────────────────────────────────
 
-  private jump(dirX: number = 0) {
+  private jump(dirX: number, dt: number) {
     if (this.isAirborne) return;
-    this.vy         = -JUMP_VELOCITY;
     this.jumpVx     = dirX * this.moveSpeed;
     this.isAirborne = true;
+    Matter.Body.setVelocity(this.body, {
+      x: this.body.velocity.x,
+      y: -JUMP_VELOCITY * dt,   // px/tick = px/s * s/tick
+    });
   }
 
-  private applyPhysics(dt: number, platforms: PlatformData[]) {
-    // Check if a grounded character has walked off a platform edge
-    if (!this.isAirborne && this.floorY < GROUND_Y) {
-      const onPlat = platforms.some(
-        p => this.x >= p.x && this.x <= p.x + p.width && this.floorY === p.y,
-      );
-      if (!onPlat) {
-        this.isAirborne = true;
-        this.vy         = 0;
-      }
+  syncToBody(dt: number) {
+    if (this.isAirborne) this.x += this.jumpVx * dt;
+    Matter.Body.setPosition(this.body, { x: this.x, y: this.body.position.y });
+    Matter.Body.setVelocity(this.body, { x: 0, y: this.body.velocity.y });
+  }
+
+  syncFromBody(platforms: PlatformData[]) {
+    const halfH = this.config.height / 2;
+    this.y = this.body.position.y + halfH;
+
+    const onSurface = this.physics.isOnSurface(this.body);
+    if (onSurface && this.isAirborne) {
+      this.isAirborne = false;
+      this.jumpVx     = 0;
+    } else if (!onSurface && !this.isAirborne) {
+      // Walked off an edge
+      this.isAirborne = true;
     }
 
-    if (!this.isAirborne) return;
-
-    this.vy += CHAR_GRAVITY * dt;
-    this.y  += this.vy    * dt;
-    this.x  += this.jumpVx * dt;
-
-    // Platform landing (only while falling downward)
-    if (this.vy > 0) {
-      for (const p of platforms) {
-        if (this.x >= p.x && this.x <= p.x + p.width && this.y >= p.y) {
-          this.y          = p.y;
-          this.vy         = 0;
-          this.jumpVx     = 0;
-          this.isAirborne = false;
-          this.floorY     = p.y;
-          return;
-        }
-      }
-      // Ground landing
-      if (this.y >= GROUND_Y) {
-        this.y          = GROUND_Y;
-        this.vy         = 0;
-        this.jumpVx     = 0;
-        this.isAirborne = false;
-        this.floorY     = GROUND_Y;
-      }
+    // Derive floorY from which surface we landed on
+    if (!this.isAirborne) {
+      const onPlat = platforms.find(
+        p => this.x >= p.x && this.x <= p.x + p.width && Math.abs(this.y - p.y) < 8,
+      );
+      this.floorY = onPlat ? onPlat.y : GROUND_Y;
     }
   }
 
@@ -774,7 +769,7 @@ export class Character {
           const dirToCoin = Math.sign(this.targetCoin.x - this.x);
           this.x += dirToCoin * this.moveSpeed * dt;
           if (this.x >= plat.x && this.x <= plat.x + plat.width) {
-            this.jump(dirToCoin);
+            this.jump(dirToCoin, dt);
           }
           this.state = 'collecting';
           return;
@@ -868,7 +863,7 @@ export class Character {
         const dirToEnemy = Math.sign(closest.x - this.x);
         this.x += dirToEnemy * this.moveSpeed * dt;
         if (this.x >= plat.x && this.x <= plat.x + plat.width) {
-          this.jump(dirToEnemy);
+          this.jump(dirToEnemy, dt);
         }
         this.state = 'marching';
       } else if (toEnemy > 0 && closestDist > this.config.attackRange * 0.8) {
@@ -982,6 +977,7 @@ export class Character {
 
   destroy() {
     this.removeCoinCarry();
+    this.physics.removeBody(this.body);
     this.container.destroy({ children: true });
   }
 }

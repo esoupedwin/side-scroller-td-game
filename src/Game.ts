@@ -8,6 +8,7 @@ export interface CpuStrategyInfo {
   coinAdv:  number;   // clamped coin balance delta
   decision: string;   // most recent significant action
 }
+import { Physics } from './Physics';
 import { buildBackground } from './Background';
 import { Tower } from './Tower';
 import type { TowerShot } from './Tower';
@@ -52,6 +53,7 @@ export class Game {
   private damageLabels:  DamageLabel[] = [];
   private platform!:     Platform;
   private readonly platformData: PlatformData[] = [];
+  private physics!:      Physics;
 
   private nextCharId  = 1;
   private freeCharIds: number[] = [];
@@ -137,6 +139,11 @@ export class Game {
     this.platformData.push(this.platform.data);
     this.app.stage.addChild(this.platform.container);
 
+    this.physics = new Physics({
+      x: PLATFORM_X, y: PLATFORM_Y,
+      width: PLATFORM_WIDTH, height: PLATFORM_HEIGHT,
+    });
+
     this.coinLayer  = new PIXI.Container();
     this.projLayer  = new PIXI.Container();
     this.unitLayer  = new PIXI.Container();
@@ -165,7 +172,7 @@ export class Game {
 
     const configs = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, medic: MEDIC, heavy: HEAVY };
     const config = configs[type];
-    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId());
+    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), this.physics);
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
@@ -259,7 +266,7 @@ export class Game {
     for (const type of order) {
       if (this.cpuCoinBalance < CHAR_COST[type]) continue;
       this.cpuCoinBalance -= CHAR_COST[type];
-      const c = new Character('enemy', this.enemyTower.frontX, cfgMap[type], this.allocateCharId());
+      const c = new Character('enemy', this.enemyTower.frontX, cfgMap[type], this.allocateCharId(), this.physics);
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
       this.cpuStrategyInfo.decision = `Spawned ${type} #${c.id}`;
@@ -281,9 +288,9 @@ export class Game {
     else          this.freeCharIds.splice(i, 0, id);
   }
 
-  private spawnCoin(value: number, kind: CoinKind) {
+  private spawnCoin(value: number, kind: CoinKind, dt = 1 / 60) {
     const x    = COIN_DROP_X_MIN + Math.random() * (COIN_DROP_X_MAX - COIN_DROP_X_MIN);
-    const coin = new Coin(x, COIN_LIFETIME_S, value, kind);
+    const coin = new Coin(x, COIN_LIFETIME_S, value, kind, 0, 0, -20, this.physics, dt);
     this.coins.push(coin);
     this.coinLayer.addChild(coin.container);
   }
@@ -396,6 +403,11 @@ export class Game {
       c.update(ctx);
     }
 
+    // Physics step: push AI positions → engine → read results back
+    for (const c of liveChars) c.syncToBody(dt);
+    this.physics.step(dt);
+    for (const c of liveChars) c.syncFromBody(this.platformData);
+
     // Tower fire
     const fireShot = (shot: TowerShot, side: 'player' | 'enemy') =>
       this.fireProjectile({ ...shot, side, projectileKind: 'arrow' });
@@ -411,7 +423,7 @@ export class Game {
       c.pendingCoinDrop = null;
       const vx   = (Math.random() < 0.5 ? 1 : -1) * (COIN_DROP_VX_MIN + Math.random() * (COIN_DROP_VX_MAX - COIN_DROP_VX_MIN));
       const vy   = -(COIN_DROP_VY_MIN + Math.random() * (COIN_DROP_VY_MAX - COIN_DROP_VY_MIN));
-      const coin = new Coin(x, COIN_LIFETIME_S, dropValue, dropKind, vx, vy, y);
+      const coin = new Coin(x, COIN_LIFETIME_S, dropValue, dropKind, vx, vy, y, this.physics, dt);
       this.coins.push(coin);
       this.coinLayer.addChild(coin.container);
       if (!c.isDead) c.recoverCoin(coin);

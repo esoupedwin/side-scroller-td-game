@@ -1,23 +1,20 @@
 import * as PIXI from 'pixi.js';
-import {
-  GROUND_Y, COIN_GRAVITY,
-  COIN_BOUNCE_DAMPING, COIN_BOUNCE_X_FRICTION, COIN_BOUNCE_SETTLE_VY,
-  COIN_BOUNCE_INIT_VX_MIN, COIN_BOUNCE_INIT_VX_MAX,
-} from './constants';
+import Matter from 'matter-js';
+import { GROUND_Y } from './constants';
+import type { Physics } from './Physics';
 import type { PlatformData } from './Platform';
 
 const LAND_Y = GROUND_Y - 14;
 
 export type CoinKind = 'gold' | 'silver';
 
-// [outer, mid, inner, highlight] — shared by Coin and Character carry visual
 export const COIN_PALETTE: Record<CoinKind, readonly [number, number, number, number]> = {
   gold:   [0xf0a500, 0xffd166, 0xf0a500, 0xfffab0],
   silver: [0x909090, 0xbfbfbf, 0x909090, 0xe8e8e8],
 };
 
 export class Coin {
-  x: number;   // mutable — dropped coins drift horizontally
+  x: number;
   y: number;
 
   readonly kind:  CoinKind;
@@ -33,8 +30,8 @@ export class Coin {
 
   get isOnPlatform() { return this.isOnGround && this.floorY < GROUND_Y; }
 
-  private vx: number;
-  private vy: number;
+  private body:    Matter.Body;
+  private physics: Physics;
   private timer             = 0;
   private lifetimeRemaining: number;
 
@@ -46,13 +43,13 @@ export class Coin {
     initVx = 0,
     initVy = 0,
     initY  = -20,
+    physics?: Physics,
+    dt     = 1 / 60,
   ) {
     this.x     = x;
-    this.y     = initY;
+    this.y     = initY < 0 ? LAND_Y + initY : initY;
     this.value = value;
     this.kind  = kind;
-    this.vx    = initVx;
-    this.vy    = initVy;
     this.lifetimeRemaining = lifetimeSec;
 
     this.container = new PIXI.Container();
@@ -61,6 +58,17 @@ export class Coin {
     this.container.addChild(this.gfx);
     this.container.x = x;
     this.container.y = this.y;
+
+    // Physics body — created even without a Physics instance for safety,
+    // but only added to the world when physics is provided.
+    if (physics) {
+      this.physics = physics;
+      this.body    = physics.createCoinBody(this.x, this.y, initVx, initVy, dt);
+    } else {
+      // Fallback: dummy (never added to world)
+      this.physics = null!;
+      this.body    = Matter.Bodies.circle(this.x, this.y, 10);
+    }
   }
 
   private drawCoin() {
@@ -72,52 +80,28 @@ export class Coin {
     this.gfx.beginFill(hi, 0.85);   this.gfx.drawCircle(-3, -3, 2.5);  this.gfx.endFill();
   }
 
-  // Resolves a landing: either bounces the coin or settles it on the surface.
-  private bounce(surfaceY: number, surfaceFloorY: number) {
-    const bounceVy = -this.vy * COIN_BOUNCE_DAMPING;
-    if (Math.abs(bounceVy) < COIN_BOUNCE_SETTLE_VY) {
-      this.y          = surfaceY;
-      this.vy         = 0;
-      this.vx         = 0;
-      this.isOnGround = true;
-      this.floorY     = surfaceFloorY;
-    } else {
-      this.y      = surfaceY;
-      this.vy     = bounceVy;
-      this.floorY = surfaceFloorY;
-      if (Math.abs(this.vx) < 10) {
-        // Spawn-drop coins arrive with no horizontal velocity — kick them sideways.
-        const sign = Math.random() < 0.5 ? 1 : -1;
-        this.vx = sign * (COIN_BOUNCE_INIT_VX_MIN + Math.random() * (COIN_BOUNCE_INIT_VX_MAX - COIN_BOUNCE_INIT_VX_MIN));
-      } else {
-        this.vx *= COIN_BOUNCE_X_FRICTION;
-      }
-    }
-  }
-
-  update(dt: number, platforms: PlatformData[] = []) {
+  update(dt: number, _platforms: PlatformData[] = []) {
     if (this.isDead || this.isPickedUp) return;
 
     this.timer += dt;
 
     if (!this.isOnGround) {
-      this.vy += COIN_GRAVITY * dt;
-      this.x  += this.vx * dt;
-      this.y  += this.vy * dt;
+      // Read position from Matter.js body
+      this.x = this.body.position.x;
+      this.y = this.body.position.y;
 
-      if (this.vy > 0) {
-        // Platform landing
-        for (const p of platforms) {
-          const platLandY = p.y - 14;
-          if (this.x >= p.x && this.x <= p.x + p.width && this.y >= platLandY) {
-            this.bounce(platLandY, p.y);
-            break;
-          }
-        }
-        // Ground landing
-        if (!this.isOnGround && this.y >= LAND_Y) {
-          this.bounce(LAND_Y, GROUND_Y);
-        }
+      const speed = Math.sqrt(
+        this.body.velocity.x * this.body.velocity.x +
+        this.body.velocity.y * this.body.velocity.y,
+      );
+
+      // Settle when nearly stopped and near a surface
+      if (speed < 0.05 && this.y >= LAND_Y - 20) {
+        this.isOnGround = true;
+        this.floorY     = this.y >= LAND_Y - 4 ? GROUND_Y : GROUND_Y - 140;
+        Matter.Body.setStatic(this.body, true);
+        // Snap visual to flat rest position
+        this.y = this.floorY === GROUND_Y ? LAND_Y : this.floorY - 14;
       }
 
       this.container.x = this.x;
@@ -149,6 +133,7 @@ export class Coin {
   }
 
   destroy() {
+    if (this.physics) this.physics.removeBody(this.body);
     this.container.destroy({ children: true });
   }
 }
