@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import Matter from 'matter-js';
-import { GROUND_Y } from './constants';
+import { GROUND_Y, PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH } from './constants';
 import type { Physics } from './Physics';
 import type { PlatformData } from './Platform';
 
@@ -83,6 +83,14 @@ export class Coin {
   update(dt: number, platforms: PlatformData[] = []) {
     if (this.isDead || this.isPickedUp) return;
 
+    // Kill coin instantly if it travels beyond either tower
+    const leftBound  = PLAYER_TOWER_X - TOWER_WIDTH / 2;
+    const rightBound = ENEMY_TOWER_X  + TOWER_WIDTH / 2;
+    if (this.x < leftBound || this.x > rightBound) {
+      this.isDead = true;
+      return;
+    }
+
     this.timer += dt;
 
     if (!this.isOnGround) {
@@ -127,7 +135,6 @@ export class Coin {
       this.container.alpha = 0.35 + 0.65 * Math.abs(Math.sin(this.timer * 6));
     } else {
       this.container.alpha = 1;
-      this.container.y = this.y + Math.sin(this.timer * 2.8) * 2.5;
     }
 
     this.gfx.rotation += dt * 1.8;

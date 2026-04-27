@@ -58,7 +58,7 @@ export class CharacterHUD {
 
     const idEl = document.createElement('span');
     idEl.className   = 'char-card-id';
-    idEl.textContent = `#${id}`;
+    idEl.textContent = char.name;
 
     header.append(iconEl, idEl);
 
@@ -94,7 +94,8 @@ export class CharacterHUD {
       if (char.isDead) return;
       char.behavior =
         char.behavior === 'attacking'  ? 'collecting' :
-        char.behavior === 'collecting' ? 'harass'     : 'attacking';
+        char.behavior === 'collecting' ? 'harass'     :
+        char.behavior === 'harass'     ? 'defend'     : 'attacking';
       this.syncBehaviorEl(behaviorBtn, char.behavior);
     });
 
@@ -110,14 +111,17 @@ export class CharacterHUD {
     el.style.color = RANK_COLORS[rank];
   }
 
-  private syncBehaviorEl(el: HTMLElement, behavior: 'attacking' | 'collecting' | 'harass') {
-    el.classList.remove('char-card-behavior-collect', 'char-card-behavior-harass');
+  private syncBehaviorEl(el: HTMLElement, behavior: 'attacking' | 'collecting' | 'harass' | 'defend') {
+    el.classList.remove('char-card-behavior-collect', 'char-card-behavior-harass', 'char-card-behavior-defend');
     if (behavior === 'collecting') {
       el.textContent = '💰 Collect';
       el.classList.add('char-card-behavior-collect');
     } else if (behavior === 'harass') {
       el.textContent = '🎯 Harass';
       el.classList.add('char-card-behavior-harass');
+    } else if (behavior === 'defend') {
+      el.textContent = '🛡 Defend';
+      el.classList.add('char-card-behavior-defend');
     } else {
       el.textContent = '⚔ Attack';
     }

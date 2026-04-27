@@ -51,6 +51,13 @@ export const PLATFORM_Y      = GameConfig.platform.y;
 export const PLATFORM_WIDTH  = GameConfig.platform.width;
 export const PLATFORM_HEIGHT = GameConfig.platform.height;
 
+// ── Coin box ─────────────────────────────────────────────────────────────────
+export const COIN_BOX_X          = GameConfig.coinBox.x;
+export const COIN_BOX_Y          = GameConfig.coinBox.y;
+export const COIN_BOX_W          = GameConfig.coinBox.width;
+export const COIN_BOX_H          = GameConfig.coinBox.height;
+export const COIN_BOX_SPREAD_DEG = GameConfig.coinBox.spreadDeg;
+
 // ── Economy ──────────────────────────────────────────────────────────────────
 export const STARTING_COINS      = economy.startingCoins;
 export const PASSIVE_INCOME_RATE = economy.passiveIncomeRate;
@@ -109,6 +116,8 @@ export const PROMO_THRESHOLDS: number[] = [...promo.thresholds];
 // ── Characters ───────────────────────────────────────────────────────────────
 export const CHAR_HEAL_RANGE        = ch.healRange;
 export const CHAR_HEAL_RATE         = ch.healRate;
+export const SAFE_ZONE_HEAL_RATE    = ch.safeZoneHealRate;
+export const HIT_JUMP_CHANCE        = ch.hitJumpChance;
 export const HARASS_SAFETY_BUFFER   = ch.harassSafetyBuffer;
 export const RANGED_KITE_THRESHOLD  = ch.rangedKiteThreshold;
 export const COIN_THROW_SCAN_RANGE  = ch.coinThrowScanRange;

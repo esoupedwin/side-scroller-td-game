@@ -20,7 +20,7 @@ export const GameConfig = {
     enemyX:      W - 60,
     attackRange: 300,   // px — horizontal range of tower fire
     attackPower: 40,    // damage per projectile
-    fireRate:    2.5,   // seconds between shots
+    fireRate:    1.0,   // seconds between shots
   },
 
   characters: {
@@ -40,10 +40,12 @@ export const GameConfig = {
     rangedKiteThreshold: 80, // px — ranged units back away when a melee enemy closes within this distance
     coinThrowScanRange:  80,  // px — scan radius for a new coin after throwing one toward tower
     coinThrowHoldSec:   0.5, // seconds the character holds the coin before releasing the throw
+    safeZoneHealRate:    5,  // HP/s passively healed while within own tower's attack range
+    hitJumpChance:    0.75,  // probability of jumping when struck by a projectile
 
     warrior: {
       type:        'warrior'  as const,
-      hp:          100,
+      hp:          160,
       speed:       100,
       attackRange: 40,
       attackPower: 12,   // damage per swing
@@ -53,7 +55,7 @@ export const GameConfig = {
     },
     archer: {
       type:        'archer'   as const,
-      hp:          60,
+      hp:          100,
       speed:       70,
       attackRange: 180,
       attackPower: 28,
@@ -63,7 +65,7 @@ export const GameConfig = {
     },
     rifleman: {
       type:        'rifleman' as const,
-      hp:          75,
+      hp:          90,
       speed:       78,
       attackRange: 180,
       attackPower: 22,
@@ -73,7 +75,7 @@ export const GameConfig = {
     },
     sniper: {
       type:        'sniper' as const,
-      hp:          50,
+      hp:          70,
       speed:       50,
       attackRange: 220,
       attackPower: 32,
@@ -93,7 +95,7 @@ export const GameConfig = {
     },
     heavy: {
       type:        'heavy'    as const,
-      hp:          160,
+      hp:          220,
       speed:       25,
       attackRange: 48,
       attackPower: 40,
@@ -123,6 +125,14 @@ export const GameConfig = {
     height: 14,
   },
 
+  coinBox: {
+    x:         W / 2,             // centre of map
+    y:         GROUND_Y - 320,    // top of box (≈80 px from canvas top)
+    width:     48,
+    height:    48,
+    spreadDeg: 25,                // ± degrees from vertical coins can be released
+  },
+
   economy: {
     startingCoins:      150,
     passiveIncomeRate:  0.8,
@@ -144,7 +154,7 @@ export const GameConfig = {
     dropBounceVxMax:    140,    // px/s — horizontal bounce speed (max)
     dropBounceVyMin:    160,    // px/s — upward bounce speed (min)
     dropBounceVyMax:    240,    // px/s — upward bounce speed (max)
-    coinBounceDamping:    0.55, // restitution — fraction of vy retained on each bounce
+    coinBounceDamping:    0.78, // restitution — fraction of vy retained on each bounce
     coinBounceXFriction:  0.62, // legacy (unused by Matter.js path)
     coinBounceSettleVy:   65,   // legacy (unused by Matter.js path)
     coinBounceInitVxMin:  60,   // px/s — horizontal kick on character-dropped coins (min)
@@ -152,8 +162,8 @@ export const GameConfig = {
     coinThrowVx:          300,  // px/s — horizontal component of throw (60° → vy ≈ vx × √3)
     coinThrowVy:          446,  // px/s — vertical (upward) component of throw
     coinDropStartY:       10,   // absolute y where sky-dropped coins spawn (near canvas top)
-    coinFriction:         0.4,  // contact friction on coin bodies (combined with surface via sqrt)
-    coinFrictionAir:      0.012,// air resistance per tick — higher than default to settle faster
+    coinFriction:         0.01, // contact friction on coin bodies (combined with surface via sqrt)
+    coinFrictionAir:      0.003,// air resistance per tick — higher than default to settle faster
     surfaceFriction:      0.8,  // friction on ground/platform surfaces; characters unaffected
                                 // because char friction=0 → sqrt(0 × 0.8)=0
   },

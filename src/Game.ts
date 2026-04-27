@@ -9,15 +9,16 @@ export interface CpuStrategyInfo {
   decision: string;   // most recent significant action
 }
 import { Physics } from './Physics';
-import { buildBackground, buildTowerRangeMarkers } from './Background';
+import { buildBackground, buildTowerRangeMarkers, buildCoinBox } from './Background';
 import { Tower } from './Tower';
 import type { TowerShot } from './Tower';
-import { Character, RANK_NAMES, type FireRequest, type UpdateContext } from './Character';
+import { Character, RANK_NAMES, type CharacterConfig, type FireRequest, type UpdateContext } from './Character';
 import { Projectile } from './Projectile';
 import { CharacterHUD } from './CharacterHUD';
 import { Coin, type CoinKind } from './Coin';
 import { DamageLabel } from './DamageLabel';
 import { Platform } from './Platform';
+import { pickName } from './names';
 import type { PlatformData } from './Platform';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
@@ -29,14 +30,30 @@ import {
   STARTING_COINS, CHAR_COST,
   PASSIVE_INCOME_RATE, LOW_BALANCE_THRESHOLD, LOW_BALANCE_INCOME_MULT,
   COIN_VALUE, KILL_REWARD, TOWER_KILL_REWARD, COIN_DROP_MIN_MS, COIN_DROP_MAX_MS,
-  COIN_LIFETIME_S, COIN_DROP_X_MIN, COIN_DROP_X_MAX,
-  COIN_DROP_VX_MIN, COIN_DROP_VX_MAX, COIN_DROP_VY_MIN, COIN_DROP_VY_MAX, COIN_DROP_START_Y,
+  COIN_LIFETIME_S,
+  COIN_DROP_VX_MIN, COIN_DROP_VX_MAX, COIN_DROP_VY_MIN, COIN_DROP_VY_MAX,
+  COIN_BOX_X, COIN_BOX_Y, COIN_BOX_H, COIN_BOX_SPREAD_DEG,
+  COIN_GRAVITY,
   SILVER_COIN_VALUE, SILVER_DROP_MIN_MS, SILVER_DROP_MAX_MS,
   PLATFORM_X, PLATFORM_Y, PLATFORM_WIDTH, PLATFORM_HEIGHT,
   CPU_PRESSURE_THRESHOLD,
   CPU_URGENT_MAX_FACTOR, CPU_COMFORT_MIN_FACTOR,
   CPU_NEUTRAL_MIN_FACTOR, CPU_NEUTRAL_MAX_FACTOR,
 } from './constants';
+
+function spawnBoost(): number {
+  return Math.min(Math.floor(Math.random() * 11), Math.floor(Math.random() * 11));
+}
+
+function withSpawnBoosts(cfg: CharacterConfig): CharacterConfig {
+  return {
+    ...cfg,
+    hp:          cfg.hp          + spawnBoost(),
+    speed:       cfg.speed       + spawnBoost(),
+    attackRange: cfg.attackRange + spawnBoost(),
+    attackPower: cfg.attackPower + spawnBoost(),
+  };
+}
 
 export class Game {
   readonly app: PIXI.Application;
@@ -147,6 +164,7 @@ export class Game {
 
     buildBackground(this.world);
     buildTowerRangeMarkers(this.world);
+    buildCoinBox(this.world);
 
     this.platform = new Platform({
       x: PLATFORM_X, y: PLATFORM_Y,
@@ -190,8 +208,8 @@ export class Game {
     this.notifyCoins();
 
     const configs = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, sniper: SNIPER, medic: MEDIC, heavy: HEAVY };
-    const config = configs[type];
-    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), this.physics);
+    const config = withSpawnBoosts(configs[type]);
+    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), pickName(), this.physics);
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
@@ -288,7 +306,7 @@ export class Game {
     for (const type of order) {
       if (this.cpuCoinBalance < CHAR_COST[type]) continue;
       this.cpuCoinBalance -= CHAR_COST[type];
-      const c = new Character('enemy', this.enemyTower.frontX, cfgMap[type], this.allocateCharId(), this.physics);
+      const c = new Character('enemy', this.enemyTower.frontX, withSpawnBoosts(cfgMap[type]), this.allocateCharId(), pickName(), this.physics);
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
       this.cpuStrategyInfo.decision = `Spawned ${type} #${c.id}`;
@@ -311,8 +329,11 @@ export class Game {
   }
 
   private spawnCoin(value: number, kind: CoinKind, dt = 1 / 60) {
-    const x    = COIN_DROP_X_MIN + Math.random() * (COIN_DROP_X_MAX - COIN_DROP_X_MIN);
-    const coin = new Coin(x, COIN_LIFETIME_S, value, kind, 0, 0, COIN_DROP_START_Y, this.physics, dt);
+    const fallH     = PLATFORM_Y - (COIN_BOX_Y + COIN_BOX_H);
+    const spreadRad = COIN_BOX_SPREAD_DEG * (Math.PI / 180);
+    const vxMax     = Math.tan(spreadRad) * Math.sqrt(fallH * COIN_GRAVITY / 2);
+    const vx        = (Math.random() * 2 - 1) * vxMax;
+    const coin = new Coin(COIN_BOX_X, COIN_LIFETIME_S, value, kind, vx, 0, COIN_BOX_Y + COIN_BOX_H, this.physics, dt);
     this.coins.push(coin);
     this.coinLayer.addChild(coin.container);
   }

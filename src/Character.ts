@@ -5,7 +5,7 @@ import {
   JUMP_VELOCITY,
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
-  CHAR_HEAL_RANGE, CHAR_HEAL_RATE,
+  CHAR_HEAL_RANGE, CHAR_HEAL_RATE, SAFE_ZONE_HEAL_RATE, HIT_JUMP_CHANCE,
   PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, RANGED_KITE_THRESHOLD,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST,
@@ -61,7 +61,8 @@ export class Character {
   readonly side:   Side;
   readonly config: CharacterConfig;
 
-  readonly id: number;
+  readonly id:   number;
+  readonly name: string;
 
   hp:    number;
   x:     number;
@@ -102,16 +103,27 @@ export class Character {
   private legPhase: number = Math.random() * Math.PI * 2;  // stagger across characters
   private coinPickupCooldown = 0;
   private coinThrowTimer     = -1;  // countdown before throw; -1 = not winding up
-  private _behavior:    'attacking' | 'collecting' | 'harass' = 'attacking';
+  private pendingHitJump     = false;
+  private defendTargetX      = -1;  // -1 = not yet assigned
+  private defendRoamTimer    = 0;
+  private healParticleTimer  = 0;
+  private readonly healParticles: Array<{
+    gfx:  PIXI.Graphics;
+    relY: number;
+    vy:   number;
+    life: number;
+  }> = [];
+  private _behavior:    'attacking' | 'collecting' | 'harass' | 'defend' = 'attacking';
   private carryingCoin  = false;
   private coinCarryValue: number   = 0;
   private coinCarryKind:  CoinKind = 'gold';
   private targetCoin:   Coin | null = null;
   private coinCarryGfx: PIXI.Graphics | null = null;
 
-  constructor(side: Side, startX: number, config: CharacterConfig, id: number, physics: Physics) {
+  constructor(side: Side, startX: number, config: CharacterConfig, id: number, name: string, physics: Physics) {
     this.side    = side;
     this.id      = id;
+    this.name    = name;
     this.config  = { ...config };
     this.hp      = config.hp;
     this.x       = startX;
@@ -136,8 +148,8 @@ export class Character {
     this.container.addChild(this.rankGfx);
     this.drawRankBadge();
 
-    const idLabel = new PIXI.Text(`#${id}`, {
-      fontSize:        8,
+    const idLabel = new PIXI.Text(name, {
+      fontSize:        12,
       fontWeight:      'bold',
       fill:            0xffffff,
       stroke:          0x000000,
@@ -153,13 +165,17 @@ export class Character {
 
   // ── Behavior toggle ──────────────────────────────────────────────────────────
 
-  get behavior(): 'attacking' | 'collecting' | 'harass' { return this._behavior; }
+  get behavior(): 'attacking' | 'collecting' | 'harass' | 'defend' { return this._behavior; }
 
-  set behavior(val: 'attacking' | 'collecting' | 'harass') {
+  set behavior(val: 'attacking' | 'collecting' | 'harass' | 'defend') {
     if (val === this._behavior) return;
     if (this._behavior === 'collecting') {
       this.targetCoin = null;
       if (this.carryingCoin) this.dropCarriedCoin();
+    }
+    if (val === 'defend') {
+      this.defendTargetX   = -1;
+      this.defendRoamTimer = 0;
     }
     this._behavior = val;
   }
@@ -706,6 +722,7 @@ export class Character {
     this.hp = Math.max(0, this.hp - dmg);
     this.drawBar();
     if (this.carryingCoin) this.dropCarriedCoin();
+    if (!this.isAirborne && Math.random() < HIT_JUMP_CHANCE) this.pendingHitJump = true;
     if (this.hp <= 0) {
       this.state = 'dead';
       this.removeCoinCarry();
@@ -743,6 +760,17 @@ export class Character {
 
     if (this.config.type === 'medic') this.tickHeal(ctx.dt, ctx.allChars);
 
+    // Evasive jump on hit
+    if (this.pendingHitJump) {
+      this.pendingHitJump = false;
+      if (!this.isAirborne) this.jump(this.lastMoveDir, ctx.dt);
+    }
+
+    // Passive regen while inside own tower's attack range
+    const inSafeZone = this.hp < this.maxHp && Math.abs(this.x - ctx.homeTowerFrontX) <= TOWER_ATTACK_RANGE;
+    if (inSafeZone) this.heal(SAFE_ZONE_HEAL_RATE * ctx.dt);
+    this.tickHealParticles(ctx.dt, inSafeZone);
+
     if (this.coinPickupCooldown > 0) {
       this.coinPickupCooldown = Math.max(0, this.coinPickupCooldown - ctx.dt);
       this.container.alpha = this.coinPickupCooldown > 0
@@ -757,6 +785,8 @@ export class Character {
       this.updateCollecting(ctx);
     } else if (this._behavior === 'harass') {
       this.updateHarass(ctx);
+    } else if (this._behavior === 'defend') {
+      this.updateDefending(ctx);
     } else {
       this.updateAttacking(ctx);
     }
@@ -821,8 +851,9 @@ export class Character {
         }
       }
 
-      // Ground landing: position-based (more reliable than collision events).
-      if (this.y >= GROUND_Y - 1) {
+      // Ground landing: only when falling (vy ≥ 0) — prevents premature reset
+      // on the tick a jump starts, when the body hasn't moved up yet.
+      if (this.y >= GROUND_Y - 1 && this.body.velocity.y >= 0) {
         this.isAirborne = false;
         this.jumpVx     = 0;
         this.floorY     = GROUND_Y;
@@ -1108,6 +1139,61 @@ export class Character {
     }
   }
 
+  // ── Defend behaviour ─────────────────────────────────────────────────────────
+
+  private updateDefending(ctx: UpdateContext) {
+    const { dt, allChars, homeTowerFrontX, onFire } = ctx;
+    if (this.isAirborne) return;
+
+    const isRanged = this.config.type === 'archer' || this.config.type === 'rifleman' || this.config.type === 'sniper';
+    const dir      = this.side === 'player' ? 1 : -1;
+
+    const pickSpot = () =>
+      homeTowerFrontX + dir * (10 + Math.random() * (TOWER_ATTACK_RANGE - 20));
+
+    // Assign initial spot the first tick we enter defend mode
+    if (this.defendTargetX < 0) {
+      this.defendTargetX   = pickSpot();
+      this.defendRoamTimer = 6;
+    }
+
+    // Count down roam timer; relocate every 6 s if no enemy is visible
+    this.defendRoamTimer -= dt;
+    if (this.defendRoamTimer <= 0) {
+      this.defendRoamTimer = 6;
+      const hasEnemy = this.nearestEnemy(allChars, this.config.attackRange) !== null;
+      if (!hasEnemy) this.defendTargetX = pickSpot();
+    }
+
+    // Attack any enemy in range
+    const target = this.nearestEnemy(allChars, this.config.attackRange);
+    if (target) {
+      this.state = 'fighting';
+      this.attackEnemy(target, onFire);
+
+      // Ranged: kite back from closing melee, stay within own safe zone
+      if (isRanged) {
+        const isMelee = target.config.type === 'warrior' || target.config.type === 'heavy';
+        if (isMelee && Math.abs(this.x - target.x) < RANGED_KITE_THRESHOLD) {
+          const retreatX = this.x - dir * this.moveSpeed * dt;
+          this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
+        }
+      }
+      return;
+    }
+
+    // No enemies in range — walk to the current patrol spot
+    const delta = this.defendTargetX - this.x;
+    if (Math.abs(delta) > 5) {
+      this.state = 'marching';
+      this.x += Math.sign(delta) * this.moveSpeed * dt;
+      if (delta > 0) this.x = Math.min(this.x, this.defendTargetX);
+      else           this.x = Math.max(this.x, this.defendTargetX);
+    } else {
+      this.state = 'fighting'; // holding the patrol spot
+    }
+  }
+
   // ── Attack helpers ───────────────────────────────────────────────────────────
 
   private tickHeal(dt: number, allChars: Character[]) {
@@ -1120,6 +1206,39 @@ export class Character {
       if (ratio < lowestRatio) { lowestRatio = ratio; target = c; }
     }
     if (target) target.heal(CHAR_HEAL_RATE * dt);
+  }
+
+  private tickHealParticles(dt: number, healing: boolean) {
+    if (healing) {
+      this.healParticleTimer -= dt;
+      if (this.healParticleTimer <= 0) {
+        this.healParticleTimer = 0.28;
+        const gfx = new PIXI.Graphics();
+        const s   = 3;
+        gfx.lineStyle(2, 0x44ff88);
+        gfx.moveTo(-s, 0); gfx.lineTo(s, 0);
+        gfx.moveTo(0, -s); gfx.lineTo(0, s);
+        gfx.x = (Math.random() - 0.5) * this.config.width * 2.5;
+        gfx.y = -Math.random() * this.config.height;
+        this.container.addChild(gfx);
+        this.healParticles.push({ gfx, relY: gfx.y, vy: -(28 + Math.random() * 18), life: 0 });
+      }
+    } else {
+      this.healParticleTimer = 0;
+    }
+
+    for (let i = this.healParticles.length - 1; i >= 0; i--) {
+      const p = this.healParticles[i];
+      p.life += dt;
+      p.relY += p.vy * dt;
+      p.gfx.y  = p.relY;
+      p.gfx.alpha = Math.max(0, 1 - p.life / 0.85);
+      if (p.life >= 0.85) {
+        this.container.removeChild(p.gfx);
+        p.gfx.destroy();
+        this.healParticles.splice(i, 1);
+      }
+    }
   }
 
   private get moveSpeed() {

@@ -3,6 +3,7 @@ import {
   GAME_WIDTH, GAME_HEIGHT, GROUND_Y,
   PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH, TOWER_ATTACK_RANGE,
   PLAYER_COLOR, ENEMY_COLOR,
+  COIN_BOX_X, COIN_BOX_Y, COIN_BOX_W, COIN_BOX_H,
 } from './constants';
 
 export function buildBackground(stage: PIXI.Container) {
@@ -101,6 +102,60 @@ export function buildTowerRangeMarkers(stage: PIXI.Container) {
   eLabel.x = enemyRangeX;
   eLabel.y = GROUND_Y - lineH - 3;
   stage.addChild(eLabel);
+}
+
+export function buildCoinBox(world: PIXI.Container) {
+  const x = COIN_BOX_X;
+  const y = COIN_BOX_Y;
+  const w = COIN_BOX_W;
+  const h = COIN_BOX_H;
+  const g = new PIXI.Graphics();
+
+  // Drop shadow
+  g.beginFill(0x000000, 0.22);
+  g.drawRect(x - w / 2 + 4, y + 4, w, h);
+  g.endFill();
+
+  // Main body
+  g.beginFill(0xc8790a);
+  g.drawRect(x - w / 2, y, w, h);
+  g.endFill();
+
+  // Top highlight band
+  g.beginFill(0xf5a623, 0.65);
+  g.drawRect(x - w / 2 + 3, y + 3, w - 6, h * 0.30);
+  g.endFill();
+
+  // Dark border
+  g.lineStyle(3, 0x7a4a06);
+  g.drawRect(x - w / 2, y, w, h);
+  g.lineStyle(0);
+
+  // Corner studs (classic block look)
+  const cs = 9;
+  g.beginFill(0x7a4a06, 0.55);
+  g.drawRect(x - w / 2,       y,         cs, cs);
+  g.drawRect(x + w / 2 - cs,  y,         cs, cs);
+  g.drawRect(x - w / 2,       y + h - cs, cs, cs);
+  g.drawRect(x + w / 2 - cs,  y + h - cs, cs, cs);
+  g.endFill();
+
+  world.addChild(g);
+
+  // "?" label centred in the box
+  const label = new PIXI.Text('?', {
+    fontFamily: 'Arial Black, Arial',
+    fontSize:   26,
+    fontWeight: 'bold',
+    fill:       0xffffff,
+    stroke:     0x7a4a06,
+    strokeThickness: 4,
+  } as Partial<PIXI.ITextStyle>);
+  label.anchor.set(0.5);
+  label.x = x;
+  label.y = y + h / 2;
+  world.addChild(label);
+
 }
 
 function mulberry32(seed: number) {
