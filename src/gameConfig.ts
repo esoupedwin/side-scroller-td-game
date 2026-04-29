@@ -105,6 +105,18 @@ export const GameConfig = {
       width:       28,
       height:      44,
     },
+    tanker: {
+      type:        'tanker'   as const,
+      hp:          500,
+      speed:       30,
+      attackRange: 240,
+      attackPower: 75,
+      fireRate:    3.2,   // slow but devastating
+      cost:        160,
+      critical:    0.08,
+      width:       80,
+      height:      52,
+    },
   },
 
   cpu: {

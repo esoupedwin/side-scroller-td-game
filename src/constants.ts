@@ -133,6 +133,7 @@ export const CHAR_COST = {
   sniper:   ch.sniper.cost,
   medic:    ch.medic.cost,
   heavy:    ch.heavy.cost,
+  tanker:   ch.tanker.cost,
 } as const;
 
 export const CHAR_WIDTH  = ch.width;
@@ -208,4 +209,16 @@ export const HEAVY = {
   critical:    ch.heavy.critical,
   width:       ch.heavy.width,
   height:      ch.heavy.height,
+};
+
+export const TANKER = {
+  type:        ch.tanker.type,
+  hp:          ch.tanker.hp,
+  speed:       ch.tanker.speed,
+  attackRange: ch.tanker.attackRange,
+  attackPower: ch.tanker.attackPower,
+  fireRate:    ch.tanker.fireRate,
+  critical:    ch.tanker.critical,
+  width:       ch.tanker.width,
+  height:      ch.tanker.height,
 };

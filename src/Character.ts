@@ -22,7 +22,7 @@ import { COIN_PALETTE } from './Coin';
 import type { PlatformData } from './Platform';
 
 export interface CharacterConfig {
-  type:        'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy';
+  type:        'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker';
   hp:          number;
   speed:       number;
   attackRange: number;
@@ -205,6 +205,7 @@ export class Character {
     else if (this.config.type === 'sniper')   this.buildSniperSprite();
     else if (this.config.type === 'medic')    this.buildMedicSprite();
     else if (this.config.type === 'heavy')    this.buildHeavySprite();
+    else if (this.config.type === 'tanker')   this.buildTankerSprite();
     else                                       this.buildWarriorSprite();
   }
 
@@ -476,6 +477,127 @@ export class Character {
     this.container.addChild(g);
   }
 
+  private buildTankerSprite() {
+    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const w = this.config.width;
+    const h = this.config.height;
+    const dir = this.side === 'player' ? 1 : -1;
+
+    // All vertical positions are proportional so the sprite fills the full h.
+    // From bottom:  tracks (0–18%), lower hull (18–52%), upper hull (52–70%),
+    //               turret (52–88%), cupola (88–100%).
+    const trackTop    = h * 0.82;
+    const hullLowTop  = h * 0.48;
+    const hullHighTop = h * 0.30;
+    const turretTop   = h * 0.12;
+    const cupolaTop   = h * 0.00;
+
+    const g = new PIXI.Graphics();
+
+    // ── Rubber track belt ─────────────────────────────────────────────────
+    g.beginFill(0x1e1e1e);
+    g.drawRoundedRect(-w / 2, trackTop, w, h - trackTop, 3);
+    g.endFill();
+    // Tread links
+    g.lineStyle(1, 0x333333, 0.8);
+    for (let i = 0; i <= 8; i++) {
+      const tx = -w / 2 + i * (w / 8);
+      g.moveTo(tx, trackTop);
+      g.lineTo(tx, h);
+    }
+    g.lineStyle(0);
+    // Road wheels
+    const wheelY = trackTop + (h - trackTop) * 0.5;
+    const wheelR = (h - trackTop) * 0.38;
+    g.beginFill(0x3d3d3d);
+    for (let i = 0; i < 5; i++) {
+      g.drawCircle(-w / 2 + 9 + i * ((w - 18) / 4), wheelY, wheelR);
+    }
+    g.endFill();
+    g.beginFill(0x666666, 0.6);
+    for (let i = 0; i < 5; i++) {
+      g.drawCircle(-w / 2 + 9 + i * ((w - 18) / 4), wheelY, wheelR * 0.45);
+    }
+    g.endFill();
+
+    // ── Lower hull ────────────────────────────────────────────────────────
+    g.beginFill(color, 0.85);
+    g.drawRoundedRect(-w / 2, hullLowTop, w, trackTop - hullLowTop, 3);
+    g.endFill();
+    // Side skirt panels
+    g.beginFill(0x000000, 0.18);
+    g.drawRect(-w / 2,     hullLowTop, 6, trackTop - hullLowTop);
+    g.drawRect(w / 2 - 6,  hullLowTop, 6, trackTop - hullLowTop);
+    g.endFill();
+
+    // ── Upper hull ────────────────────────────────────────────────────────
+    g.beginFill(color);
+    g.drawRoundedRect(-w / 2 + 6, hullHighTop, w - 12, hullLowTop - hullHighTop, 4);
+    g.endFill();
+    // Ventilation grill (rear side)
+    g.lineStyle(1, 0x000000, 0.18);
+    for (let i = 0; i < 4; i++) {
+      const gx = -dir * (w * 0.14 + i * 5);
+      g.moveTo(gx, hullHighTop + 2);
+      g.lineTo(gx, hullLowTop - 2);
+    }
+    g.lineStyle(0);
+
+    // ── Turret ────────────────────────────────────────────────────────────
+    const turretCx = dir * w * 0.06;
+    const turretH  = hullHighTop - turretTop;
+    g.beginFill(color);
+    g.drawRoundedRect(turretCx - w * 0.28, turretTop, w * 0.56, turretH, 6);
+    g.endFill();
+    // Turret top highlight
+    g.beginFill(0xffffff, 0.12);
+    g.drawRoundedRect(turretCx - w * 0.22, turretTop + 2, w * 0.44, turretH * 0.35, 4);
+    g.endFill();
+    // Armour weld lines
+    g.lineStyle(1, 0x000000, 0.12);
+    g.moveTo(turretCx - w * 0.28, turretTop + turretH * 0.5);
+    g.lineTo(turretCx + w * 0.28, turretTop + turretH * 0.5);
+    g.lineStyle(0);
+
+    // ── Commander's cupola ────────────────────────────────────────────────
+    const cupolaCx = turretCx - dir * w * 0.06;
+    const cupolaH  = turretTop - cupolaTop;
+    g.beginFill(color);
+    g.drawRoundedRect(cupolaCx - w * 0.10, cupolaTop, w * 0.20, cupolaH + 3, 4);
+    g.endFill();
+    g.lineStyle(1.5, 0x000000, 0.22);
+    g.drawCircle(cupolaCx, cupolaTop + cupolaH * 0.5, w * 0.07);
+    g.lineStyle(0);
+
+    // ── Gun barrel ────────────────────────────────────────────────────────
+    const barrelCY   = turretTop + turretH * 0.55;
+    const barrelFrom = turretCx + dir * w * 0.28;
+    const barrelTo   = dir * w * 0.72;
+    const barrelH    = Math.max(5, turretH * 0.28);
+    g.beginFill(0x2e2e2e);
+    g.drawRect(
+      Math.min(barrelFrom, barrelTo),
+      barrelCY - barrelH / 2,
+      Math.abs(barrelTo - barrelFrom),
+      barrelH,
+    );
+    g.endFill();
+    // Muzzle brake
+    const muzzleX = dir > 0
+      ? Math.max(barrelFrom, barrelTo) - 4
+      : Math.min(barrelFrom, barrelTo) - 2;
+    g.beginFill(0x1a1a1a);
+    g.drawRect(muzzleX, barrelCY - barrelH * 0.85, 6, barrelH * 1.7);
+    g.endFill();
+    // Barrel ring near turret
+    g.lineStyle(2, color, 0.55);
+    const ringX = turretCx + dir * w * 0.28 - (dir > 0 ? 2 : -5);
+    g.drawRect(ringX, barrelCY - barrelH * 0.7, 5, barrelH * 1.4);
+    g.lineStyle(0);
+
+    this.container.addChild(g);
+  }
+
   private buildMedicSprite() {
     const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const w = this.config.width, h = this.config.height;
@@ -578,6 +700,7 @@ export class Character {
   }
 
   private tickRandomJump(dt: number, homeTowerFrontX: number) {
+    if (this.config.type === 'tanker') return;
     if (this.isAirborne || this.state === 'fighting') return;
     if (this.isOnPlatform) return;   // stay on platform; horizontal movement is the right action
     this.randomJumpTimer -= dt;
@@ -826,6 +949,7 @@ export class Character {
 
   private jump(dirX: number, dt: number) {
     if (this.isAirborne) return;
+    if (this.config.type === 'tanker') return;   // tanks cannot jump
     this.jumpVx     = dirX * this.moveSpeed;
     this.isAirborne = true;
     Matter.Body.setVelocity(this.body, {
@@ -937,6 +1061,11 @@ export class Character {
 
     // ── jump ─────────────────────────────────────────────────────────────────
     if (step.action === 'jump') {
+      // Tanker cannot jump — skip the step and walk toward the target x on the ground.
+      if (this.config.type === 'tanker') {
+        this.pathIdx++;
+        return false;
+      }
       // If already on the target surface, advance (redundant step)
       if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20 && step.floorY < GROUND_Y - 10) {
         this.pathIdx++;
@@ -1346,7 +1475,8 @@ export class Character {
   }
 
   private get projectileKind(): 'arrow' | 'bullet' {
-    return (this.config.type === 'rifleman' || this.config.type === 'sniper') ? 'bullet' : 'arrow';
+    return (this.config.type === 'rifleman' || this.config.type === 'sniper' || this.config.type === 'tanker')
+      ? 'bullet' : 'arrow';
   }
 
   private attackEnemy(target: Character, onFire?: (r: FireRequest) => void) {

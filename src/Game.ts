@@ -27,7 +27,7 @@ import {
   VIEWPORT_WIDTH, GAME_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
   PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY,
+  WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER,
   CPU_SPAWN_MIN_MS, CPU_SPAWN_MAX_MS, CPU_FIRST_SPAWN_MAX,
   STARTING_COINS, CHAR_COST,
   PASSIVE_INCOME_RATE, LOW_BALANCE_THRESHOLD, LOW_BALANCE_INCOME_MULT,
@@ -93,6 +93,10 @@ export class Game {
     if (e.key === 'b' || e.key === 'B') {
       this.showCollisionBoxes = !this.showCollisionBoxes;
       this.collisionDebugLayer.visible = this.showCollisionBoxes;
+    }
+    if (e.key === 'k' || e.key === 'K') {
+      this.coinBalance += 100;
+      this.notifyCoins();
     }
   };
   private readonly onKeyUp = (e: KeyboardEvent) => { this.keysDown.delete(e.key); };
@@ -252,7 +256,7 @@ export class Game {
   // ── Spawn ────────────────────────────────────────────────────────────────────
 
   /** Returns false if the player cannot afford this unit. */
-  spawnPlayer(type: 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy'): boolean {
+  spawnPlayer(type: 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker'): boolean {
     if (this.isOver) return false;
     const cost = CHAR_COST[type];
     if (this.coinBalance < cost) return false;
@@ -260,7 +264,7 @@ export class Game {
     this.coinBalance -= cost;
     this.notifyCoins();
 
-    const configs = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, sniper: SNIPER, medic: MEDIC, heavy: HEAVY };
+    const configs = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, sniper: SNIPER, medic: MEDIC, heavy: HEAVY, tanker: TANKER };
     const config = withSpawnBoosts(configs[type]);
     const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), pickName(), this.physics);
     this.characters.push(c);
@@ -276,6 +280,7 @@ export class Game {
     const cpuChars    = liveChars.filter(c => c.side === 'enemy');
 
     const typeWeight = (type: string) =>
+      type === 'tanker'   ? 2.5 :
       type === 'heavy'    ? 1.8 :
       type === 'sniper'   ? 1.4 :
       type === 'rifleman' ? 1.3 :
@@ -324,12 +329,12 @@ export class Game {
     const hurting  = cpuChars.filter(c => c.hp / c.config.hp < 0.5).length;
     const hasMedic = cpuChars.some(c => c.config.type === 'medic');
 
-    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy';
+    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker';
     let order: UnitType[];
 
     if (stance === 'push') {
-      // Mass melee; heavies are the priority finisher
-      order = ['heavy', 'warrior', 'archer'];
+      // Mass melee; tanker/heavies are the priority finisher
+      order = this.cpuCoinBalance >= CHAR_COST.tanker ? ['tanker', 'heavy', 'warrior', 'archer'] : ['heavy', 'warrior', 'archer'];
     } else if (stance === 'defend') {
       // Get a medic early — 1 hurting unit is enough to justify it when squad exists
       const needMedic = hurting >= 1 && !hasMedic && cpuChars.length >= 2;
@@ -346,6 +351,8 @@ export class Game {
       // Economy: invest in better units; get a medic if the squad is hurting
       if (hurting >= 2 && !hasMedic) {
         order = ['medic', 'archer', 'warrior'];
+      } else if (this.cpuCoinBalance >= CHAR_COST.tanker && cpuChars.length >= 4) {
+        order = ['tanker', 'sniper', 'rifleman', 'archer', 'heavy', 'warrior'];
       } else if (this.cpuCoinBalance >= CHAR_COST.sniper && cpuChars.length >= 3) {
         order = ['sniper', 'rifleman', 'archer', 'heavy', 'warrior'];
       } else if (this.cpuCoinBalance >= CHAR_COST.rifleman) {
@@ -355,7 +362,7 @@ export class Game {
       }
     }
 
-    const cfgMap = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, sniper: SNIPER, medic: MEDIC, heavy: HEAVY };
+    const cfgMap = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, sniper: SNIPER, medic: MEDIC, heavy: HEAVY, tanker: TANKER };
     for (const type of order) {
       if (this.cpuCoinBalance < CHAR_COST[type]) continue;
       this.cpuCoinBalance -= CHAR_COST[type];
