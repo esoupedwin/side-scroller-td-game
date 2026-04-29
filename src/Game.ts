@@ -20,10 +20,12 @@ import { DamageLabel } from './DamageLabel';
 import { Platform } from './Platform';
 import { pickName } from './names';
 import type { PlatformData } from './Platform';
+import type { CollisionBoxData } from './CollisionBox';
+import { NavGraph } from './Pathfinding';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
   VIEWPORT_WIDTH, GAME_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
-  PLAYER_TOWER_X, ENEMY_TOWER_X,
+  PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY,
   CPU_SPAWN_MIN_MS, CPU_SPAWN_MAX_MS, CPU_FIRST_SPAWN_MAX,
@@ -32,7 +34,7 @@ import {
   COIN_VALUE, KILL_REWARD, TOWER_KILL_REWARD, COIN_DROP_MIN_MS, COIN_DROP_MAX_MS,
   COIN_LIFETIME_S,
   COIN_DROP_VX_MIN, COIN_DROP_VX_MAX, COIN_DROP_VY_MIN, COIN_DROP_VY_MAX,
-  COIN_BOX_X, COIN_BOX_Y, COIN_BOX_H, COIN_BOX_SPREAD_DEG,
+  COIN_BOX_X, COIN_BOX_Y, COIN_BOX_W, COIN_BOX_H, COIN_BOX_SPREAD_DEG,
   COIN_GRAVITY,
   SILVER_COIN_VALUE, SILVER_DROP_MIN_MS, SILVER_DROP_MAX_MS,
   PLATFORM_X, PLATFORM_Y, PLATFORM_WIDTH, PLATFORM_HEIGHT,
@@ -76,10 +78,21 @@ export class Game {
   private cameraX  = 0;
   private readonly keysDown = new Set<string>();
 
+  private navGraph!: NavGraph;
+
+  // Collision-box debug overlay (toggled with 'B')
+  private collisionDebugLayer!: PIXI.Graphics;
+  private showCollisionBoxes   = false;
+  private staticCollisionBoxes: CollisionBoxData[] = [];
+
   private readonly onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
       this.keysDown.add(e.key);
+    }
+    if (e.key === 'b' || e.key === 'B') {
+      this.showCollisionBoxes = !this.showCollisionBoxes;
+      this.collisionDebugLayer.visible = this.showCollisionBoxes;
     }
   };
   private readonly onKeyUp = (e: KeyboardEvent) => { this.keysDown.delete(e.key); };
@@ -192,6 +205,46 @@ export class Game {
     this.enemyTower  = new Tower('enemy',  ENEMY_TOWER_X);
     this.world.addChild(this.playerTower.container);
     this.world.addChild(this.enemyTower.container);
+
+    // Navigation graph — built from current platforms; rebuild whenever map changes.
+    this.navGraph = new NavGraph();
+    this.navGraph.build(this.platformData);
+
+    // Tower physics bodies — solid, block character movement.
+    this.physics.createTowerBody(PLAYER_TOWER_X, TOWER_WIDTH);
+    this.physics.createTowerBody(ENEMY_TOWER_X,  TOWER_WIDTH);
+
+    // Register static collision boxes for the debug overlay.
+    this.staticCollisionBoxes = [
+      // Towers — solid
+      {
+        x: PLAYER_TOWER_X - TOWER_WIDTH / 2, y: GROUND_Y - TOWER_HEIGHT,
+        width: TOWER_WIDTH, height: TOWER_HEIGHT,
+        type: 'solid', label: 'Player Tower',
+      },
+      {
+        x: ENEMY_TOWER_X - TOWER_WIDTH / 2, y: GROUND_Y - TOWER_HEIGHT,
+        width: TOWER_WIDTH, height: TOWER_HEIGHT,
+        type: 'solid', label: 'Enemy Tower',
+      },
+      // Platform — passthrough (one-way)
+      {
+        x: PLATFORM_X, y: PLATFORM_Y,
+        width: PLATFORM_WIDTH, height: PLATFORM_HEIGHT,
+        type: 'passthrough', label: 'Platform',
+      },
+      // Coin box — passthrough (sensor / no obstruction)
+      {
+        x: COIN_BOX_X - COIN_BOX_W / 2, y: COIN_BOX_Y,
+        width: COIN_BOX_W, height: COIN_BOX_H,
+        type: 'passthrough', label: 'Coin Box',
+      },
+    ];
+
+    // Debug overlay — drawn on top of everything in world space.
+    this.collisionDebugLayer = new PIXI.Graphics();
+    this.collisionDebugLayer.visible = false;
+    this.world.addChild(this.collisionDebugLayer);
 
     this.app.stage.addChild(this.world);
   }
@@ -438,6 +491,7 @@ export class Game {
         homeTowerFrontX:   isPlayer ? this.playerTower.frontX : this.enemyTower.frontX,
         coins:             liveCoins,
         platforms:         this.platformData,
+        navGraph:          this.navGraph,
         onFire:        (req: FireRequest) => this.fireProjectile(req),
         onDamageTower: (dmg: number)     => enemyTower.takeDamage(dmg),
         onDepositCoin: (value: number) => {
@@ -542,6 +596,9 @@ export class Game {
 
     this.hud.update();
 
+    // Collision-box debug overlay
+    if (this.showCollisionBoxes) this.drawCollisionDebug(liveChars);
+
     // Countdown
     this.timeRemaining -= dt;
     const displaySecs = Math.max(0, Math.floor(this.timeRemaining));
@@ -557,6 +614,98 @@ export class Game {
 
     if (this.enemyTower.isDead)       this.end('player', 'tower');
     else if (this.playerTower.isDead) this.end('enemy',  'tower');
+  }
+
+  // ── Collision debug overlay ──────────────────────────────────────────────────
+
+  private drawCollisionDebug(chars: Character[]) {
+    const g = this.collisionDebugLayer;
+    g.clear();
+
+    // Static boxes: towers (solid=red), platform & coin box (passthrough=yellow)
+    for (const box of this.staticCollisionBoxes) {
+      const color = box.type === 'solid' ? 0xff3333 : 0xffdd00;
+      g.lineStyle(2, color, 0.85);
+      g.beginFill(color, 0.08);
+      g.drawRect(box.x, box.y, box.width, box.height);
+      g.endFill();
+    }
+
+    // Per-character: collision box + pathfinding path
+    for (const c of chars) {
+      const charColor = c.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+
+      // Collision box
+      g.lineStyle(1.5, 0x44ff88, 0.75);
+      g.beginFill(0x44ff88, 0.06);
+      g.drawRect(c.x - c.config.width / 2, c.y - c.config.height, c.config.width, c.config.height);
+      g.endFill();
+
+      // Path visualization
+      const { steps, currentIdx } = c.debugPath;
+      if (steps.length === 0) continue;
+
+      // Trace the remaining steps as connected segments
+      let prevX = c.x;
+      let prevY = c.y;   // character feet
+
+      for (let i = currentIdx; i < steps.length; i++) {
+        const step    = steps[i];
+        const isCur   = i === currentIdx;
+        const stepColor = step.action === 'jump' ? 0x00eeff
+                        : step.action === 'fall' ? 0xff8800
+                        : charColor;
+        const alpha   = isCur ? 1.0 : 0.45;
+        const thick   = isCur ? 2.0 : 1.0;
+
+        g.lineStyle(thick, stepColor, alpha);
+
+        // Jump trigger marker
+        if (step.action === 'jump' && step.jumpTriggerX !== undefined) {
+          const tx = step.jumpTriggerX;
+          const ty = prevY;
+          // Dashed segment to trigger x
+          g.lineStyle(1, stepColor, alpha * 0.6);
+          g.moveTo(prevX, prevY);
+          g.lineTo(tx, ty);
+          // Arc to landing point
+          g.lineStyle(thick, stepColor, alpha);
+          const peakY = ty - 90;
+          const midX  = (tx + step.targetX) / 2;
+          g.moveTo(tx, ty);
+          g.quadraticCurveTo(midX, peakY, step.targetX, step.floorY);
+          prevX = step.targetX;
+          prevY = step.floorY;
+          continue;
+        }
+
+        // Walk or fall: straight line
+        g.moveTo(prevX, prevY);
+        g.lineTo(step.targetX, step.floorY);
+        prevX = step.targetX;
+        prevY = step.floorY;
+      }
+
+      // Waypoint dots for each remaining step
+      for (let i = currentIdx; i < steps.length; i++) {
+        const step  = steps[i];
+        const isCur = i === currentIdx;
+        const dotColor = step.action === 'jump' ? 0x00eeff
+                       : step.action === 'fall' ? 0xff8800
+                       : charColor;
+        g.lineStyle(0);
+        g.beginFill(dotColor, isCur ? 1.0 : 0.5);
+        g.drawCircle(step.targetX, step.floorY, isCur ? 5 : 3);
+        g.endFill();
+
+        // Jump trigger dot
+        if (step.action === 'jump' && step.jumpTriggerX !== undefined) {
+          g.beginFill(0xffffff, isCur ? 0.9 : 0.4);
+          g.drawCircle(step.jumpTriggerX, step.floorY, isCur ? 4 : 2);
+          g.endFill();
+        }
+      }
+    }
   }
 
   private notifyCoins() {

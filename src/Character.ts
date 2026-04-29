@@ -13,6 +13,7 @@ import {
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
 } from './constants';
 import type { Physics } from './Physics';
+import { NavGraph, type PathStep } from './Pathfinding';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
 import type { Side } from './Tower';
@@ -50,6 +51,7 @@ export interface UpdateContext {
   homeTowerFrontX:   number;   // the collecting character's own tower
   coins:             Coin[];
   platforms:         PlatformData[];
+  navGraph:          NavGraph;
   onFire?:           (req: FireRequest) => void;
   onDamageTower?:    (dmg: number) => void;
   onDepositCoin:     (value: number) => void;
@@ -114,6 +116,21 @@ export class Character {
     life: number;
   }> = [];
   private _behavior:    'attacking' | 'collecting' | 'harass' | 'defend' = 'attacking';
+
+  // ── Pathfinding state ─────────────────────────────────────────────────────
+  private path:        PathStep[] = [];
+  private pathIdx      = 0;
+  // Key of the last requested target — avoids rebuilding the path every tick.
+  private pathTargetKey = '';
+  // Seconds since path was built; stale paths are discarded and rebuilt.
+  private pathAge      = 0;
+  private readonly PATH_TTL = 8;   // s — re-plan after this many seconds
+
+  /** Read-only view of the current path for debug rendering. */
+  get debugPath(): { steps: readonly PathStep[]; currentIdx: number } {
+    return { steps: this.path, currentIdx: this.pathIdx };
+  }
+
   private carryingCoin  = false;
   private coinCarryValue: number   = 0;
   private coinCarryKind:  CoinKind = 'gold';
@@ -796,9 +813,9 @@ export class Character {
     this.tickLegs(ctx.dt);
     this.tickPromoAnim(ctx.dt);
 
-    // Hard boundary: characters cannot pass behind either tower
-    const boundL = PLAYER_TOWER_X - TOWER_WIDTH / 2;
-    const boundR = ENEMY_TOWER_X  + TOWER_WIDTH / 2;
+    // Hard boundary: characters are blocked at each tower's front face (solid collision).
+    const boundL = PLAYER_TOWER_X + TOWER_WIDTH / 2;   // player tower right face
+    const boundR = ENEMY_TOWER_X  - TOWER_WIDTH / 2;   // enemy tower left face
     if (this.x < boundL) { this.x = boundL; this.jumpVx = 0; }
     if (this.x > boundR) { this.x = boundR; this.jumpVx = 0; }
 
@@ -818,7 +835,14 @@ export class Character {
   }
 
   syncToBody(dt: number) {
-    if (this.isAirborne) this.x += this.jumpVx * dt;
+    if (this.isAirborne) {
+      this.x += this.jumpVx * dt;
+      // Enforce tower faces while airborne (clamp in update() runs before syncToBody).
+      const boundL = PLAYER_TOWER_X + TOWER_WIDTH / 2;
+      const boundR = ENEMY_TOWER_X  - TOWER_WIDTH / 2;
+      if (this.x < boundL) { this.x = boundL; this.jumpVx = 0; }
+      if (this.x > boundR) { this.x = boundR; this.jumpVx = 0; }
+    }
     // Character bodies have no Matter.js platform collision (mask: CAT_GROUND only).
     // Without pinning, gravity pulls the body through the platform to the ground,
     // making char.y drift to GROUND_Y while floorY stays stale at platform height.
@@ -866,10 +890,93 @@ export class Character {
     }
   }
 
+  // ── Pathfinding ──────────────────────────────────────────────────────────────
+
+  /**
+   * Request a fresh path to (toX, toFloorY) only when the target moved
+   * far enough or the existing path has gone stale.
+   */
+  private requestPath(toX: number, toFloorY: number, navGraph: NavGraph, dt: number): void {
+    const key = `${Math.round(toX / 20) * 20},${Math.round(toFloorY)}`;
+    this.pathAge += dt;
+    if (key === this.pathTargetKey && this.pathAge < this.PATH_TTL && this.path.length > 0) return;
+
+    this.path         = navGraph.findPath(this.x, this.floorY, toX, toFloorY);
+    this.pathIdx      = 0;
+    this.pathTargetKey = key;
+    this.pathAge      = 0;
+  }
+
+  /** Invalidate the current path (e.g. after a coin is picked up, target changes). */
+  clearPath(): void {
+    this.path          = [];
+    this.pathIdx       = 0;
+    this.pathTargetKey = '';
+  }
+
+  /**
+   * Follow the current path one tick.
+   * Returns true when the final step is reached; false while still en-route.
+   * Modifies this.x and may call this.jump().
+   */
+  private followPath(dt: number): boolean {
+    if (this.pathIdx >= this.path.length) return true;
+
+    const step = this.path[this.pathIdx];
+
+    // ── walk ─────────────────────────────────────────────────────────────────
+    if (step.action === 'walk') {
+      const dx = step.targetX - this.x;
+      if (Math.abs(dx) <= 10) {
+        this.pathIdx++;
+        return this.pathIdx >= this.path.length;
+      }
+      if (!this.isAirborne) this.x += Math.sign(dx) * this.moveSpeed * dt;
+      return false;
+    }
+
+    // ── jump ─────────────────────────────────────────────────────────────────
+    if (step.action === 'jump') {
+      // If already on the target surface, advance (redundant step)
+      if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20 && step.floorY < GROUND_Y - 10) {
+        this.pathIdx++;
+        return this.pathIdx >= this.path.length;
+      }
+      if (this.isAirborne) return false;  // physics arc in progress
+
+      const triggerX = step.jumpTriggerX ?? step.targetX;
+      const dx       = triggerX - this.x;
+      if (Math.abs(dx) <= 16) {
+        const dir = Math.sign(step.targetX - this.x) || 1;
+        this.jump(dir, dt);
+      } else {
+        this.x += Math.sign(dx) * this.moveSpeed * dt;
+      }
+      return false;
+    }
+
+    // ── fall ─────────────────────────────────────────────────────────────────
+    if (step.action === 'fall') {
+      // Landed at target surface — advance
+      if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20) {
+        this.pathIdx++;
+        return this.pathIdx >= this.path.length;
+      }
+      // While airborne, physics handles the descent
+      if (this.isAirborne) return false;
+      // Walk toward the fall-off edge
+      const dx = step.targetX - this.x;
+      if (Math.abs(dx) > 5) this.x += Math.sign(dx) * this.moveSpeed * dt;
+      return false;
+    }
+
+    return true;
+  }
+
   // ── Attacking behaviour ──────────────────────────────────────────────────────
 
   private updateAttacking(ctx: UpdateContext) {
-    const { dt, allChars, enemyTowerFrontX, enemyTowerY, onFire } = ctx;
+    const { dt, allChars, enemyTowerFrontX, enemyTowerY, onFire, navGraph } = ctx;
     if (this.isAirborne) return;   // don't change horizontal intent mid-air
 
     if (this.config.type === 'medic') {
@@ -907,14 +1014,16 @@ export class Character {
       this.attackTower(enemyTowerFrontX, enemyTowerY, onFire, ctx.onDamageTower);
     } else {
       this.state = 'marching';
-      this.x += dir * this.moveSpeed * dt;
+      // Use pathfinding so the character navigates down from platforms en route.
+      this.requestPath(enemyTowerFrontX, GROUND_Y, navGraph, dt);
+      this.followPath(dt);
     }
   }
 
   // ── Collecting behaviour ─────────────────────────────────────────────────────
 
   private updateCollecting(ctx: UpdateContext) {
-    const { dt, allChars, coins, platforms, homeTowerFrontX, onFire, onDepositCoin } = ctx;
+    const { dt, allChars, coins, platforms, homeTowerFrontX, onFire, onDepositCoin, navGraph } = ctx;
 
     // Attack any enemy that wanders into range without stopping movement
     if (!this.isAirborne) {
@@ -965,7 +1074,8 @@ export class Character {
       } else {
         this.coinThrowTimer = -1;  // moved close enough — cancel any pending windup
         this.state = 'returning';
-        this.x += Math.sign(homeTowerFrontX - this.x) * this.moveSpeed * dt;
+        this.requestPath(homeTowerFrontX, GROUND_Y, navGraph, dt);
+        this.followPath(dt);
         return;
       }
     }
@@ -979,10 +1089,7 @@ export class Character {
     }
 
     if (this.targetCoin) {
-      // Also treat as "on platform" when the coin is still bouncing (isOnGround=false)
-      // but is already within the platform's x-range and at/above its surface.
-      // Without this, the character walks to coin.x on the ground, can't pick up
-      // (isOnGround=false), and freezes because Math.sign(0) gives no movement.
+      // Determine which surface the coin rests on.
       const coinOnPlatform = this.targetCoin.isOnPlatform ||
         platforms.some(p =>
           !this.targetCoin!.isOnGround &&
@@ -990,35 +1097,26 @@ export class Character {
           this.targetCoin!.y <= p.y + 5,
         );
       const charOnPlatform = this.floorY < GROUND_Y;
+      const coinFloorY     = coinOnPlatform
+        ? (platforms.find(p => this.targetCoin!.x >= p.x && this.targetCoin!.x <= p.x + p.width)?.y ?? GROUND_Y)
+        : GROUND_Y;
 
-      // ── Pathfinding: jump onto platform ──────────────────────────────────────
-      if (coinOnPlatform && !charOnPlatform && !this.isAirborne) {
-        const plat = platforms[0];
-        if (plat) {
-          // Walk toward coin; jump once character enters the platform's x range
-          const dirToCoin = Math.sign(this.targetCoin.x - this.x);
-          this.x += dirToCoin * this.moveSpeed * dt;
-          if (this.x >= plat.x && this.x <= plat.x + plat.width) {
-            this.jump(dirToCoin, dt);
-          }
-          this.state = 'collecting';
-          return;
-        }
-      }
+      // Navigate to the coin using the pathfinding graph.
+      this.requestPath(this.targetCoin.x, coinFloorY, navGraph, dt);
+      this.followPath(dt);
 
-      if (this.isAirborne) return;   // horizontal position handled by physics tick
+      this.state = 'collecting';
 
-      // ── Same-floor pickup ────────────────────────────────────────────────────
-      const dist       = Math.abs(this.x - this.targetCoin.x);
+      if (this.isAirborne) return;   // horizontal position handled by physics
+
+      // ── Pickup check ──────────────────────────────────────────────────────
+      const dist        = Math.abs(this.x - this.targetCoin.x);
       const sameSurface = Math.abs(this.floorY - this.targetCoin.floorY) < 30
-        || (charOnPlatform && coinOnPlatform);  // both on platform even if coin still settling
-
-      // Allow pickup if fully settled OR near resting surface OR both on platform.
-      // The platform fallback prevents Math.sign(0)=0 freeze when a bouncing coin
-      // and the character share the platform but isOnGround is still false.
+        || (charOnPlatform && coinOnPlatform);
       const coinReachable = this.targetCoin.isOnGround
-        || this.targetCoin.y >= GROUND_Y - 30   // near ground (existing fallback)
-        || (charOnPlatform && coinOnPlatform);   // near platform surface
+        || this.targetCoin.y >= GROUND_Y - 30
+        || (charOnPlatform && coinOnPlatform);
+
       if (dist <= CHAR_PICKUP_DIST && sameSurface && coinReachable && this.coinPickupCooldown <= 0) {
         this.coinCarryValue = this.targetCoin.value;
         this.coinCarryKind  = this.targetCoin.kind;
@@ -1026,10 +1124,8 @@ export class Character {
         this.targetCoin  = null;
         this.carryingCoin = true;
         this.showCoinCarry();
+        this.clearPath();
         this.state = 'returning';
-      } else {
-        this.state = 'collecting';
-        this.x += Math.sign(this.targetCoin.x - this.x) * this.moveSpeed * dt;
       }
     } else {
       // No coins on field — drift toward center drop zone

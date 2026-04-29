@@ -12,6 +12,7 @@ export const CAT_PLATFORM  = 0x0002;
 export const CAT_CHARACTER = 0x0004;
 export const CAT_COIN      = 0x0008;
 export const CAT_WALL      = 0x0010;
+export const CAT_TOWER     = 0x0020;
 
 export class Physics {
   readonly engine: Matter.Engine;
@@ -107,13 +108,30 @@ export class Physics {
   }
 
   createCharBody(x: number, feetY: number, w: number, h: number): Matter.Body {
-    // Characters only collide with the ground — platform landing is handled manually
-    // in syncFromBody to avoid one-way platform tunneling issues.
+    // Characters collide with ground and solid tower walls.
+    // Platform landing is handled manually in syncFromBody (one-way tunneling workaround).
     const body = Matter.Bodies.rectangle(x, feetY - h / 2, w, h, {
       friction: 0, frictionAir: 0, frictionStatic: 0,
       restitution: 0,
       inertia: Infinity, inverseInertia: 0,
-      collisionFilter: { category: CAT_CHARACTER, mask: CAT_GROUND },
+      collisionFilter: { category: CAT_CHARACTER, mask: CAT_GROUND | CAT_TOWER },
+    });
+    Matter.Composite.add(this.engine.world, body);
+    return body;
+  }
+
+  /**
+   * Creates a full-height static body for a tower (solid — blocks characters).
+   * Extends from the top of the canvas to below the ground so characters
+   * cannot jump over it.
+   */
+  createTowerBody(centerX: number, w: number): Matter.Body {
+    const h = GROUND_Y + 60;   // sky-to-ground full height
+    const body = Matter.Bodies.rectangle(centerX, h / 2, w, h, {
+      isStatic: true,
+      label: 'tower',
+      friction: 0, frictionStatic: 0, restitution: 0,
+      collisionFilter: { category: CAT_TOWER, mask: CAT_CHARACTER },
     });
     Matter.Composite.add(this.engine.world, body);
     return body;
