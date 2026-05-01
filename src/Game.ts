@@ -16,6 +16,7 @@ import { Character, RANK_NAMES, type CharacterConfig, type FireRequest, type Upd
 import { Projectile } from './Projectile';
 import { CharacterHUD } from './CharacterHUD';
 import { Coin, type CoinKind } from './Coin';
+import { PowerUp, type PowerUpType } from './PowerUp';
 import { DamageLabel } from './DamageLabel';
 import { Platform } from './Platform';
 import { pickName } from './names';
@@ -41,6 +42,7 @@ import {
   CPU_PRESSURE_THRESHOLD,
   CPU_URGENT_MAX_FACTOR, CPU_COMFORT_MIN_FACTOR,
   CPU_NEUTRAL_MIN_FACTOR, CPU_NEUTRAL_MAX_FACTOR,
+  POWERUP_DROP_INTERVAL, POWERUP_INDICATOR_LEAD,
 } from './constants';
 
 function spawnBoost(): number {
@@ -57,6 +59,16 @@ function withSpawnBoosts(cfg: CharacterConfig): CharacterConfig {
   };
 }
 
+const CHAR_CONFIGS = {
+  warrior:  WARRIOR,
+  archer:   ARCHER,
+  rifleman: RIFLEMAN,
+  sniper:   SNIPER,
+  medic:    MEDIC,
+  heavy:    HEAVY,
+  tanker:   TANKER,
+} as const;
+
 export class Game {
   readonly app: PIXI.Application;
 
@@ -65,11 +77,27 @@ export class Game {
   private characters:   Character[]  = [];
   private projectiles:  Projectile[] = [];
   private coins:        Coin[]       = [];
+  private powerUps:     PowerUp[]    = [];
   private unitLayer!:   PIXI.Container;
   private projLayer!:   PIXI.Container;
   private coinLayer!:    PIXI.Container;
+  private powerUpLayer!: PIXI.Container;
   private labelLayer!:   PIXI.Container;
   private damageLabels:  DamageLabel[] = [];
+
+  private powerUpTimer    = 0;
+  private readonly powerUpInterval = POWERUP_DROP_INTERVAL * 1000;
+
+  // Drop indicator (screen-space)
+  private powerUpIndicatorContainer!: PIXI.Container;
+  private powerUpIndicatorGfx!:       PIXI.Graphics;
+  private powerUpIndicatorText!:      PIXI.Text;
+  private powerUpIndicatorActive      = false;
+  private powerUpIndicatorX           = 0;
+  private powerUpIndicatorTargetX     = 0;
+  private powerUpIndicatorMoveTimer   = 0;
+  private powerUpTypePreview: PowerUpType = 'heal';
+  private powerUpLastCountdown        = -1;
   private platform!:     Platform;
   private readonly platformData: PlatformData[] = [];
   private physics!:      Physics;
@@ -200,11 +228,13 @@ export class Game {
       width: PLATFORM_WIDTH, height: PLATFORM_HEIGHT,
     });
 
-    this.coinLayer  = new PIXI.Container();
-    this.projLayer  = new PIXI.Container();
-    this.unitLayer  = new PIXI.Container();
-    this.labelLayer = new PIXI.Container();
+    this.coinLayer     = new PIXI.Container();
+    this.powerUpLayer  = new PIXI.Container();
+    this.projLayer     = new PIXI.Container();
+    this.unitLayer     = new PIXI.Container();
+    this.labelLayer    = new PIXI.Container();
     this.world.addChild(this.coinLayer);
+    this.world.addChild(this.powerUpLayer);
     this.world.addChild(this.projLayer);
     this.world.addChild(this.unitLayer);
     this.world.addChild(this.labelLayer);
@@ -255,6 +285,77 @@ export class Game {
     this.world.addChild(this.collisionDebugLayer);
 
     this.app.stage.addChild(this.world);
+
+    // World-space drop indicator (moves across the map, above all other layers)
+    this.powerUpIndicatorContainer = new PIXI.Container();
+    this.powerUpIndicatorGfx       = new PIXI.Graphics();
+    this.powerUpIndicatorText       = new PIXI.Text('', {
+      fontFamily: 'Arial Black, Arial',
+      fontSize:   20,
+      fontWeight: 'bold',
+      fill:       0xffffff,
+      align:      'center',
+      stroke:     0x000000,
+      strokeThickness: 3,
+    } as Partial<PIXI.ITextStyle>);
+    this.powerUpIndicatorText.anchor.set(0.5, 0.5);
+    this.powerUpIndicatorText.y = 28;
+    this.powerUpIndicatorContainer.addChild(this.powerUpIndicatorGfx);
+    this.powerUpIndicatorContainer.addChild(this.powerUpIndicatorText);
+    this.powerUpIndicatorContainer.y   = 5;   // fixed at top of world
+    this.powerUpIndicatorContainer.visible = false;
+    this.world.addChild(this.powerUpIndicatorContainer);  // world space — scrolls with camera
+  }
+
+  private readonly TYPE_COLORS: Record<PowerUpType, number> = {
+    heal:   0x44dd88,
+    speed:  0x44aaff,
+    attack: 0xff8833,
+  };
+
+  private buildDropIndicatorGfx() {
+    const color = this.TYPE_COLORS[this.powerUpTypePreview];
+    const g     = this.powerUpIndicatorGfx;
+    const bw = 68, bh = 44;
+    g.clear();
+
+    // Dark pill background
+    g.beginFill(0x0d0d22, 0.92);
+    g.drawRoundedRect(-bw / 2, 0, bw, bh, 10);
+    g.endFill();
+
+    // Colored border
+    g.lineStyle(2.5, color, 1);
+    g.drawRoundedRect(-bw / 2, 0, bw, bh, 10);
+    g.lineStyle(0);
+
+    // Small type icon (left side of pill)
+    g.beginFill(color, 0.9);
+    if (this.powerUpTypePreview === 'heal') {
+      g.drawRect(-26, 18, 4, 12); g.drawRect(-29, 21, 10, 6);   // cross
+    } else if (this.powerUpTypePreview === 'speed') {
+      g.drawPolygon([-28, 17, -23, 26, -27, 26, -22, 35, -16, 22, -21, 22, -17, 14]); // bolt
+    } else {
+      g.drawPolygon([-22, 15, -19, 20, -21, 20, -21, 34, -25, 34, -25, 20, -27, 20]); // arrow up
+    }
+    g.endFill();
+
+    // Separator line
+    g.lineStyle(1, color, 0.35);
+    g.moveTo(-8, 6);
+    g.lineTo(-8, bh - 6);
+    g.lineStyle(0);
+
+    // Stem line from box to arrowhead
+    g.lineStyle(2, color, 0.8);
+    g.moveTo(0, bh);
+    g.lineTo(0, bh + 14);
+    g.lineStyle(0);
+
+    // Arrowhead
+    g.beginFill(color, 1);
+    g.drawPolygon([0, bh + 26, -10, bh + 14, 10, bh + 14]);
+    g.endFill();
   }
 
   // ── Spawn ────────────────────────────────────────────────────────────────────
@@ -268,8 +369,7 @@ export class Game {
     this.coinBalance -= cost;
     this.notifyCoins();
 
-    const configs = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, sniper: SNIPER, medic: MEDIC, heavy: HEAVY, tanker: TANKER };
-    const config = withSpawnBoosts(configs[type]);
+    const config = withSpawnBoosts(CHAR_CONFIGS[type]);
     const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), pickName(), this.physics);
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
@@ -373,11 +473,10 @@ export class Game {
       }
     }
 
-    const cfgMap = { warrior: WARRIOR, archer: ARCHER, rifleman: RIFLEMAN, sniper: SNIPER, medic: MEDIC, heavy: HEAVY, tanker: TANKER };
     for (const type of order) {
       if (this.cpuCoinBalance < CHAR_COST[type]) continue;
       this.cpuCoinBalance -= CHAR_COST[type];
-      const c = new Character('enemy', this.enemyTower.frontX, withSpawnBoosts(cfgMap[type]), this.allocateCharId(), pickName(), this.physics);
+      const c = new Character('enemy', this.enemyTower.frontX, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics);
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
       this.cpuStrategyInfo.decision = `Spawned ${type} #${c.id}`;
@@ -486,6 +585,76 @@ export class Game {
       this.resetSilverDropTimer();
     }
 
+    // Power-up drop (every 40 s) with 20 s lead-up indicator
+    this.powerUpTimer += ticker.deltaMS;
+    const timeUntilDrop = this.powerUpInterval - this.powerUpTimer;
+
+    if (timeUntilDrop <= POWERUP_INDICATOR_LEAD * 1000) {
+      const innerLeft  = PLAYER_TOWER_X + TOWER_WIDTH / 2 + 60;
+      const innerRight = ENEMY_TOWER_X  - TOWER_WIDTH / 2 - 60;
+
+      // First frame entering the 20 s window: choose type + seed indicator position
+      if (!this.powerUpIndicatorActive) {
+        this.powerUpIndicatorActive    = true;
+        const types: PowerUpType[]     = ['heal', 'speed', 'attack'];
+        this.powerUpTypePreview        = types[Math.floor(Math.random() * types.length)];
+        this.powerUpIndicatorX         = innerLeft + Math.random() * (innerRight - innerLeft);
+        this.powerUpIndicatorTargetX   = this.powerUpIndicatorX;
+        this.powerUpIndicatorMoveTimer = 0;
+        this.powerUpLastCountdown      = -1;
+        this.buildDropIndicatorGfx();
+        this.powerUpIndicatorContainer.visible = true;
+      }
+
+      // Random drift across map: pick a new world-X target every 1.2 – 2.4 s
+      this.powerUpIndicatorMoveTimer += dt;
+      if (this.powerUpIndicatorMoveTimer >= 1.2 + Math.random() * 1.2) {
+        this.powerUpIndicatorMoveTimer  = 0;
+        this.powerUpIndicatorTargetX    = innerLeft + Math.random() * (innerRight - innerLeft);
+      }
+      // Smooth slide toward target
+      this.powerUpIndicatorX += (this.powerUpIndicatorTargetX - this.powerUpIndicatorX) * Math.min(1, dt * 2 / 3);
+      this.powerUpIndicatorContainer.x = this.powerUpIndicatorX;
+
+      // Countdown text (update only when integer second changes)
+      const secs = Math.max(0, Math.ceil(timeUntilDrop / 1000));
+      if (secs !== this.powerUpLastCountdown) {
+        this.powerUpLastCountdown    = secs;
+        this.powerUpIndicatorText.text = `${secs}s`;
+      }
+    } else {
+      // Outside the 20 s window — hide
+      if (this.powerUpIndicatorActive) {
+        this.powerUpIndicatorActive = false;
+        this.powerUpIndicatorContainer.visible = false;
+      }
+    }
+
+    if (this.powerUpTimer >= this.powerUpInterval) {
+      this.powerUpTimer           = 0;
+      this.powerUpIndicatorActive = false;
+      this.powerUpIndicatorContainer.visible = false;
+
+      // Spawn at indicator world position (already in world coords)
+      const innerLeft  = PLAYER_TOWER_X + TOWER_WIDTH / 2 + 60;
+      const innerRight = ENEMY_TOWER_X  - TOWER_WIDTH / 2 - 60;
+      const px  = Math.max(innerLeft, Math.min(innerRight, this.powerUpIndicatorX));
+      const pu  = new PowerUp(px, this.powerUpTypePreview, this.physics);
+      this.powerUps.push(pu);
+      this.powerUpLayer.addChild(pu.container);
+    }
+
+    // Update and pick up power-ups
+    for (const pu of this.powerUps) {
+      pu.update(dt, this.platformData);
+      if (pu.isDead || pu.isPickedUp) continue;
+      const idx = pu.tryPickup(liveChars);
+      if (idx !== -1) {
+        liveChars[idx].applyPowerUp(pu.type);
+        pu.collect();
+      }
+    }
+
     // Update coins
     for (const coin of this.coins) coin.update(dt, this.platformData);
 
@@ -528,6 +697,7 @@ export class Game {
     // Physics step: push AI positions → engine → read results back
     for (const c of liveChars) c.syncToBody(dt);
     for (const coin of this.coins) if (!coin.isDead && !coin.isPickedUp) this.physics.updatePlatformPassthrough(coin.body);
+    for (const pu of this.powerUps) if (!pu.isDead && !pu.isPickedUp && !pu.isOnGround) this.physics.updatePlatformPassthrough(pu.body);
     this.physics.step(dt);
     for (const c of liveChars) c.syncFromBody(this.platformData);
 
@@ -605,6 +775,10 @@ export class Game {
     });
     this.coins = this.coins.filter(coin => {
       if (coin.isDead) { this.coinLayer.removeChild(coin.container); coin.destroy(); return false; }
+      return true;
+    });
+    this.powerUps = this.powerUps.filter(pu => {
+      if (pu.isDead) { this.powerUpLayer.removeChild(pu.container); pu.destroy(); return false; }
       return true;
     });
     this.damageLabels = this.damageLabels.filter(l => {
@@ -895,11 +1069,16 @@ export class Game {
     for (const c of this.characters)    { c.destroy(); }
     for (const p of this.projectiles)   { p.destroy(); }
     for (const coin of this.coins)      { coin.destroy(); }
+    for (const pu of this.powerUps)     { pu.destroy(); }
     for (const l of this.damageLabels)  { l.destroy(); }
     this.characters   = [];
     this.projectiles  = [];
     this.coins        = [];
+    this.powerUps     = [];
     this.damageLabels = [];
+    this.powerUpTimer           = 0;
+    this.powerUpIndicatorActive = false;
+    this.powerUpLastCountdown   = -1;
     this.isOver                = false;
     this.nextCharId            = 1;
     this.freeCharIds           = [];

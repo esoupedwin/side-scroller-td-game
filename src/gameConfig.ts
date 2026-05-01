@@ -167,8 +167,6 @@ export const GameConfig = {
     dropBounceVyMin:    160,    // px/s — upward bounce speed (min)
     dropBounceVyMax:    240,    // px/s — upward bounce speed (max)
     coinBounceDamping:    0.78, // restitution — fraction of vy retained on each bounce
-    coinBounceXFriction:  0.62, // legacy (unused by Matter.js path)
-    coinBounceSettleVy:   65,   // legacy (unused by Matter.js path)
     coinBounceInitVxMin:  60,   // px/s — horizontal kick on character-dropped coins (min)
     coinBounceInitVxMax:  130,  // px/s — horizontal kick on character-dropped coins (max)
     coinThrowVx:          300,  // px/s — horizontal component of throw (60° → vy ≈ vx × √3)
@@ -197,6 +195,20 @@ export const GameConfig = {
       lifetimeSec: 1.0,
       risePx:      38,   // total upward travel over lifetime
     },
+  },
+
+  powerUp: {
+    pickupDist:  30,    // px — horizontal pickup radius
+    lifetimeSec: 20,    // seconds on ground before expiry
+    bobAmp:      4,     // px vertical bob amplitude
+    bobFreq:     2.2,   // Hz
+    bodyRadius:  20,    // physics circle radius
+    speedMult:   2.5,   // speed multiplier for speed power-up
+    speedDurSec: 15,    // seconds the speed boost lasts
+    atkMult:     2.0,   // attack multiplier for attack power-up
+    dropIntervalSec: 40, // seconds between power-up drops
+    indicatorLeadSec: 20, // seconds before drop that indicator appears
+    indicatorDriftSpeed: 0.667, // fraction of full drift speed (1 = original, 2/3 = 3× slower)
   },
 
   promotions: {

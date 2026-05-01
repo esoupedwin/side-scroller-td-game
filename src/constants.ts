@@ -5,6 +5,7 @@ const ch    = characters;
 const proj  = GameConfig.projectiles;
 const ui    = GameConfig.ui;
 const promo = GameConfig.promotions;
+const pu    = GameConfig.powerUp;
 
 export const VIEWPORT_WIDTH   = canvas.width;        // visible canvas width (1248 px)
 export const GAME_WIDTH       = GameConfig.worldWidth; // scrollable world width (2246 px)
@@ -80,8 +81,6 @@ export const COIN_DROP_VX_MAX    = economy.dropBounceVxMax;
 export const COIN_DROP_VY_MIN    = economy.dropBounceVyMin;
 export const COIN_DROP_VY_MAX    = economy.dropBounceVyMax;
 export const COIN_BOUNCE_DAMPING     = economy.coinBounceDamping;
-export const COIN_BOUNCE_X_FRICTION  = economy.coinBounceXFriction;
-export const COIN_BOUNCE_SETTLE_VY   = economy.coinBounceSettleVy;
 export const COIN_BOUNCE_INIT_VX_MIN = economy.coinBounceInitVxMin;
 export const COIN_BOUNCE_INIT_VX_MAX = economy.coinBounceInitVxMax;
 export const COIN_DROP_START_Y       = economy.coinDropStartY;
@@ -103,6 +102,18 @@ export const PROJ_TOWER_SPLASH   = proj.towerSplashBonus;
 // ── UI ───────────────────────────────────────────────────────────────────────
 export const DMG_LABEL_LIFETIME  = ui.damageLabel.lifetimeSec;
 export const DMG_LABEL_RISE      = ui.damageLabel.risePx;
+
+// ── Power-ups ────────────────────────────────────────────────────────────────
+export const POWERUP_PICKUP_DIST    = pu.pickupDist;
+export const POWERUP_LIFETIME_S     = pu.lifetimeSec;
+export const POWERUP_BOB_AMP        = pu.bobAmp;
+export const POWERUP_BOB_FREQ       = pu.bobFreq;
+export const POWERUP_BODY_RADIUS    = pu.bodyRadius;
+export const POWERUP_SPEED_MULT     = pu.speedMult;
+export const POWERUP_SPEED_DUR_S    = pu.speedDurSec;
+export const POWERUP_ATK_MULT       = pu.atkMult;
+export const POWERUP_DROP_INTERVAL  = pu.dropIntervalSec;
+export const POWERUP_INDICATOR_LEAD = pu.indicatorLeadSec;
 
 // ── Promotions ───────────────────────────────────────────────────────────────
 export const PROMO_KILL_AP     = promo.killAP;

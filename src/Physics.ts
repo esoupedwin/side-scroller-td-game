@@ -13,6 +13,7 @@ export const CAT_CHARACTER = 0x0004;
 export const CAT_COIN      = 0x0008;
 export const CAT_WALL      = 0x0010;
 export const CAT_TOWER     = 0x0020;
+export const CAT_POWERUP   = 0x0040;
 
 export class Physics {
   readonly engine: Matter.Engine;
@@ -38,7 +39,7 @@ export class Physics {
         isStatic: true,
         label: 'ground',
         friction: SURFACE_FRICTION, frictionStatic: 0, restitution: 0,
-        collisionFilter: { category: CAT_GROUND, mask: CAT_CHARACTER | CAT_COIN },
+        collisionFilter: { category: CAT_GROUND, mask: CAT_CHARACTER | CAT_COIN | CAT_POWERUP },
       },
     );
 
@@ -51,7 +52,7 @@ export class Physics {
         isStatic: true,
         label: 'platform',
         friction: SURFACE_FRICTION, frictionStatic: 0, restitution: 0,
-        collisionFilter: { category: CAT_PLATFORM, mask: CAT_CHARACTER | CAT_COIN },
+        collisionFilter: { category: CAT_PLATFORM, mask: CAT_CHARACTER | CAT_COIN | CAT_POWERUP },
       },
     );
 
@@ -62,7 +63,7 @@ export class Physics {
     const wallOpts = (label: string): Matter.IBodyDefinition => ({
       isStatic: true, label,
       friction: 0, frictionStatic: 0, restitution: 0.1,
-      collisionFilter: { category: CAT_WALL, mask: CAT_COIN },
+      collisionFilter: { category: CAT_WALL, mask: CAT_COIN | CAT_POWERUP },
     });
     const leftWall = Matter.Bodies.rectangle(
       PLAYER_TOWER_X - TOWER_WIDTH / 2 - wallThick / 2, wallCenterY,
@@ -135,7 +136,16 @@ export class Physics {
       isStatic: true,
       label: 'tower',
       friction: 0, frictionStatic: 0, restitution: 0.2,
-      collisionFilter: { category: CAT_TOWER, mask: CAT_CHARACTER | CAT_COIN },
+      collisionFilter: { category: CAT_TOWER, mask: CAT_CHARACTER | CAT_COIN | CAT_POWERUP },
+    });
+    Matter.Composite.add(this.engine.world, body);
+    return body;
+  }
+
+  createPowerUpBody(x: number, y: number): Matter.Body {
+    const body = Matter.Bodies.circle(x, y, 20, {
+      friction: 0.05, frictionAir: 0.004, restitution: 0.5,
+      collisionFilter: { category: CAT_POWERUP, mask: CAT_GROUND | CAT_PLATFORM | CAT_WALL | CAT_TOWER },
     });
     Matter.Composite.add(this.engine.world, body);
     return body;

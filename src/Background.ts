@@ -142,19 +142,22 @@ export function buildCoinBox(world: PIXI.Container) {
 
   world.addChild(g);
 
-  // "?" label centred in the box
-  const label = new PIXI.Text('?', {
-    fontFamily: 'Arial Black, Arial',
-    fontSize:   26,
-    fontWeight: 'bold',
-    fill:       0xffffff,
-    stroke:     0x7a4a06,
-    strokeThickness: 4,
-  } as Partial<PIXI.ITextStyle>);
-  label.anchor.set(0.5);
-  label.x = x;
-  label.y = y + h / 2;
-  world.addChild(label);
+  // Star icon centred in the box
+  const cx = x;
+  const cy = y + h / 2;
+  const outerR = 15, innerR = 6, points = 5;
+  const starPts: number[] = [];
+  for (let i = 0; i < points * 2; i++) {
+    const r     = i % 2 === 0 ? outerR : innerR;
+    const angle = (i * Math.PI) / points - Math.PI / 2;
+    starPts.push(cx + r * Math.cos(angle), cy + r * Math.sin(angle));
+  }
+  // Outline / shadow
+  g.lineStyle(4, 0x7a4a06, 1);
+  g.beginFill(0xffffff);
+  g.drawPolygon(starPts);
+  g.endFill();
+  g.lineStyle(0);
 
 }
 

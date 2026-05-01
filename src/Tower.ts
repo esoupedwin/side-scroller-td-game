@@ -31,7 +31,7 @@ export class Tower {
     this.container = new PIXI.Container();
 
     const color = side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
-    const cx    = side === 'player' ? x - TOWER_WIDTH / 2 : x - TOWER_WIDTH / 2;
+    const cx    = x - TOWER_WIDTH / 2;
 
     // Body
     this.body = new PIXI.Graphics();
@@ -53,7 +53,7 @@ export class Tower {
     // HP bar background
     const barBg = new PIXI.Graphics();
     barBg.beginFill(0x333333);
-    barBg.drawRect(cx - 4, GROUND_Y - TOWER_HEIGHT - 18, TOWER_WIDTH + 8, 10);
+    barBg.drawRect(cx - 4, GROUND_Y - TOWER_HEIGHT - 32, TOWER_WIDTH + 8, 10);
     barBg.endFill();
     this.container.addChild(barBg);
 
@@ -69,7 +69,7 @@ export class Tower {
       fontWeight: 'bold',
     });
     this.label.x = cx + TOWER_WIDTH / 2 - this.label.width / 2;
-    this.label.y = GROUND_Y - TOWER_HEIGHT - 30;
+    this.label.y = GROUND_Y - TOWER_HEIGHT - 44;
     this.container.addChild(this.label);
   }
 
@@ -82,7 +82,7 @@ export class Tower {
 
     this.bar.clear();
     this.bar.beginFill(color);
-    this.bar.drawRect(cx - 4, GROUND_Y - TOWER_HEIGHT - 18, (TOWER_WIDTH + 8) * ratio, 10);
+    this.bar.drawRect(cx - 4, GROUND_Y - TOWER_HEIGHT - 32, (TOWER_WIDTH + 8) * ratio, 10);
     this.bar.endFill();
   }
 

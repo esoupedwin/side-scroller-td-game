@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import {
-  GROUND_Y, PLAYER_COLOR, ENEMY_COLOR,
+  PLAYER_COLOR, ENEMY_COLOR,
   BULLET_SPEED, BULLET_MIN_TIME, BULLET_ARC_FACTOR, BULLET_SPLASH,
   ARROW_SPEED, ARROW_MIN_TIME, ARROW_ARC_FACTOR, ARROW_SPLASH,
   PROJ_TOWER_SPLASH,
@@ -193,8 +193,6 @@ export class Projectile {
       targetTower.takeDamage(this.damage);
     }
   }
-
-  static groundY() { return GROUND_Y; }
 
   destroy() {
     this.container.destroy({ children: true });

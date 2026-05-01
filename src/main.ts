@@ -123,7 +123,7 @@ function handleTimeChanged(seconds: number) {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   countdownEl.textContent = `${mins}:${String(secs).padStart(2, '0')}`;
-  if (seconds <= 30) {
+  if (seconds < 20) {
     countdownEl.classList.add('countdown-urgent');
   } else {
     countdownEl.classList.remove('countdown-urgent');

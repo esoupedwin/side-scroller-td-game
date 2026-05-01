@@ -11,6 +11,7 @@ import {
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
+  POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
@@ -136,6 +137,11 @@ export class Character {
   private coinCarryKind:  CoinKind = 'gold';
   private targetCoin:   Coin | null = null;
   private coinCarryGfx: PIXI.Graphics | null = null;
+
+  // Power-up effects
+  private powerUpSpeedMult  = 1.0;
+  private powerUpSpeedTimer = 0;
+  private powerUpAtkMult    = 1.0;
 
   constructor(side: Side, startX: number, config: CharacterConfig, id: number, name: string, physics: Physics) {
     this.side    = side;
@@ -894,11 +900,28 @@ export class Character {
 
   get claimedCoin(): Coin | null { return this.targetCoin; }
 
+  private get isRanged() {
+    const t = this.config.type;
+    return t === 'archer' || t === 'rifleman' || t === 'sniper';
+  }
+
+  private static isMeleeType(type: CharacterConfig['type']) {
+    return type === 'warrior' || type === 'heavy';
+  }
+
   update(ctx: UpdateContext) {
     if (this.isDead) return;
 
     this.attackTimer      = Math.max(0, this.attackTimer      - ctx.dt);
     this.evasiveJumpTimer = Math.max(0, this.evasiveJumpTimer - ctx.dt);
+
+    if (this.powerUpSpeedTimer > 0) {
+      this.powerUpSpeedTimer -= ctx.dt;
+      if (this.powerUpSpeedTimer <= 0) {
+        this.powerUpSpeedTimer = 0;
+        this.powerUpSpeedMult  = 1.0;
+      }
+    }
 
     if (this.config.type === 'medic') this.tickHeal(ctx.dt, ctx.allChars);
 
@@ -1121,7 +1144,6 @@ export class Character {
       return;
     }
 
-    const isRanged    = this.config.type === 'archer' || this.config.type === 'rifleman' || this.config.type === 'sniper';
     const dir         = this.side === 'player' ? 1 : -1;
     const nearest     = this.nearestEnemy(allChars, this.config.attackRange);
     const distToTower = Math.abs(this.x - enemyTowerFrontX);
@@ -1131,9 +1153,9 @@ export class Character {
       this.attackEnemy(nearest, onFire);
 
       // Kiting: ranged units back away when a melee enemy closes in
-      if (isRanged) {
+      if (this.isRanged) {
         const dist        = Math.abs(this.x - nearest.x);
-        const enemyIsMelee = nearest.config.type === 'warrior' || nearest.config.type === 'heavy';
+        const enemyIsMelee = Character.isMeleeType(nearest.config.type);
         if (enemyIsMelee && dist < RANGED_KITE_THRESHOLD) {
           const retreatX = this.x - dir * this.moveSpeed * dt;
           // Don't back into own tower
@@ -1281,7 +1303,6 @@ export class Character {
     const { dt, allChars, enemyTowerFrontX, homeTowerFrontX, onFire, platforms } = ctx;
     if (this.isAirborne) return;
 
-    const isRanged = this.config.type === 'archer' || this.config.type === 'rifleman' || this.config.type === 'sniper';
     const dir   = this.side === 'player' ? 1 : -1;
     const safeX = enemyTowerFrontX - dir * (TOWER_ATTACK_RANGE + HARASS_SAFETY_BUFFER);
 
@@ -1302,8 +1323,8 @@ export class Character {
       this.attackEnemy(inRange, onFire);
 
       // Kiting: ranged harass units retreat when a melee enemy closes in
-      if (isRanged) {
-        const isMelee = inRange.config.type === 'warrior' || inRange.config.type === 'heavy';
+      if (this.isRanged) {
+        const isMelee = Character.isMeleeType(inRange.config.type);
         if (isMelee && Math.abs(this.x - inRange.x) < RANGED_KITE_THRESHOLD) {
           const retreatX = this.x - dir * this.moveSpeed * dt;
           this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
@@ -1342,7 +1363,7 @@ export class Character {
         this.x = clamp(this.x + dir * this.moveSpeed * dt);
         if (this.state !== 'fighting') this.state = 'marching';
       } else if (toEnemy <= 0) {
-        if (!isRanged && closestDist <= this.config.attackRange * 4) {
+        if (!this.isRanged && closestDist <= this.config.attackRange * 4) {
           // Melee harass: pursue enemy that's behind rather than drifting away
           this.x -= dir * this.moveSpeed * dt;
           if (this.state !== 'fighting') this.state = 'marching';
@@ -1379,8 +1400,7 @@ export class Character {
     const { dt, allChars, homeTowerFrontX, onFire } = ctx;
     if (this.isAirborne) return;
 
-    const isRanged = this.config.type === 'archer' || this.config.type === 'rifleman' || this.config.type === 'sniper';
-    const dir      = this.side === 'player' ? 1 : -1;
+    const dir = this.side === 'player' ? 1 : -1;
 
     const pickSpot = () =>
       homeTowerFrontX + dir * (10 + Math.random() * (TOWER_ATTACK_RANGE - 20));
@@ -1406,8 +1426,8 @@ export class Character {
       this.attackEnemy(target, onFire);
 
       // Ranged: kite back from closing melee, stay within own safe zone
-      if (isRanged) {
-        const isMelee = target.config.type === 'warrior' || target.config.type === 'heavy';
+      if (this.isRanged) {
+        const isMelee = Character.isMeleeType(target.config.type);
         if (isMelee && Math.abs(this.x - target.x) < RANGED_KITE_THRESHOLD) {
           const retreatX = this.x - dir * this.moveSpeed * dt;
           this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
@@ -1476,11 +1496,23 @@ export class Character {
   }
 
   private get moveSpeed() {
-    return this.config.speed * (1 + this.rank * PROMO_SPEED_BOOST) * (this.carryingCoin ? CHAR_CARRY_SPEED_MULT : 1);
+    return this.config.speed * (1 + this.rank * PROMO_SPEED_BOOST) * (this.carryingCoin ? CHAR_CARRY_SPEED_MULT : 1) * this.powerUpSpeedMult;
   }
 
   private get effectiveAtk() {
-    return this.config.attackPower * (1 + this.rank * PROMO_ATK_BOOST);
+    return this.config.attackPower * (1 + this.rank * PROMO_ATK_BOOST) * this.powerUpAtkMult;
+  }
+
+  applyPowerUp(type: 'heal' | 'speed' | 'attack') {
+    if (type === 'heal') {
+      this.hp = this.maxHp;
+      this.drawBar();
+    } else if (type === 'speed') {
+      this.powerUpSpeedMult  = POWERUP_SPEED_MULT;
+      this.powerUpSpeedTimer = POWERUP_SPEED_DUR_S;
+    } else {
+      this.powerUpAtkMult = POWERUP_ATK_MULT;
+    }
   }
 
   private get projectileKind(): 'arrow' | 'bullet' {
