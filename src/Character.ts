@@ -5,13 +5,14 @@ import {
   JUMP_VELOCITY,
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
-  CHAR_HEAL_RANGE, CHAR_HEAL_RATE, SAFE_ZONE_HEAL_RATE, HIT_JUMP_CHANCE,
+  CHAR_HEAL_RANGE, CHAR_HEAL_RATE, SAFE_ZONE_HEAL_RATE, MEDIC_PASSIVE_HEAL_RATE, HIT_JUMP_CHANCE,
   PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, RANGED_KITE_THRESHOLD,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
   POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
+  GRENADE_MAX_VX,
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
@@ -23,7 +24,7 @@ import { COIN_PALETTE } from './Coin';
 import type { PlatformData } from './Platform';
 
 export interface CharacterConfig {
-  type:        'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker';
+  type:        'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier';
   hp:          number;
   speed:       number;
   attackRange: number;
@@ -39,7 +40,7 @@ export interface FireRequest {
   sx: number; sy: number;
   tx: number; ty: number;
   damage:         number;
-  projectileKind: 'arrow' | 'bullet';
+  projectileKind: 'arrow' | 'bullet' | 'grenade';
   shooter?:       Character;
 }
 
@@ -110,6 +111,10 @@ export class Character {
   private defendTargetX      = -1;  // -1 = not yet assigned
   private defendRoamTimer    = 0;
   private healParticleTimer  = 0;
+  private medicHealTimer     = 0;   // > 0 while being healed by a medic this tick
+  private healAura:           PIXI.Graphics | null = null;
+  private healAuraT           = 0;
+  private healAuraActive      = false;
   private readonly healParticles: Array<{
     gfx:  PIXI.Graphics;
     relY: number;
@@ -206,13 +211,14 @@ export class Character {
   // ── Sprite builders ──────────────────────────────────────────────────────────
 
   private buildSprite() {
-    if      (this.config.type === 'archer')   this.buildArcherSprite();
-    else if (this.config.type === 'rifleman') this.buildRiflemanSprite();
-    else if (this.config.type === 'sniper')   this.buildSniperSprite();
-    else if (this.config.type === 'medic')    this.buildMedicSprite();
-    else if (this.config.type === 'heavy')    this.buildHeavySprite();
-    else if (this.config.type === 'tanker')   this.buildTankerSprite();
-    else                                       this.buildWarriorSprite();
+    if      (this.config.type === 'archer')    this.buildArcherSprite();
+    else if (this.config.type === 'rifleman')  this.buildRiflemanSprite();
+    else if (this.config.type === 'sniper')    this.buildSniperSprite();
+    else if (this.config.type === 'medic')     this.buildMedicSprite();
+    else if (this.config.type === 'heavy')     this.buildHeavySprite();
+    else if (this.config.type === 'tanker')    this.buildTankerSprite();
+    else if (this.config.type === 'grenadier') this.buildGrenadierSprite();
+    else                                        this.buildWarriorSprite();
   }
 
   // Creates two animated leg containers (added to container before body, so legs render behind).
@@ -604,6 +610,55 @@ export class Character {
     this.container.addChild(g);
   }
 
+  private buildGrenadierSprite() {
+    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const w = this.config.width, h = this.config.height;
+    const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.32, w * 0.32, w * 0.34, h * 0.45, 0.58);
+
+    const g = new PIXI.Graphics();
+
+    // Body — olive drab jacket
+    g.beginFill(0x4a5a2a, 0.92);
+    g.drawRoundedRect(-w * 0.5, h * 0.18, w, h * 0.42, 3);
+    g.endFill();
+    // Chest ammo pouches
+    g.beginFill(0x3a4a1a, 0.8);
+    g.drawRoundedRect(-w * 0.18, h * 0.22, w * 0.36, h * 0.14, 2);
+    g.endFill();
+
+    // Head
+    g.beginFill(color, 0.88);
+    g.drawCircle(0, h * 0.10, w * 0.37);
+    g.endFill();
+    // Helmet
+    g.beginFill(0x3a4a1a);
+    g.drawEllipse(0, h * 0.04, w * 0.43, w * 0.28);
+    g.endFill();
+
+    // Grenade launcher — thick tube at arm/shoulder height
+    const tubeY  = h * 0.26;
+    const tubeLen = w * 0.90;
+    const tubeH  = h * 0.11;
+    g.beginFill(0x222222);
+    g.drawRoundedRect(dir > 0 ? w * 0.06 : -w * 0.96, tubeY, tubeLen, tubeH, 2);
+    g.endFill();
+    // Tube highlight
+    g.beginFill(0xffffff, 0.10);
+    g.drawRoundedRect(dir > 0 ? w * 0.06 : -w * 0.96, tubeY, tubeLen, tubeH * 0.4, 2);
+    g.endFill();
+    // Barrel opening at the front
+    g.beginFill(0x111111);
+    g.drawCircle(dir > 0 ? w * 0.96 : -w * 0.96, tubeY + tubeH * 0.5, tubeH * 0.6);
+    g.endFill();
+    // Grip handle under tube
+    g.beginFill(0x333333);
+    g.drawRoundedRect(dir > 0 ? w * 0.12 : -w * 0.22, tubeY + tubeH, w * 0.10, h * 0.12, 2);
+    g.endFill();
+
+    this.container.addChild(g);
+  }
+
   private buildMedicSprite() {
     const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const w = this.config.width, h = this.config.height;
@@ -635,6 +690,11 @@ export class Character {
     g.drawRect(-1.5, h * 0.02 - 9, 3, 8);
     g.drawRect(-5,   h * 0.02 - 6, 10, 3);
     g.endFill();
+
+    // Pulsing heal aura — inserted at index 0 so it sits behind the sprite
+    const aura = new PIXI.Graphics();
+    this.container.addChildAt(aura, 0);
+    this.healAura = aura;
 
     this.container.addChild(g);
   }
@@ -882,6 +942,10 @@ export class Character {
     this.drawBar();
   }
 
+  notifyHealedByMedic() {
+    this.medicHealTimer = 0.35;
+  }
+
   /** Called by Game.ts after spawning the dropped coin so the character chases it. */
   recoverCoin(coin: Coin) {
     this.targetCoin = coin;
@@ -898,11 +962,17 @@ export class Character {
 
   get bowY() { return this.y - this.config.height * 0.62; }
 
+  /** Approximate horizontal velocity (px/s) — used by grenadier lead targeting. */
+  get approxVx(): number {
+    if (this.state === 'dead' || this.state === 'fighting') return 0;
+    return this.moveSpeed * this.lastMoveDir;
+  }
+
   get claimedCoin(): Coin | null { return this.targetCoin; }
 
   private get isRanged() {
     const t = this.config.type;
-    return t === 'archer' || t === 'rifleman' || t === 'sniper';
+    return t === 'archer' || t === 'rifleman' || t === 'sniper' || t === 'grenadier';
   }
 
   private static isMeleeType(type: CharacterConfig['type']) {
@@ -923,7 +993,10 @@ export class Character {
       }
     }
 
-    if (this.config.type === 'medic') this.tickHeal(ctx.dt, ctx.allChars);
+    if (this.config.type === 'medic') {
+      this.tickHeal(ctx.dt, ctx.allChars);
+      this.tickHealAura(ctx.dt);
+    }
 
     // Evasive jump on hit
     if (this.pendingHitJump) {
@@ -934,6 +1007,7 @@ export class Character {
     // Passive regen while inside own tower's attack range
     const inSafeZone = this.hp < this.maxHp && Math.abs(this.x - ctx.homeTowerFrontX) <= TOWER_ATTACK_RANGE;
     if (inSafeZone) this.heal(SAFE_ZONE_HEAL_RATE * ctx.dt);
+    if (this.config.type === 'medic' && !inSafeZone && this.hp < this.maxHp) this.heal(MEDIC_PASSIVE_HEAL_RATE * ctx.dt);
     this.tickHealParticles(ctx.dt, inSafeZone);
 
     if (this.coinPickupCooldown > 0) {
@@ -1459,11 +1533,33 @@ export class Character {
       const ratio = c.hp / c.maxHp;
       if (ratio < lowestRatio) { lowestRatio = ratio; target = c; }
     }
-    if (target) target.heal(CHAR_HEAL_RATE * dt);
+    if (target) {
+      target.heal(CHAR_HEAL_RATE * dt);
+      target.notifyHealedByMedic();
+      this.healAuraActive = true;
+    } else {
+      this.healAuraActive = false;
+    }
+  }
+
+  private tickHealAura(dt: number) {
+    if (!this.healAura) return;
+    this.healAuraT += dt;
+    const pulse = Math.sin(this.healAuraT * Math.PI * 2 * 2.5);
+    const alpha = this.healAuraActive ? 0.22 + 0.12 * pulse : 0;
+    const r     = 18 + 4 * pulse;
+    this.healAura.clear();
+    if (alpha > 0) {
+      this.healAura.lineStyle(2.5, 0x44ff88, alpha);
+      this.healAura.drawCircle(0, -this.config.height * 0.3, r);
+      this.healAura.lineStyle(1, 0x44ff88, alpha * 0.45);
+      this.healAura.drawCircle(0, -this.config.height * 0.3, r + 7);
+    }
   }
 
   private tickHealParticles(dt: number, healing: boolean) {
-    if (healing) {
+    this.medicHealTimer = Math.max(0, this.medicHealTimer - dt);
+    if (healing || this.medicHealTimer > 0) {
       this.healParticleTimer -= dt;
       if (this.healParticleTimer <= 0) {
         this.healParticleTimer = 0.28;
@@ -1503,21 +1599,34 @@ export class Character {
     return this.config.attackPower * (1 + this.rank * PROMO_ATK_BOOST) * this.powerUpAtkMult;
   }
 
-  applyPowerUp(type: 'heal' | 'speed' | 'attack') {
+  applyPowerUp(type: 'heal' | 'speed' | 'attack' | 'promote') {
     if (type === 'heal') {
       this.hp = this.maxHp;
       this.drawBar();
     } else if (type === 'speed') {
       this.powerUpSpeedMult  = POWERUP_SPEED_MULT;
       this.powerUpSpeedTimer = POWERUP_SPEED_DUR_S;
-    } else {
+    } else if (type === 'attack') {
       this.powerUpAtkMult = POWERUP_ATK_MULT;
+    } else {
+      // Promote: advance one rank, restore HP, play the promotion animation
+      if (this.rank < 3) {
+        this.ap   = PROMO_THRESHOLDS[this.rank];  // jump AP to current threshold so earnAP triggers correctly
+        this.rank = (this.rank + 1) as 0 | 1 | 2 | 3;
+        this.hp   = this.maxHp;
+        this.pendingPromotion = true;
+        this.drawRankBadge();
+        this.drawBar();
+        this.startPromoAnim();
+      }
     }
   }
 
-  private get projectileKind(): 'arrow' | 'bullet' {
-    return (this.config.type === 'rifleman' || this.config.type === 'sniper' || this.config.type === 'tanker')
-      ? 'bullet' : 'arrow';
+  private get projectileKind(): 'arrow' | 'bullet' | 'grenade' {
+    const t = this.config.type;
+    if (t === 'grenadier') return 'grenade';
+    if (t === 'rifleman' || t === 'sniper' || t === 'tanker') return 'bullet';
+    return 'arrow';
   }
 
   /**
@@ -1561,13 +1670,31 @@ export class Character {
     if (this.config.type === 'warrior' || this.config.type === 'heavy') {
       target.takeDamage(damage, miss ? undefined : this);
     } else if (onFire) {
-      const snapped = this.snapFireAngle(this.x, this.bowY, target.x, target.bowY);
-      onFire({
-        side: this.side, sx: this.x, sy: this.bowY,
-        tx: snapped.tx,  ty: snapped.ty,
-        damage, projectileKind: this.projectileKind,
-        shooter: miss ? undefined : this,
-      });
+      if (this.config.type === 'grenadier') {
+        // Lead targeting: predict where the target will be when the grenade arrives.
+        // vxAbs mirrors the formula in Grenade.ts; two iterations refine the estimate.
+        const leadTime = (dx: number) => {
+          const vxAbs = Math.max(GRENADE_MAX_VX * 0.45, Math.min(Math.abs(dx) * 0.55, GRENADE_MAX_VX));
+          return Math.abs(dx) / vxAbs;
+        };
+        const dx0  = target.x - this.x;
+        const tx0  = target.x + target.approxVx * leadTime(dx0);
+        const tx   = target.x + target.approxVx * leadTime(tx0 - this.x);
+        onFire({
+          side: this.side, sx: this.x, sy: this.bowY,
+          tx,              ty: target.bowY,
+          damage, projectileKind: 'grenade',
+          shooter: miss ? undefined : this,
+        });
+      } else {
+        const snapped = this.snapFireAngle(this.x, this.bowY, target.x, target.bowY);
+        onFire({
+          side: this.side, sx: this.x, sy: this.bowY,
+          tx: snapped.tx,  ty: snapped.ty,
+          damage, projectileKind: this.projectileKind,
+          shooter: miss ? undefined : this,
+        });
+      }
     }
     this.attackTimer = this.config.fireRate;
   }
@@ -1583,12 +1710,20 @@ export class Character {
     if (this.config.type === 'warrior' || this.config.type === 'heavy') {
       onDamageTower?.(this.effectiveAtk);
     } else if (onFire) {
-      const snapped = this.snapFireAngle(this.x, this.bowY, towerFrontX, towerY);
-      onFire({
-        side: this.side, sx: this.x, sy: this.bowY,
-        tx: snapped.tx,  ty: snapped.ty,
-        damage: this.effectiveAtk, projectileKind: this.projectileKind,
-      });
+      if (this.config.type === 'grenadier') {
+        onFire({
+          side: this.side, sx: this.x, sy: this.bowY,
+          tx: towerFrontX, ty: towerY,
+          damage: this.effectiveAtk, projectileKind: 'grenade',
+        });
+      } else {
+        const snapped = this.snapFireAngle(this.x, this.bowY, towerFrontX, towerY);
+        onFire({
+          side: this.side, sx: this.x, sy: this.bowY,
+          tx: snapped.tx,  ty: snapped.ty,
+          damage: this.effectiveAtk, projectileKind: this.projectileKind,
+        });
+      }
     }
   }
 

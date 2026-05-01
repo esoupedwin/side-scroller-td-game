@@ -6,6 +6,7 @@ const proj  = GameConfig.projectiles;
 const ui    = GameConfig.ui;
 const promo = GameConfig.promotions;
 const pu    = GameConfig.powerUp;
+const gr    = GameConfig.grenade;
 
 export const VIEWPORT_WIDTH   = canvas.width;        // visible canvas width (1248 px)
 export const GAME_WIDTH       = GameConfig.worldWidth; // scrollable world width (2246 px)
@@ -68,8 +69,6 @@ export const TOWER_KILL_REWARD   = economy.towerKillReward;
 export const COIN_DROP_MIN_MS    = economy.dropIntervalMinMs;
 export const COIN_DROP_MAX_MS    = economy.dropIntervalMaxMs;
 export const COIN_LIFETIME_S     = economy.coinLifetimeSec;
-export const COIN_DROP_X_MIN          = economy.dropZoneXMin;
-export const COIN_DROP_X_MAX          = economy.dropZoneXMax;
 export const LOW_BALANCE_THRESHOLD    = economy.lowBalanceThreshold;
 export const LOW_BALANCE_INCOME_MULT  = economy.lowBalanceIncomeMult;
 export const SILVER_COIN_VALUE        = economy.silverCoinValue;
@@ -83,7 +82,6 @@ export const COIN_DROP_VY_MAX    = economy.dropBounceVyMax;
 export const COIN_BOUNCE_DAMPING     = economy.coinBounceDamping;
 export const COIN_BOUNCE_INIT_VX_MIN = economy.coinBounceInitVxMin;
 export const COIN_BOUNCE_INIT_VX_MAX = economy.coinBounceInitVxMax;
-export const COIN_DROP_START_Y       = economy.coinDropStartY;
 export const COIN_FRICTION           = economy.coinFriction;
 export const COIN_FRICTION_AIR       = economy.coinFrictionAir;
 export const SURFACE_FRICTION        = economy.surfaceFriction;
@@ -127,7 +125,8 @@ export const PROMO_THRESHOLDS: number[] = [...promo.thresholds];
 // ── Characters ───────────────────────────────────────────────────────────────
 export const CHAR_HEAL_RANGE        = ch.healRange;
 export const CHAR_HEAL_RATE         = ch.healRate;
-export const SAFE_ZONE_HEAL_RATE    = ch.safeZoneHealRate;
+export const SAFE_ZONE_HEAL_RATE      = ch.safeZoneHealRate;
+export const MEDIC_PASSIVE_HEAL_RATE  = ch.medicPassiveHealRate;
 export const HIT_JUMP_CHANCE        = ch.hitJumpChance;
 export const HARASS_SAFETY_BUFFER   = ch.harassSafetyBuffer;
 export const RANGED_KITE_THRESHOLD  = ch.rangedKiteThreshold;
@@ -138,13 +137,14 @@ export const COIN_THROW_VY          = GameConfig.economy.coinThrowVy;
 export const COIN_THROW_MIN_DIST    = GameConfig.towers.attackRange + 50;
 
 export const CHAR_COST = {
-  warrior:  ch.warrior.cost,
-  archer:   ch.archer.cost,
-  rifleman: ch.rifleman.cost,
-  sniper:   ch.sniper.cost,
-  medic:    ch.medic.cost,
-  heavy:    ch.heavy.cost,
-  tanker:   ch.tanker.cost,
+  warrior:   ch.warrior.cost,
+  archer:    ch.archer.cost,
+  rifleman:  ch.rifleman.cost,
+  sniper:    ch.sniper.cost,
+  medic:     ch.medic.cost,
+  heavy:     ch.heavy.cost,
+  tanker:    ch.tanker.cost,
+  grenadier: ch.grenadier.cost,
 } as const;
 
 export const CHAR_WIDTH  = ch.width;
@@ -233,3 +233,21 @@ export const TANKER = {
   width:       ch.tanker.width,
   height:      ch.tanker.height,
 };
+
+export const GRENADIER = {
+  type:        ch.grenadier.type,
+  hp:          ch.grenadier.hp,
+  speed:       ch.grenadier.speed,
+  attackRange: ch.grenadier.attackRange,
+  attackPower: ch.grenadier.attackPower,
+  fireRate:    ch.grenadier.fireRate,
+  critical:    ch.grenadier.critical,
+  width:       ch.width,
+  height:      ch.height,
+};
+
+// ── Grenade ──────────────────────────────────────────────────────────────────
+export const GRENADE_FUSE_S       = gr.fuseSec;
+export const GRENADE_SPLASH_R     = gr.splashRadius;
+export const GRENADE_GRAVITY      = gr.gravity;
+export const GRENADE_MAX_VX       = gr.maxVx;

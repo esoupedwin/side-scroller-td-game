@@ -7,12 +7,13 @@ import {
 import type { Physics } from './Physics';
 import type { PlatformData } from './Platform';
 
-export type PowerUpType = 'heal' | 'speed' | 'attack';
+export type PowerUpType = 'heal' | 'speed' | 'attack' | 'promote';
 
 const TYPE_COLOR: Record<PowerUpType, number> = {
-  heal:   0x44dd88,
-  speed:  0x44aaff,
-  attack: 0xff8833,
+  heal:    0x44dd88,
+  speed:   0x44aaff,
+  attack:  0xff8833,
+  promote: 0xf0e040,
 };
 
 export class PowerUp {
@@ -74,8 +75,18 @@ export class PowerUp {
       this.icon.drawRect(-10, -3, 20, 6);
     } else if (this.type === 'speed') {
       this.icon.drawPolygon([2, -11, -4, 1, 2, 1, -2, 11, 8, -3, 2, -3]);
-    } else {
+    } else if (this.type === 'attack') {
       this.icon.drawPolygon([0, -11, 6, -3, 2, -3, 2, 11, -2, 11, -2, -3, -6, -3]);
+    } else {
+      // Promote: 5-pointed star
+      const R = 10, r = 4.5, pts = 5;
+      const verts: number[] = [];
+      for (let i = 0; i < pts * 2; i++) {
+        const ang = (i * Math.PI / pts) - Math.PI / 2;
+        const rad = i % 2 === 0 ? R : r;
+        verts.push(Math.cos(ang) * rad, Math.sin(ang) * rad);
+      }
+      this.icon.drawPolygon(verts);
     }
     this.icon.endFill();
   }

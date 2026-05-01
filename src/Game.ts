@@ -14,9 +14,11 @@ import { Tower } from './Tower';
 import type { TowerShot } from './Tower';
 import { Character, RANK_NAMES, type CharacterConfig, type FireRequest, type UpdateContext } from './Character';
 import { Projectile } from './Projectile';
+import { Grenade } from './Grenade';
 import { CharacterHUD } from './CharacterHUD';
 import { Coin, type CoinKind } from './Coin';
 import { PowerUp, type PowerUpType } from './PowerUp';
+import { Sheep } from './Sheep';
 import { DamageLabel } from './DamageLabel';
 import { Platform } from './Platform';
 import { pickName } from './names';
@@ -28,7 +30,8 @@ import {
   VIEWPORT_WIDTH, GAME_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
   PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER,
+  WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER, GRENADIER,
+  GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX,
   CPU_SPAWN_MIN_MS, CPU_SPAWN_MAX_MS, CPU_FIRST_SPAWN_MAX,
   STARTING_COINS, CHAR_COST,
   PASSIVE_INCOME_RATE, LOW_BALANCE_THRESHOLD, LOW_BALANCE_INCOME_MULT,
@@ -60,13 +63,14 @@ function withSpawnBoosts(cfg: CharacterConfig): CharacterConfig {
 }
 
 const CHAR_CONFIGS = {
-  warrior:  WARRIOR,
-  archer:   ARCHER,
-  rifleman: RIFLEMAN,
-  sniper:   SNIPER,
-  medic:    MEDIC,
-  heavy:    HEAVY,
-  tanker:   TANKER,
+  warrior:   WARRIOR,
+  archer:    ARCHER,
+  rifleman:  RIFLEMAN,
+  sniper:    SNIPER,
+  medic:     MEDIC,
+  heavy:     HEAVY,
+  tanker:    TANKER,
+  grenadier: GRENADIER,
 } as const;
 
 export class Game {
@@ -76,11 +80,15 @@ export class Game {
   private enemyTower!:  Tower;
   private characters:   Character[]  = [];
   private projectiles:  Projectile[] = [];
+  private grenades:     Grenade[]    = [];
   private coins:        Coin[]       = [];
   private powerUps:     PowerUp[]    = [];
+  private sheep:        Sheep | null = null;
   private unitLayer!:   PIXI.Container;
-  private projLayer!:   PIXI.Container;
+  private projLayer!:    PIXI.Container;
+  private grenadeLayer!: PIXI.Container;
   private coinLayer!:    PIXI.Container;
+  private sheepLayer!:   PIXI.Container;
   private powerUpLayer!: PIXI.Container;
   private labelLayer!:   PIXI.Container;
   private damageLabels:  DamageLabel[] = [];
@@ -229,13 +237,17 @@ export class Game {
     });
 
     this.coinLayer     = new PIXI.Container();
+    this.sheepLayer    = new PIXI.Container();
     this.powerUpLayer  = new PIXI.Container();
     this.projLayer     = new PIXI.Container();
+    this.grenadeLayer  = new PIXI.Container();
     this.unitLayer     = new PIXI.Container();
     this.labelLayer    = new PIXI.Container();
     this.world.addChild(this.coinLayer);
+    this.world.addChild(this.sheepLayer);
     this.world.addChild(this.powerUpLayer);
     this.world.addChild(this.projLayer);
+    this.world.addChild(this.grenadeLayer);
     this.world.addChild(this.unitLayer);
     this.world.addChild(this.labelLayer);
 
@@ -286,6 +298,13 @@ export class Game {
 
     this.app.stage.addChild(this.world);
 
+    // Sheep — spawns at a random x within the playable field
+    const sheepLeft  = PLAYER_TOWER_X + TOWER_WIDTH / 2 + 150;
+    const sheepRight = ENEMY_TOWER_X  - TOWER_WIDTH / 2 - 150;
+    const sheepX     = sheepLeft + Math.random() * (sheepRight - sheepLeft);
+    this.sheep = new Sheep(sheepX, this.physics);
+    this.sheepLayer.addChild(this.sheep.container);
+
     // World-space drop indicator (moves across the map, above all other layers)
     this.powerUpIndicatorContainer = new PIXI.Container();
     this.powerUpIndicatorGfx       = new PIXI.Graphics();
@@ -308,9 +327,10 @@ export class Game {
   }
 
   private readonly TYPE_COLORS: Record<PowerUpType, number> = {
-    heal:   0x44dd88,
-    speed:  0x44aaff,
-    attack: 0xff8833,
+    heal:    0x44dd88,
+    speed:   0x44aaff,
+    attack:  0xff8833,
+    promote: 0xf0e040,
   };
 
   private buildDropIndicatorGfx() {
@@ -335,8 +355,18 @@ export class Game {
       g.drawRect(-26, 18, 4, 12); g.drawRect(-29, 21, 10, 6);   // cross
     } else if (this.powerUpTypePreview === 'speed') {
       g.drawPolygon([-28, 17, -23, 26, -27, 26, -22, 35, -16, 22, -21, 22, -17, 14]); // bolt
-    } else {
+    } else if (this.powerUpTypePreview === 'attack') {
       g.drawPolygon([-22, 15, -19, 20, -21, 20, -21, 34, -25, 34, -25, 20, -27, 20]); // arrow up
+    } else {
+      // promote: small 5-pointed star centred at (-22, 25)
+      const cx = -22, cy = 25, R = 8, r = 3.5, pts = 5;
+      const verts: number[] = [];
+      for (let i = 0; i < pts * 2; i++) {
+        const ang = (i * Math.PI / pts) - Math.PI / 2;
+        const rad = i % 2 === 0 ? R : r;
+        verts.push(cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad);
+      }
+      g.drawPolygon(verts);
     }
     g.endFill();
 
@@ -361,7 +391,7 @@ export class Game {
   // ── Spawn ────────────────────────────────────────────────────────────────────
 
   /** Returns false if the player cannot afford this unit. */
-  spawnPlayer(type: 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker'): boolean {
+  spawnPlayer(type: 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier'): boolean {
     if (this.isOver) return false;
     const cost = CHAR_COST[type];
     if (this.coinBalance < cost) return false;
@@ -596,7 +626,7 @@ export class Game {
       // First frame entering the 20 s window: choose type + seed indicator position
       if (!this.powerUpIndicatorActive) {
         this.powerUpIndicatorActive    = true;
-        const types: PowerUpType[]     = ['heal', 'speed', 'attack'];
+        const types: PowerUpType[]     = ['heal', 'speed', 'attack', 'promote'];
         this.powerUpTypePreview        = types[Math.floor(Math.random() * types.length)];
         this.powerUpIndicatorX         = innerLeft + Math.random() * (innerRight - innerLeft);
         this.powerUpIndicatorTargetX   = this.powerUpIndicatorX;
@@ -613,7 +643,7 @@ export class Game {
         this.powerUpIndicatorTargetX    = innerLeft + Math.random() * (innerRight - innerLeft);
       }
       // Smooth slide toward target
-      this.powerUpIndicatorX += (this.powerUpIndicatorTargetX - this.powerUpIndicatorX) * Math.min(1, dt * 2 / 3);
+      this.powerUpIndicatorX += (this.powerUpIndicatorTargetX - this.powerUpIndicatorX) * Math.min(1, dt * 2 / 9);
       this.powerUpIndicatorContainer.x = this.powerUpIndicatorX;
 
       // Countdown text (update only when integer second changes)
@@ -658,6 +688,9 @@ export class Game {
     // Update coins
     for (const coin of this.coins) coin.update(dt, this.platformData);
 
+    // Update sheep
+    if (this.sheep) this.sheep.update(dt);
+
     const liveCoins = this.coins.filter(c => !c.isDead);
 
     this.tickCpuCollectAI(liveChars, liveCoins);
@@ -698,6 +731,7 @@ export class Game {
     for (const c of liveChars) c.syncToBody(dt);
     for (const coin of this.coins) if (!coin.isDead && !coin.isPickedUp) this.physics.updatePlatformPassthrough(coin.body);
     for (const pu of this.powerUps) if (!pu.isDead && !pu.isPickedUp && !pu.isOnGround) this.physics.updatePlatformPassthrough(pu.body);
+    if (this.sheep) this.physics.updatePlatformPassthrough(this.sheep.body);
     this.physics.step(dt);
     for (const c of liveChars) c.syncFromBody(this.platformData);
 
@@ -748,7 +782,29 @@ export class Game {
 
     // Update projectiles
     for (const p of this.projectiles) {
+      const wasAlive = !p.isDead;
       p.update(dt, liveChars, this.playerTower, this.enemyTower);
+      // Startle the sheep when a projectile lands within 55 px of it
+      if (wasAlive && p.isDead && this.sheep && Math.abs(p.x - this.sheep.x) <= 55) {
+        this.sheep.reactToHit(p.x);
+      }
+    }
+
+    // Update grenades + process AoE explosions
+    for (const g of this.grenades) {
+      g.update(dt, this.platformData);
+      const ex = g.consumeExplosion();
+      if (ex) {
+        for (const c of liveChars) {
+          if (c.side === g.side) continue;
+          if (Math.hypot(c.x - ex.x, c.y - ex.y) <= ex.radius) {
+            c.takeDamage(ex.damage, ex.shooter ?? undefined);
+          }
+        }
+        if (this.sheep && Math.hypot(this.sheep.x - ex.x, this.sheep.y - ex.y) <= ex.radius + 20) {
+          this.sheep.reactToHit(ex.x);
+        }
+      }
     }
 
     // Cull dead entities
@@ -771,6 +827,10 @@ export class Game {
     });
     this.projectiles = this.projectiles.filter(p => {
       if (p.isDead) { this.projLayer.removeChild(p.container); p.destroy(); return false; }
+      return true;
+    });
+    this.grenades = this.grenades.filter(g => {
+      if (g.isDead) { this.grenadeLayer.removeChild(g.container); g.destroy(); return false; }
       return true;
     });
     this.coins = this.coins.filter(coin => {
@@ -1050,9 +1110,19 @@ export class Game {
   }
 
   private fireProjectile(req: FireRequest) {
-    const p = new Projectile(req.side, req.sx, req.sy, req.tx, req.ty, req.damage, req.projectileKind, req.shooter ?? null);
-    this.projectiles.push(p);
-    this.projLayer.addChild(p.container);
+    if (req.projectileKind === 'grenade') {
+      const g = new Grenade(
+        req.side, req.sx, req.sy, req.tx,
+        req.damage, GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX,
+        req.shooter ?? null,
+      );
+      this.grenades.push(g);
+      this.grenadeLayer.addChild(g.container);
+    } else {
+      const p = new Projectile(req.side, req.sx, req.sy, req.tx, req.ty, req.damage, req.projectileKind, req.shooter ?? null);
+      this.projectiles.push(p);
+      this.projLayer.addChild(p.container);
+    }
   }
 
   // ── Game state ───────────────────────────────────────────────────────────────
@@ -1068,11 +1138,15 @@ export class Game {
 
     for (const c of this.characters)    { c.destroy(); }
     for (const p of this.projectiles)   { p.destroy(); }
+    for (const g of this.grenades)      { g.destroy(); }
     for (const coin of this.coins)      { coin.destroy(); }
     for (const pu of this.powerUps)     { pu.destroy(); }
     for (const l of this.damageLabels)  { l.destroy(); }
+    this.sheep?.destroy();
+    this.sheep = null;
     this.characters   = [];
     this.projectiles  = [];
+    this.grenades     = [];
     this.coins        = [];
     this.powerUps     = [];
     this.damageLabels = [];

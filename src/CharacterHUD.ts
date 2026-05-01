@@ -2,21 +2,25 @@ import type { Character } from './Character';
 import { RANK_NAMES } from './Character';
 
 const TYPE_ICON: Record<string, string> = {
-  warrior:  '⚔',
-  archer:   '🏹',
-  rifleman: '🔫',
-  sniper:   '🎯',
-  medic:    '➕',
-  heavy:    '🔨',
+  warrior:   '⚔',
+  archer:    '🏹',
+  rifleman:  '🔫',
+  sniper:    '🎯',
+  medic:     '➕',
+  heavy:     '🔨',
+  tanker:    '🪖',
+  grenadier: '💣',
 };
 
 const TYPE_COLOR: Record<string, string> = {
-  warrior:  '#00b4d8',
-  archer:   '#43aa8b',
-  rifleman: '#7a8c42',
-  sniper:   '#e07b39',
-  medic:    '#9b5de5',
-  heavy:    '#8899bb',
+  warrior:   '#00b4d8',
+  archer:    '#43aa8b',
+  rifleman:  '#7a8c42',
+  sniper:    '#e07b39',
+  medic:     '#9b5de5',
+  heavy:     '#8899bb',
+  tanker:    '#8b4513',
+  grenadier: '#6b7a2a',
 };
 
 interface CardEntry {

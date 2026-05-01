@@ -41,6 +41,7 @@ export const GameConfig = {
     coinThrowScanRange:  80,  // px — scan radius for a new coin after throwing one toward tower
     coinThrowHoldSec:   0.5, // seconds the character holds the coin before releasing the throw
     safeZoneHealRate:    5,  // HP/s passively healed while within own tower's attack range
+    medicPassiveHealRate: 2, // HP/s the medic self-heals regardless of position
     hitJumpChance:    0.75,  // probability of jumping when struck by a projectile
 
     warrior: {
@@ -68,7 +69,7 @@ export const GameConfig = {
       hp:          90,
       speed:       78,
       attackRange: 280,
-      attackPower: 7,
+      attackPower: 9,
       fireRate:    0.5,
       cost:        70,
       critical:    0.07, // 7 % miss chance
@@ -117,6 +118,23 @@ export const GameConfig = {
       width:       80,
       height:      70,
     },
+    grenadier: {
+      type:        'grenadier' as const,
+      hp:          110,
+      speed:       65,
+      attackRange: 280,
+      attackPower: 55,   // grenade AoE damage per target hit
+      fireRate:    2,  
+      cost:        90,
+      critical:    0.08,
+    },
+  },
+
+  grenade: {
+    fuseSec:      2.2,     // seconds until explosion
+    splashRadius: 80,    // px — AoE damage radius
+    gravity:      800,   // px/s² — matches character gravity
+    maxVx:        400,   // px/s — max horizontal launch speed
   },
 
   cpu: {
@@ -139,7 +157,7 @@ export const GameConfig = {
 
   coinBox: {
     x:         W / 2,             // centre of map
-    y:         GROUND_Y - 320,    // top of box (≈80 px from canvas top)
+    y:         GROUND_Y - 350,    // top of box (≈80 px from canvas top)
     width:     48,
     height:    48,
     spreadDeg: 25,                // ± degrees from vertical coins can be released
@@ -151,11 +169,9 @@ export const GameConfig = {
     coinValue:          30,
     killReward:         2,
     towerKillReward:    15,
-    dropIntervalMinMs:  8_000,
+    dropIntervalMinMs:  4_000,
     dropIntervalMaxMs:  15_000,
-    coinLifetimeSec:    25,
-    dropZoneXMin:       1217,  // scaled with world width (≈ W/2 − 187)
-    dropZoneXMax:       1591,  // scaled with world width (≈ W/2 + 187)
+    coinLifetimeSec:    30,
     silverCoinValue:         15,     // silver is worth less than gold (20)
     silverDropIntervalMinMs: 5_000, // drops 50% more often than gold (min)
     silverDropIntervalMaxMs: 10_000,// drops 50% more often than gold (max)
@@ -171,7 +187,6 @@ export const GameConfig = {
     coinBounceInitVxMax:  130,  // px/s — horizontal kick on character-dropped coins (max)
     coinThrowVx:          300,  // px/s — horizontal component of throw (60° → vy ≈ vx × √3)
     coinThrowVy:          446,  // px/s — vertical (upward) component of throw
-    coinDropStartY:       10,   // absolute y where sky-dropped coins spawn (near canvas top)
     coinFriction:         0.01, // contact friction on coin bodies (combined with surface via sqrt)
     coinFrictionAir:      0.003,// air resistance per tick — higher than default to settle faster
     surfaceFriction:      0.8,  // friction on ground/platform surfaces; characters unaffected

@@ -14,6 +14,7 @@ export const CAT_COIN      = 0x0008;
 export const CAT_WALL      = 0x0010;
 export const CAT_TOWER     = 0x0020;
 export const CAT_POWERUP   = 0x0040;
+export const CAT_SHEEP     = 0x0080;
 
 export class Physics {
   readonly engine: Matter.Engine;
@@ -39,7 +40,7 @@ export class Physics {
         isStatic: true,
         label: 'ground',
         friction: SURFACE_FRICTION, frictionStatic: 0, restitution: 0,
-        collisionFilter: { category: CAT_GROUND, mask: CAT_CHARACTER | CAT_COIN | CAT_POWERUP },
+        collisionFilter: { category: CAT_GROUND, mask: CAT_CHARACTER | CAT_COIN | CAT_POWERUP | CAT_SHEEP },
       },
     );
 
@@ -52,7 +53,7 @@ export class Physics {
         isStatic: true,
         label: 'platform',
         friction: SURFACE_FRICTION, frictionStatic: 0, restitution: 0,
-        collisionFilter: { category: CAT_PLATFORM, mask: CAT_CHARACTER | CAT_COIN | CAT_POWERUP },
+        collisionFilter: { category: CAT_PLATFORM, mask: CAT_CHARACTER | CAT_COIN | CAT_POWERUP | CAT_SHEEP },
       },
     );
 
@@ -63,7 +64,7 @@ export class Physics {
     const wallOpts = (label: string): Matter.IBodyDefinition => ({
       isStatic: true, label,
       friction: 0, frictionStatic: 0, restitution: 0.1,
-      collisionFilter: { category: CAT_WALL, mask: CAT_COIN | CAT_POWERUP },
+      collisionFilter: { category: CAT_WALL, mask: CAT_COIN | CAT_POWERUP | CAT_SHEEP },
     });
     const leftWall = Matter.Bodies.rectangle(
       PLAYER_TOWER_X - TOWER_WIDTH / 2 - wallThick / 2, wallCenterY,
@@ -136,7 +137,7 @@ export class Physics {
       isStatic: true,
       label: 'tower',
       friction: 0, frictionStatic: 0, restitution: 0.2,
-      collisionFilter: { category: CAT_TOWER, mask: CAT_CHARACTER | CAT_COIN | CAT_POWERUP },
+      collisionFilter: { category: CAT_TOWER, mask: CAT_CHARACTER | CAT_COIN | CAT_POWERUP | CAT_SHEEP },
     });
     Matter.Composite.add(this.engine.world, body);
     return body;
@@ -158,6 +159,22 @@ export class Physics {
       collisionFilter: { category: CAT_COIN, mask: CAT_GROUND | CAT_PLATFORM | CAT_WALL | CAT_TOWER },
     });
     Matter.Body.setVelocity(body, { x: vx * dt, y: vy * dt });
+    Matter.Composite.add(this.engine.world, body);
+    return body;
+  }
+
+  createSheepBody(x: number, centerY: number): Matter.Body {
+    const body = Matter.Bodies.rectangle(x, centerY, 34, 22, {
+      friction:        0.6,
+      frictionAir:     0.04,
+      frictionStatic:  0,
+      restitution:     0.05,
+      inertia: Infinity, inverseInertia: 0,  // prevent rotation on collision
+      collisionFilter: {
+        category: CAT_SHEEP,
+        mask:     CAT_GROUND | CAT_PLATFORM | CAT_WALL | CAT_TOWER,
+      },
+    });
     Matter.Composite.add(this.engine.world, body);
     return body;
   }
