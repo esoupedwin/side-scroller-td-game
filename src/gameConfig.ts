@@ -1,5 +1,5 @@
 const VIEWPORT_W      = 1248;
-const W               = Math.round(VIEWPORT_W * 1.8);  // 2246 — scrollable world width
+const W               = Math.round(VIEWPORT_W * 2.25); // 2808 — scrollable world width
 const H               = 480;
 const CHAR_W          = 20;
 const CHAR_H          = 32;
@@ -46,9 +46,9 @@ export const GameConfig = {
     warrior: {
       type:        'warrior'  as const,
       hp:          160,
-      speed:       100,
+      speed:       120,
       attackRange: 40,
-      attackPower: 12,   // damage per swing
+      attackPower: 15,   // damage per swing
       fireRate:    0.8,  // seconds between swings
       cost:        25,
       critical:    0.10, // 10 % miss chance
@@ -58,7 +58,7 @@ export const GameConfig = {
       hp:          100,
       speed:       70,
       attackRange: 180,
-      attackPower: 28,
+      attackPower: 12,
       fireRate:    2.2,
       cost:        50,
       critical:    0.08, // 8 % miss chance
@@ -67,9 +67,9 @@ export const GameConfig = {
       type:        'rifleman' as const,
       hp:          90,
       speed:       78,
-      attackRange: 180,
-      attackPower: 22,
-      fireRate:    0.8,
+      attackRange: 280,
+      attackPower: 7,
+      fireRate:    0.5,
       cost:        70,
       critical:    0.07, // 7 % miss chance
     },
@@ -77,8 +77,8 @@ export const GameConfig = {
       type:        'sniper' as const,
       hp:          70,
       speed:       50,
-      attackRange: 220,
-      attackPower: 32,
+      attackRange: 320,
+      attackPower: 35,
       fireRate:    2.8,
       cost:        100,
       critical:    0.05, // 5 % miss chance — trained marksman
@@ -115,7 +115,7 @@ export const GameConfig = {
       cost:        160,
       critical:    0.08,
       width:       80,
-      height:      52,
+      height:      70,
     },
   },
 
@@ -154,8 +154,8 @@ export const GameConfig = {
     dropIntervalMinMs:  8_000,
     dropIntervalMaxMs:  15_000,
     coinLifetimeSec:    25,
-    dropZoneXMin:       936,   // scaled with world width (≈ W/2 − 187)
-    dropZoneXMax:       1310,  // scaled with world width (≈ W/2 + 187)
+    dropZoneXMin:       1217,  // scaled with world width (≈ W/2 − 187)
+    dropZoneXMax:       1591,  // scaled with world width (≈ W/2 + 187)
     silverCoinValue:         15,     // silver is worth less than gold (20)
     silverDropIntervalMinMs: 5_000, // drops 50% more often than gold (min)
     silverDropIntervalMaxMs: 10_000,// drops 50% more often than gold (max)
@@ -181,7 +181,7 @@ export const GameConfig = {
   },
 
   projectiles: {
-    bulletSpeed:        1400,   // px/s
+    bulletSpeed:        500,   // px/s
     bulletMinTime:      0.08,   // s — minimum travel time
     bulletArcFactor:    0.015,  // arc height = dist × factor
     bulletSplash:       18,     // px — hit radius at landing

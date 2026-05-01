@@ -31,7 +31,8 @@ export class Coin {
   get isOnPlatform() { return this.isOnGround && this.floorY < GROUND_Y; }
 
   body:    Matter.Body;
-  private physics: Physics;
+  private physics:     Physics;
+  private bodyInWorld = true;
   private timer             = 0;
   private lifetimeRemaining: number;
 
@@ -144,10 +145,18 @@ export class Coin {
     this.isPickedUp        = true;
     this.isDead            = true;
     this.container.visible = false;
+    this.removePhysicsBody();
   }
 
   destroy() {
-    if (this.physics) this.physics.removeBody(this.body);
+    this.removePhysicsBody();
     this.container.destroy({ children: true });
+  }
+
+  private removePhysicsBody() {
+    if (this.physics && this.bodyInWorld) {
+      this.physics.removeBody(this.body);
+      this.bodyInWorld = false;
+    }
   }
 }

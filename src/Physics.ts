@@ -97,11 +97,15 @@ export class Physics {
 
   // One-way platform: call BEFORE each physics step.
   // Disables platform collision while a body's top is still below the platform surface.
+  // Preserves any extra collision bits already on the body (e.g. CAT_WALL | CAT_TOWER for coins).
   updatePlatformPassthrough(body: Matter.Body) {
     const passingThrough = body.bounds.min.y > this.platformBody.bounds.min.y;
-    const mask = passingThrough
+    const baseMask = passingThrough
       ? CAT_GROUND                   // only ground while rising through
       : CAT_GROUND | CAT_PLATFORM;   // both once above the surface
+    // Keep any bits that are neither ground nor platform (walls, towers, …)
+    const extraBits = (body.collisionFilter.mask ?? 0) & ~(CAT_GROUND | CAT_PLATFORM);
+    const mask = baseMask | extraBits;
     if (body.collisionFilter.mask !== mask) {
       Matter.Body.set(body, 'collisionFilter', { category: body.collisionFilter.category, mask });
     }
@@ -130,8 +134,8 @@ export class Physics {
     const body = Matter.Bodies.rectangle(centerX, h / 2, w, h, {
       isStatic: true,
       label: 'tower',
-      friction: 0, frictionStatic: 0, restitution: 0,
-      collisionFilter: { category: CAT_TOWER, mask: CAT_CHARACTER },
+      friction: 0, frictionStatic: 0, restitution: 0.2,
+      collisionFilter: { category: CAT_TOWER, mask: CAT_CHARACTER | CAT_COIN },
     });
     Matter.Composite.add(this.engine.world, body);
     return body;
@@ -141,7 +145,7 @@ export class Physics {
     const body = Matter.Bodies.circle(x, y, 10, {
       friction: COIN_FRICTION, frictionAir: COIN_FRICTION_AIR,
       restitution: COIN_BOUNCE_DAMPING,
-      collisionFilter: { category: CAT_COIN, mask: CAT_GROUND | CAT_PLATFORM | CAT_WALL },
+      collisionFilter: { category: CAT_COIN, mask: CAT_GROUND | CAT_PLATFORM | CAT_WALL | CAT_TOWER },
     });
     Matter.Body.setVelocity(body, { x: vx * dt, y: vy * dt });
     Matter.Composite.add(this.engine.world, body);

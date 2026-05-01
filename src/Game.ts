@@ -98,6 +98,10 @@ export class Game {
       this.coinBalance += 100;
       this.notifyCoins();
     }
+    if (e.key === 'l' || e.key === 'L') {
+      this.cpuCoinBalance += 10;
+      this.notifyCpuCoins();
+    }
   };
   private readonly onKeyUp = (e: KeyboardEvent) => { this.keysDown.delete(e.key); };
 
@@ -310,8 +314,8 @@ export class Game {
     if (this.playerTower.hp / TOWER_HP < 0.28) { this.cpuStrategyInfo.stance = 'push';   return 'push';   }
 
     const stance: 'push' | 'economy' | 'defend' =
-      score >  1.5 ? 'push' :
-      score < -1.0 ? 'defend' : 'economy';
+      score >  0.8 ? 'push' :
+      score < -0.7 ? 'defend' : 'economy';
 
     this.cpuStrategyInfo.stance = stance;
     return stance;
@@ -333,8 +337,15 @@ export class Game {
     let order: UnitType[];
 
     if (stance === 'push') {
-      // Mass melee; tanker/heavies are the priority finisher
-      order = this.cpuCoinBalance >= CHAR_COST.tanker ? ['tanker', 'heavy', 'warrior', 'archer'] : ['heavy', 'warrior', 'archer'];
+      // Aggressive push: get a medic if units are hurting, then flood high-damage units
+      const needMedic = hurting >= 1 && !hasMedic && cpuChars.length >= 2;
+      if (needMedic) {
+        order = ['medic', 'rifleman', 'heavy', 'tanker', 'warrior', 'archer'];
+      } else if (this.cpuCoinBalance >= CHAR_COST.tanker) {
+        order = ['tanker', 'rifleman', 'heavy', 'warrior', 'archer'];
+      } else {
+        order = ['rifleman', 'heavy', 'warrior', 'archer'];
+      }
     } else if (stance === 'defend') {
       // Get a medic early — 1 hurting unit is enough to justify it when squad exists
       const needMedic = hurting >= 1 && !hasMedic && cpuChars.length >= 2;
@@ -638,6 +649,15 @@ export class Game {
       g.endFill();
     }
 
+    // Coins: circular collision bodies (radius 10)
+    for (const coin of this.coins) {
+      if (coin.isDead || coin.isPickedUp) continue;
+      g.lineStyle(1.5, 0xffd700, 0.9);
+      g.beginFill(0xffd700, 0.12);
+      g.drawCircle(coin.x, coin.y, 10);
+      g.endFill();
+    }
+
     // Per-character: collision box + pathfinding path
     for (const c of chars) {
       const charColor = c.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
@@ -756,7 +776,7 @@ export class Game {
     // Desired collector count by stance — carrying collectors always finish their run
     const wantedCollectors =
       this.cpuStance === 'push'   ? 1 :
-      this.cpuStance === 'defend' ? 0 : 2;
+      this.cpuStance === 'defend' ? (cpuChars.length >= 3 ? 1 : 0) : 2;
 
     // Recall excess non-carrying collectors
     if (collectors.length > wantedCollectors) {
@@ -772,9 +792,14 @@ export class Game {
     if (liveCoins.length > 0) {
       const active = cpuChars.filter(c => c.behavior === 'collecting').length;
       if (active < wantedCollectors) {
-        // Prefer non-medic attackers that are marching (not engaged), closest to a coin
+        // Prefer light attackers that are marching (not engaged), closest to a coin
+        // Exclude medics (no combat), tankers and heavies (too valuable for collection runs)
         const pool = cpuChars.filter(
-          c => c.behavior === 'attacking' && c.config.type !== 'medic' && c.state === 'marching',
+          c => c.behavior === 'attacking'
+            && c.config.type !== 'medic'
+            && c.config.type !== 'tanker'
+            && c.config.type !== 'heavy'
+            && c.state === 'marching',
         );
         let best: Character | null = null;
         let minDist = Infinity;
@@ -804,22 +829,47 @@ export class Game {
   private tickCpuBehaviorAI(liveChars: Character[]) {
     const cpuChars = liveChars.filter(c => c.side === 'enemy');
 
+    const isMelee = (type: string) => type === 'warrior' || type === 'heavy' || type === 'tanker';
+    const isRangedUnit = (type: string) => type === 'archer' || type === 'rifleman' || type === 'sniper';
+
     if (this.cpuStance === 'defend') {
-      // All non-collecting units hold the defensive line in harass mode.
-      // Warriors/heavies form a melee wall; archers/riflemen shoot over them; medics heal in place.
+      // Melee units form the defensive wall at home tower; ranged units harass from safety.
       for (const c of cpuChars) {
         if (c.behavior === 'collecting') continue;
-        if (c.behavior !== 'harass') {
+        if (isMelee(c.config.type)) {
+          if (c.behavior !== 'defend') {
+            c.behavior = 'defend';
+            this.cpuStrategyInfo.decision = `🛡 Defend wall #${c.id} (${c.config.type})`;
+          }
+        } else if (c.config.type !== 'medic') {
+          if (c.behavior !== 'harass') {
+            c.behavior = 'harass';
+            this.cpuStrategyInfo.decision = `↯ Harass #${c.id} (${c.config.type})`;
+          }
+        }
+      }
+    } else if (this.cpuStance === 'push') {
+      // Push: ranged units harass (advance safely), melee units charge
+      for (const c of cpuChars) {
+        if (c.behavior === 'collecting') continue;
+        if (c.behavior === 'defend') {
+          // Lift any lingering defend assignments
+          c.behavior = isRangedUnit(c.config.type) ? 'harass' : 'attacking';
+          this.cpuStrategyInfo.decision = `⇒ Push #${c.id} (${c.config.type})`;
+        } else if (isRangedUnit(c.config.type) && c.behavior !== 'harass') {
           c.behavior = 'harass';
-          this.cpuStrategyInfo.decision = `↯ Defend wall #${c.id} (${c.config.type})`;
+          this.cpuStrategyInfo.decision = `↯ Harass push #${c.id} (${c.config.type})`;
+        } else if (isMelee(c.config.type) && c.behavior !== 'attacking') {
+          c.behavior = 'attacking';
+          this.cpuStrategyInfo.decision = `⇒ Attack #${c.id} (${c.config.type})`;
         }
       }
     } else {
-      // Push / economy: recall all harassers back to full attack
+      // Economy: recall all harassers and defenders back to full attack
       for (const c of cpuChars) {
-        if (c.behavior === 'harass') {
+        if (c.behavior === 'harass' || c.behavior === 'defend') {
           c.behavior = 'attacking';
-          this.cpuStrategyInfo.decision = `⇒ Attack #${c.id} (${c.config.type})`;
+          this.cpuStrategyInfo.decision = `⇒ Economy attack #${c.id} (${c.config.type})`;
         }
       }
     }

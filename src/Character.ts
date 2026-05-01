@@ -892,6 +892,8 @@ export class Character {
 
   get bowY() { return this.y - this.config.height * 0.62; }
 
+  get claimedCoin(): Coin | null { return this.targetCoin; }
+
   update(ctx: UpdateContext) {
     if (this.isDead) return;
 
@@ -1214,7 +1216,14 @@ export class Character {
     }
 
     if (!this.targetCoin) {
-      this.targetCoin = this.coinClosestToTower(coins, homeTowerFrontX);
+      // Exclude coins already claimed by an ally collector so teammates spread out
+      const claimed = new Set(
+        ctx.allChars
+          .filter(c => c !== this && c.side === this.side && c.behavior === 'collecting' && c.claimedCoin)
+          .map(c => c.claimedCoin!),
+      );
+      const free = coins.filter(c => !claimed.has(c));
+      this.targetCoin = this.coinClosestToTower(free.length > 0 ? free : coins, homeTowerFrontX);
     }
 
     if (this.targetCoin) {
@@ -1479,6 +1488,40 @@ export class Character {
       ? 'bullet' : 'arrow';
   }
 
+  /**
+   * Snaps the firing direction to the nearest allowed angle:
+   * horizontal (0°), 45° upward, or 90° straight up.
+   * The bullet always travels at the original distance so splash still lands near the target.
+   */
+  private snapFireAngle(sx: number, sy: number, tx: number, ty: number): { tx: number; ty: number } {
+    const dx   = tx - sx;
+    const dy   = ty - sy;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 1) return { tx, ty };
+
+    const angle = Math.atan2(dy, dx);
+
+    // Preserve the horizontal firing direction; never shoot backwards
+    const dir   = dx !== 0 ? Math.sign(dx) : (this.side === 'player' ? 1 : -1);
+    const hAngle = dir > 0 ? 0           : Math.PI;          // sideways
+    const dAngle = dir > 0 ? -Math.PI/4  : -3*Math.PI/4;    // 45° up
+    const uAngle = -Math.PI / 2;                              // 90° up
+
+    const angDiff = (a: number, b: number) => {
+      let d = Math.abs(a - b) % (2 * Math.PI);
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      return d;
+    };
+
+    let best = hAngle, minDiff = Infinity;
+    for (const a of [hAngle, dAngle, uAngle]) {
+      const d = angDiff(angle, a);
+      if (d < minDiff) { minDiff = d; best = a; }
+    }
+
+    return { tx: sx + dist * Math.cos(best), ty: sy + dist * Math.sin(best) };
+  }
+
   private attackEnemy(target: Character, onFire?: (r: FireRequest) => void) {
     if (this.attackTimer > 0) return;
     const miss   = Math.random() < this.config.critical;
@@ -1486,9 +1529,10 @@ export class Character {
     if (this.config.type === 'warrior' || this.config.type === 'heavy') {
       target.takeDamage(damage, miss ? undefined : this);
     } else if (onFire) {
+      const snapped = this.snapFireAngle(this.x, this.bowY, target.x, target.bowY);
       onFire({
         side: this.side, sx: this.x, sy: this.bowY,
-        tx: target.x,   ty: target.bowY,
+        tx: snapped.tx,  ty: snapped.ty,
         damage, projectileKind: this.projectileKind,
         shooter: miss ? undefined : this,
       });
@@ -1507,9 +1551,10 @@ export class Character {
     if (this.config.type === 'warrior' || this.config.type === 'heavy') {
       onDamageTower?.(this.effectiveAtk);
     } else if (onFire) {
+      const snapped = this.snapFireAngle(this.x, this.bowY, towerFrontX, towerY);
       onFire({
         side: this.side, sx: this.x, sy: this.bowY,
-        tx: towerFrontX, ty: towerY,
+        tx: snapped.tx,  ty: snapped.ty,
         damage: this.effectiveAtk, projectileKind: this.projectileKind,
       });
     }

@@ -122,24 +122,18 @@ export class Projectile {
     this.gfx.rotation = angle;
   }
 
-  private drawBullet(angle: number) {
-    // Casing (brass)
-    this.gfx.beginFill(0xc8973a);
-    this.gfx.drawEllipse(0, 0, 6, 2.5);
+  private drawBullet(_angle: number) {
+    // Outer shell (yellow)
+    this.gfx.beginFill(0xf5c400);
+    this.gfx.drawCircle(0, 0, 4.5);
     this.gfx.endFill();
 
-    // Jacket / tip (darker lead)
-    this.gfx.beginFill(0x888888);
-    this.gfx.drawPolygon([4, -2, 8, 0, 4, 2]);
+    // Inner highlight (lighter yellow, offset for 3-D effect)
+    this.gfx.beginFill(0xffe566, 0.7);
+    this.gfx.drawCircle(-1.1, -1.1, 2.25);
     this.gfx.endFill();
 
-    // Rim highlight
-    this.gfx.lineStyle(0.8, 0xffe080, 0.7);
-    this.gfx.moveTo(-5, -1.5);
-    this.gfx.lineTo(-5,  1.5);
-    this.gfx.lineStyle(0);
-
-    this.gfx.rotation = angle;
+    // No rotation — circles look the same from every angle
   }
 
   // ── Update ───────────────────────────────────────────────────────────────────
