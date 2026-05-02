@@ -1,47 +1,47 @@
 import * as PIXI from 'pixi.js';
 import {
-  GAME_WIDTH, GAME_HEIGHT, GROUND_Y,
-  PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH, TOWER_ATTACK_RANGE,
+  GAME_HEIGHT, GROUND_Y,
+  TOWER_WIDTH, TOWER_ATTACK_RANGE,
   PLAYER_COLOR, ENEMY_COLOR,
-  COIN_BOX_X, COIN_BOX_Y, COIN_BOX_W, COIN_BOX_H,
 } from './constants';
+import type { CoinBoxDef } from './maps';
 
-export function buildBackground(stage: PIXI.Container) {
+export function buildBackground(stage: PIXI.Container, worldWidth: number) {
   const g = new PIXI.Graphics();
 
-  // Sky gradient approximation with two rects
+  // Sky
   g.beginFill(0x1a1a2e);
-  g.drawRect(0, 0, GAME_WIDTH, GROUND_Y);
+  g.drawRect(0, 0, worldWidth, GROUND_Y);
   g.endFill();
 
-  // Distant mountains
+  // Distant mountains — proportionally scaled to world width
   g.beginFill(0x2d2d44);
-  const mts = [
-    [0, 200], [104, 140], [208, 180], [312, 130], [442, 160],
-    [572, 120], [702, 155], [832, 135], [962, 165], [1092, 140],
-    [1196, 170], [GAME_WIDTH, 200],
+  const fracs: [number, number][] = [
+    [0,     200], [0.037, 140], [0.074, 180], [0.111, 130], [0.157, 160],
+    [0.204, 120], [0.250, 155], [0.296, 135], [0.343, 165], [0.389, 140],
+    [0.426, 170], [1.0,   200],
   ];
   g.moveTo(0, GROUND_Y);
-  for (const [mx, my] of mts) g.lineTo(mx, my);
-  g.lineTo(GAME_WIDTH, GROUND_Y);
+  for (const [f, my] of fracs) g.lineTo(f * worldWidth, my);
+  g.lineTo(worldWidth, GROUND_Y);
   g.closePath();
   g.endFill();
 
   // Ground
   g.beginFill(0x4a7c59);
-  g.drawRect(0, GROUND_Y, GAME_WIDTH, GAME_HEIGHT - GROUND_Y);
+  g.drawRect(0, GROUND_Y, worldWidth, GAME_HEIGHT - GROUND_Y);
   g.endFill();
 
   // Ground stripe
   g.beginFill(0x3d6b4a);
-  g.drawRect(0, GROUND_Y, GAME_WIDTH, 6);
+  g.drawRect(0, GROUND_Y, worldWidth, 6);
   g.endFill();
 
   // Stars
   g.beginFill(0xffffff);
   const rng = mulberry32(42);
   for (let i = 0; i < 60; i++) {
-    const sx = rng() * GAME_WIDTH;
+    const sx = rng() * worldWidth;
     const sy = rng() * (GROUND_Y - 40);
     const sr = rng() * 1.5 + 0.3;
     g.drawCircle(sx, sy, sr);
@@ -51,9 +51,13 @@ export function buildBackground(stage: PIXI.Container) {
   stage.addChild(g);
 }
 
-export function buildTowerRangeMarkers(stage: PIXI.Container) {
-  const playerFrontX = PLAYER_TOWER_X + TOWER_WIDTH / 2;
-  const enemyFrontX  = ENEMY_TOWER_X  - TOWER_WIDTH / 2;
+export function buildTowerRangeMarkers(
+  stage: PIXI.Container,
+  playerTowerX: number,
+  enemyTowerX: number,
+) {
+  const playerFrontX = playerTowerX + TOWER_WIDTH / 2;
+  const enemyFrontX  = enemyTowerX  - TOWER_WIDTH / 2;
   const playerRangeX = playerFrontX + TOWER_ATTACK_RANGE;
   const enemyRangeX  = enemyFrontX  - TOWER_ATTACK_RANGE;
   const lineH = 30;
@@ -104,11 +108,8 @@ export function buildTowerRangeMarkers(stage: PIXI.Container) {
   stage.addChild(eLabel);
 }
 
-export function buildCoinBox(world: PIXI.Container) {
-  const x = COIN_BOX_X;
-  const y = COIN_BOX_Y;
-  const w = COIN_BOX_W;
-  const h = COIN_BOX_H;
+export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
+  const { x, y, width: w, height: h } = coinBox;
   const g = new PIXI.Graphics();
 
   // Drop shadow
@@ -131,7 +132,7 @@ export function buildCoinBox(world: PIXI.Container) {
   g.drawRect(x - w / 2, y, w, h);
   g.lineStyle(0);
 
-  // Corner studs (classic block look)
+  // Corner studs
   const cs = 9;
   g.beginFill(0x7a4a06, 0.55);
   g.drawRect(x - w / 2,       y,         cs, cs);
@@ -152,13 +153,11 @@ export function buildCoinBox(world: PIXI.Container) {
     const angle = (i * Math.PI) / points - Math.PI / 2;
     starPts.push(cx + r * Math.cos(angle), cy + r * Math.sin(angle));
   }
-  // Outline / shadow
   g.lineStyle(4, 0x7a4a06, 1);
   g.beginFill(0xffffff);
   g.drawPolygon(starPts);
   g.endFill();
   g.lineStyle(0);
-
 }
 
 function mulberry32(seed: number) {

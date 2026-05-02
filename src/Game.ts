@@ -10,6 +10,7 @@ export interface CpuStrategyInfo {
 }
 import { Physics } from './Physics';
 import { buildBackground, buildTowerRangeMarkers, buildCoinBox } from './Background';
+import { DEFAULT_MAP, type MapDefinition } from './maps';
 import { Tower } from './Tower';
 import type { TowerShot } from './Tower';
 import { Character, RANK_NAMES, type CharacterConfig, type FireRequest, type UpdateContext } from './Character';
@@ -21,14 +22,16 @@ import { PowerUp, type PowerUpType } from './PowerUp';
 import { Sheep } from './Sheep';
 import { DamageLabel } from './DamageLabel';
 import { Platform } from './Platform';
+import { Block } from './Block';
 import { pickName } from './names';
 import type { PlatformData } from './Platform';
+import type { BlockData } from './Block';
 import type { CollisionBoxData } from './CollisionBox';
 import { NavGraph } from './Pathfinding';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
-  VIEWPORT_WIDTH, GAME_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
-  PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH,
+  VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
+  TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER, GRENADIER,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX,
@@ -38,10 +41,8 @@ import {
   COIN_VALUE, KILL_REWARD, TOWER_KILL_REWARD, COIN_DROP_MIN_MS, COIN_DROP_MAX_MS,
   COIN_LIFETIME_S,
   COIN_DROP_VX_MIN, COIN_DROP_VX_MAX, COIN_DROP_VY_MIN, COIN_DROP_VY_MAX,
-  COIN_BOX_X, COIN_BOX_Y, COIN_BOX_W, COIN_BOX_H, COIN_BOX_SPREAD_DEG,
   COIN_GRAVITY,
   SILVER_COIN_VALUE, SILVER_DROP_MIN_MS, SILVER_DROP_MAX_MS,
-  PLATFORM_X, PLATFORM_Y, PLATFORM_WIDTH, PLATFORM_HEIGHT,
   CPU_PRESSURE_THRESHOLD,
   CPU_URGENT_MAX_FACTOR, CPU_COMFORT_MIN_FACTOR,
   CPU_NEUTRAL_MIN_FACTOR, CPU_NEUTRAL_MAX_FACTOR,
@@ -106,8 +107,11 @@ export class Game {
   private powerUpIndicatorMoveTimer   = 0;
   private powerUpTypePreview: PowerUpType = 'heal';
   private powerUpLastCountdown        = -1;
-  private platform!:     Platform;
+  private mapDef:        MapDefinition = DEFAULT_MAP;
+  private platforms:     Platform[]    = [];
   private readonly platformData: PlatformData[] = [];
+  private blocks:        Block[]       = [];
+  private readonly blockData:    BlockData[]    = [];
   private physics!:      Physics;
 
   private world!:     PIXI.Container;
@@ -217,24 +221,34 @@ export class Game {
   // ── Scene construction ───────────────────────────────────────────────────────
 
   private build() {
+    const m = this.mapDef;
+    const towerFaceL = m.playerTowerX + TOWER_WIDTH / 2;
+    const towerFaceR = m.enemyTowerX  - TOWER_WIDTH / 2;
+
     this.world = new PIXI.Container();
 
-    buildBackground(this.world);
-    buildTowerRangeMarkers(this.world);
-    buildCoinBox(this.world);
+    buildBackground(this.world, m.worldWidth);
+    buildTowerRangeMarkers(this.world, m.playerTowerX, m.enemyTowerX);
+    buildCoinBox(this.world, m.coinBox);
 
-    this.platform = new Platform({
-      x: PLATFORM_X, y: PLATFORM_Y,
-      width: PLATFORM_WIDTH, height: PLATFORM_HEIGHT,
-    });
+    // Build one Platform visual per map platform
+    this.platforms = m.platforms.map(p => new Platform(p));
     this.platformData.length = 0;
-    this.platformData.push(this.platform.data);
-    this.world.addChild(this.platform.container);
+    for (const plat of this.platforms) {
+      this.platformData.push(plat.data);
+      this.world.addChild(plat.container);
+    }
 
-    this.physics = new Physics({
-      x: PLATFORM_X, y: PLATFORM_Y,
-      width: PLATFORM_WIDTH, height: PLATFORM_HEIGHT,
-    });
+    // Build one Block visual per map block
+    this.blocks = m.blocks.map(b => new Block(b));
+    this.blockData.length = 0;
+    for (const blk of this.blocks) {
+      this.blockData.push(blk.data);
+      this.world.addChild(blk.container);
+    }
+
+    this.physics = new Physics(m.worldWidth, m.playerTowerX, m.enemyTowerX, m.platforms);
+    for (const b of m.blocks) this.physics.createBlockBody(b.x, b.y, b.width, b.height);
 
     this.coinLayer     = new PIXI.Container();
     this.sheepLayer    = new PIXI.Container();
@@ -251,43 +265,45 @@ export class Game {
     this.world.addChild(this.unitLayer);
     this.world.addChild(this.labelLayer);
 
-    this.playerTower = new Tower('player', PLAYER_TOWER_X);
-    this.enemyTower  = new Tower('enemy',  ENEMY_TOWER_X);
+    this.playerTower = new Tower('player', m.playerTowerX);
+    this.enemyTower  = new Tower('enemy',  m.enemyTowerX);
     this.world.addChild(this.playerTower.container);
     this.world.addChild(this.enemyTower.container);
 
     // Navigation graph — built from current platforms; rebuild whenever map changes.
     this.navGraph = new NavGraph();
-    this.navGraph.build(this.platformData);
+    this.navGraph.build(this.platformData, m.playerTowerX, m.enemyTowerX, this.blockData);
 
     // Tower physics bodies — solid, block character movement.
-    this.physics.createTowerBody(PLAYER_TOWER_X, TOWER_WIDTH);
-    this.physics.createTowerBody(ENEMY_TOWER_X,  TOWER_WIDTH);
+    this.physics.createTowerBody(m.playerTowerX, TOWER_WIDTH);
+    this.physics.createTowerBody(m.enemyTowerX,  TOWER_WIDTH);
 
     // Register static collision boxes for the debug overlay.
     this.staticCollisionBoxes = [
-      // Towers — solid
       {
-        x: PLAYER_TOWER_X - TOWER_WIDTH / 2, y: GROUND_Y - TOWER_HEIGHT,
+        x: m.playerTowerX - TOWER_WIDTH / 2, y: GROUND_Y - TOWER_HEIGHT,
         width: TOWER_WIDTH, height: TOWER_HEIGHT,
         type: 'solid', label: 'Player Tower',
       },
       {
-        x: ENEMY_TOWER_X - TOWER_WIDTH / 2, y: GROUND_Y - TOWER_HEIGHT,
+        x: m.enemyTowerX - TOWER_WIDTH / 2, y: GROUND_Y - TOWER_HEIGHT,
         width: TOWER_WIDTH, height: TOWER_HEIGHT,
         type: 'solid', label: 'Enemy Tower',
       },
-      // Platform — passthrough (one-way)
+      ...m.platforms.map((p, i) => ({
+        x: p.x, y: p.y,
+        width: p.width, height: p.height,
+        type: 'passthrough' as const, label: `Platform ${i + 1}`,
+      })),
+      ...m.blocks.map((b, i) => ({
+        x: b.x, y: b.y,
+        width: b.width, height: b.height,
+        type: 'solid' as const, label: `Block ${i + 1}`,
+      })),
       {
-        x: PLATFORM_X, y: PLATFORM_Y,
-        width: PLATFORM_WIDTH, height: PLATFORM_HEIGHT,
-        type: 'passthrough', label: 'Platform',
-      },
-      // Coin box — passthrough (sensor / no obstruction)
-      {
-        x: COIN_BOX_X - COIN_BOX_W / 2, y: COIN_BOX_Y,
-        width: COIN_BOX_W, height: COIN_BOX_H,
-        type: 'passthrough', label: 'Coin Box',
+        x: m.coinBox.x - m.coinBox.width / 2, y: m.coinBox.y,
+        width: m.coinBox.width, height: m.coinBox.height,
+        type: 'passthrough' as const, label: 'Coin Box',
       },
     ];
 
@@ -299,10 +315,10 @@ export class Game {
     this.app.stage.addChild(this.world);
 
     // Sheep — spawns at a random x within the playable field
-    const sheepLeft  = PLAYER_TOWER_X + TOWER_WIDTH / 2 + 150;
-    const sheepRight = ENEMY_TOWER_X  - TOWER_WIDTH / 2 - 150;
+    const sheepLeft  = towerFaceL + 150;
+    const sheepRight = towerFaceR - 150;
     const sheepX     = sheepLeft + Math.random() * (sheepRight - sheepLeft);
-    this.sheep = new Sheep(sheepX, this.physics);
+    this.sheep = new Sheep(sheepX, this.physics, towerFaceL, towerFaceR);
     this.sheepLayer.addChild(this.sheep.container);
 
     // World-space drop indicator (moves across the map, above all other layers)
@@ -529,11 +545,16 @@ export class Game {
   }
 
   private spawnCoin(value: number, kind: CoinKind, dt = 1 / 60) {
-    const fallH     = PLATFORM_Y - (COIN_BOX_Y + COIN_BOX_H);
-    const spreadRad = COIN_BOX_SPREAD_DEG * (Math.PI / 180);
-    const vxMax     = Math.tan(spreadRad) * Math.sqrt(fallH * COIN_GRAVITY / 2);
+    const cb        = this.mapDef.coinBox;
+    const wallL     = this.mapDef.playerTowerX - TOWER_WIDTH / 2;
+    const wallR     = this.mapDef.enemyTowerX  + TOWER_WIDTH / 2;
+    // Aim vxMax so a coin spread by spreadDeg lands on the lowest platform (rough target)
+    const lowestPlatY = this.platformData.reduce((minY, p) => Math.min(minY, p.y), GROUND_Y);
+    const fallH     = lowestPlatY - (cb.y + cb.height);
+    const spreadRad = cb.spreadDeg * (Math.PI / 180);
+    const vxMax     = Math.tan(spreadRad) * Math.sqrt(Math.max(1, fallH) * COIN_GRAVITY / 2);
     const vx        = (Math.random() * 2 - 1) * vxMax;
-    const coin = new Coin(COIN_BOX_X, COIN_LIFETIME_S, value, kind, vx, 0, COIN_BOX_Y + COIN_BOX_H, this.physics, dt);
+    const coin = new Coin(cb.x, COIN_LIFETIME_S, value, kind, vx, 0, cb.y + cb.height, this.physics, dt, wallL, wallR);
     this.coins.push(coin);
     this.coinLayer.addChild(coin.container);
   }
@@ -578,7 +599,7 @@ export class Game {
     const CAMERA_SPEED = 500; // px/s
     if (this.keysDown.has('ArrowLeft'))  this.cameraX -= CAMERA_SPEED * dt;
     if (this.keysDown.has('ArrowRight')) this.cameraX += CAMERA_SPEED * dt;
-    this.cameraX     = Math.max(0, Math.min(GAME_WIDTH - VIEWPORT_WIDTH, this.cameraX));
+    this.cameraX     = Math.max(0, Math.min(this.mapDef.worldWidth - VIEWPORT_WIDTH, this.cameraX));
     this.world.x     = -this.cameraX;
 
     if (this.isOver) return;
@@ -620,8 +641,8 @@ export class Game {
     const timeUntilDrop = this.powerUpInterval - this.powerUpTimer;
 
     if (timeUntilDrop <= POWERUP_INDICATOR_LEAD * 1000) {
-      const innerLeft  = PLAYER_TOWER_X + TOWER_WIDTH / 2 + 60;
-      const innerRight = ENEMY_TOWER_X  - TOWER_WIDTH / 2 - 60;
+      const innerLeft  = this.mapDef.playerTowerX + TOWER_WIDTH / 2 + 60;
+      const innerRight = this.mapDef.enemyTowerX  - TOWER_WIDTH / 2 - 60;
 
       // First frame entering the 20 s window: choose type + seed indicator position
       if (!this.powerUpIndicatorActive) {
@@ -666,8 +687,8 @@ export class Game {
       this.powerUpIndicatorContainer.visible = false;
 
       // Spawn at indicator world position (already in world coords)
-      const innerLeft  = PLAYER_TOWER_X + TOWER_WIDTH / 2 + 60;
-      const innerRight = ENEMY_TOWER_X  - TOWER_WIDTH / 2 - 60;
+      const innerLeft  = this.mapDef.playerTowerX + TOWER_WIDTH / 2 + 60;
+      const innerRight = this.mapDef.enemyTowerX  - TOWER_WIDTH / 2 - 60;
       const px  = Math.max(innerLeft, Math.min(innerRight, this.powerUpIndicatorX));
       const pu  = new PowerUp(px, this.powerUpTypePreview, this.physics);
       this.powerUps.push(pu);
@@ -709,8 +730,10 @@ export class Game {
         enemyTowerFrontX:  towerFrontX,
         enemyTowerY:       towerY,
         homeTowerFrontX:   isPlayer ? this.playerTower.frontX : this.enemyTower.frontX,
+        worldWidth:        this.mapDef.worldWidth,
         coins:             liveCoins,
         platforms:         this.platformData,
+        blocks:            this.blockData,
         navGraph:          this.navGraph,
         onFire:        (req: FireRequest) => this.fireProjectile(req),
         onDamageTower: (dmg: number)     => enemyTower.takeDamage(dmg),
@@ -733,7 +756,7 @@ export class Game {
     for (const pu of this.powerUps) if (!pu.isDead && !pu.isPickedUp && !pu.isOnGround) this.physics.updatePlatformPassthrough(pu.body);
     if (this.sheep) this.physics.updatePlatformPassthrough(this.sheep.body);
     this.physics.step(dt);
-    for (const c of liveChars) c.syncFromBody(this.platformData);
+    for (const c of liveChars) c.syncFromBody(this.platformData, this.blockData);
 
     // Tower fire
     const fireShot = (shot: TowerShot, side: 'player' | 'enemy') =>
@@ -749,9 +772,11 @@ export class Game {
       const { x, y, value: dropValue, kind: dropKind, vx: throwVx, vy: throwVy } = c.pendingCoinDrop;
       const isThrow = throwVx !== undefined;
       c.pendingCoinDrop = null;
-      const vx   = throwVx  ?? (Math.random() < 0.5 ? 1 : -1) * (COIN_DROP_VX_MIN + Math.random() * (COIN_DROP_VX_MAX - COIN_DROP_VX_MIN));
-      const vy   = throwVy  ?? -(COIN_DROP_VY_MIN + Math.random() * (COIN_DROP_VY_MAX - COIN_DROP_VY_MIN));
-      const coin = new Coin(x, COIN_LIFETIME_S, dropValue, dropKind, vx, vy, y, this.physics, dt);
+      const vx    = throwVx  ?? (Math.random() < 0.5 ? 1 : -1) * (COIN_DROP_VX_MIN + Math.random() * (COIN_DROP_VX_MAX - COIN_DROP_VX_MIN));
+      const vy    = throwVy  ?? -(COIN_DROP_VY_MIN + Math.random() * (COIN_DROP_VY_MAX - COIN_DROP_VY_MIN));
+      const wallL = this.mapDef.playerTowerX - TOWER_WIDTH / 2;
+      const wallR = this.mapDef.enemyTowerX  + TOWER_WIDTH / 2;
+      const coin  = new Coin(x, COIN_LIFETIME_S, dropValue, dropKind, vx, vy, y, this.physics, dt, wallL, wallR);
       this.coins.push(coin);
       this.coinLayer.addChild(coin.container);
       if (!c.isDead && !isThrow) c.recoverCoin(coin);
@@ -1133,7 +1158,8 @@ export class Game {
     this.onGameOver(winner, reason);
   }
 
-  reset() {
+  reset(mapDef?: MapDefinition) {
+    if (mapDef) this.mapDef = mapDef;
     this.app.ticker.remove(this.tickFn);
 
     for (const c of this.characters)    { c.destroy(); }

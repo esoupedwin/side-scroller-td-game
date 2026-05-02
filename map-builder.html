@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>COIN — Map Builder</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        background: #0d0d1a;
+        color: #ccc;
+        font-family: 'Segoe UI', sans-serif;
+        font-size: 13px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 12px;
+        gap: 10px;
+      }
+
+      h1 { color: #e8e8e8; font-size: 18px; letter-spacing: 0.06em; }
+
+      canvas#builder-canvas {
+        border: 2px solid #333;
+        border-radius: 4px;
+        cursor: crosshair;
+        display: block;
+        max-width: 100%;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        width: 1248px;
+        max-width: 100%;
+      }
+
+      .toolbar label { color: #888; }
+
+      input[type="text"],
+      input[type="number"] {
+        background: #1a1a2e;
+        border: 1px solid #333;
+        color: #ddd;
+        padding: 3px 6px;
+        border-radius: 3px;
+        width: 72px;
+      }
+      input[type="text"] { width: 160px; }
+
+      select {
+        background: #1a1a2e;
+        border: 1px solid #333;
+        color: #ddd;
+        padding: 3px 6px;
+        border-radius: 3px;
+      }
+
+      button {
+        background: #2a2a44;
+        border: 1px solid #444;
+        color: #ddd;
+        padding: 4px 12px;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+      button:hover { background: #3a3a5a; }
+      button.danger { border-color: #883; color: #fca; }
+      button.primary { background: #1a4a7a; border-color: #2a6aaa; color: #adf; }
+
+      .section {
+        width: 1248px;
+        max-width: 100%;
+        background: #111120;
+        border: 1px solid #222;
+        border-radius: 4px;
+        padding: 8px 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .section-title {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        color: #556;
+        text-transform: uppercase;
+        width: 100%;
+        margin-bottom: 2px;
+      }
+
+      #plat-panel { display: none; }
+
+      .io-row {
+        width: 1248px;
+        max-width: 100%;
+        display: flex;
+        gap: 10px;
+      }
+      .io-col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      textarea {
+        width: 100%;
+        height: 140px;
+        background: #0a0a18;
+        border: 1px solid #333;
+        color: #9f9;
+        font-family: 'Courier New', monospace;
+        font-size: 11px;
+        padding: 6px;
+        border-radius: 3px;
+        resize: vertical;
+      }
+
+      .hint {
+        font-size: 10px;
+        color: #445;
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>COIN — Map Builder</h1>
+
+    <!-- Top toolbar -->
+    <div class="toolbar">
+      <label>Preset:</label>
+      <select id="preset-select"><option value="">— select —</option></select>
+      <label>Map name:</label>
+      <input type="text" id="input-name" value="New Map" />
+      <span id="plat-count" style="color:#556; font-size:11px;">0 platform(s)</span>
+    </div>
+
+    <!-- Canvas -->
+    <canvas id="builder-canvas"></canvas>
+
+    <p class="hint">
+      Click to select a platform · Drag to move · Drag left/right edge to resize ·
+      Drag tower or coin box · Delete key removes selected platform
+    </p>
+
+    <!-- Tower + coin box controls -->
+    <div class="section">
+      <div class="section-title">Towers</div>
+      <label>Player X:</label>
+      <input type="number" id="input-player-x" value="60" />
+      <label>Enemy X:</label>
+      <input type="number" id="input-enemy-x" value="2748" />
+
+      <div style="flex:1"></div>
+
+      <div class="section-title" style="margin-top:6px">Coin Box</div>
+      <label>X:</label><input type="number" id="input-cb-x" value="1404" />
+      <label>Y:</label><input type="number" id="input-cb-y" value="50" />
+      <label>W:</label><input type="number" id="input-cb-w" value="48" />
+      <label>H:</label><input type="number" id="input-cb-h" value="48" />
+      <label>Spread°:</label><input type="number" id="input-cb-spread" value="25" />
+    </div>
+
+    <!-- Platform controls -->
+    <div class="section">
+      <div class="section-title">Platforms</div>
+      <button id="btn-add-platform" class="primary">+ Add Platform</button>
+      <button id="btn-delete-platform" class="danger">Delete Selected</button>
+
+      <div id="plat-panel" style="display:none; flex-wrap:wrap; gap:8px; align-items:center; width:100%;">
+        <span id="plat-label" style="color:#aaa; font-weight:bold; font-size:12px;">Platform 1</span>
+        <label>X:</label><input type="number" id="input-plat-x" value="0" />
+        <label>Y:</label><input type="number" id="input-plat-y" value="0" />
+        <label>W:</label><input type="number" id="input-plat-w" value="360" />
+        <label>H:</label><input type="number" id="input-plat-h" value="14" />
+      </div>
+    </div>
+
+    <!-- JSON Export / Import -->
+    <div class="io-row">
+      <div class="io-col">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="btn-export" class="primary">Export JSON</button>
+          <span class="hint">also copies to clipboard</span>
+        </div>
+        <textarea id="json-output" readonly placeholder="Exported map JSON will appear here…"></textarea>
+      </div>
+      <div class="io-col">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="btn-import">Import JSON</button>
+          <span class="hint">paste a MapDefinition JSON, then click Import</span>
+        </div>
+        <textarea id="json-input" placeholder="Paste map JSON here…"></textarea>
+      </div>
+    </div>
+
+    <script type="module" src="/src/map-builder.ts"></script>
+  </body>
+</html>

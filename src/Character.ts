@@ -1,12 +1,11 @@
 import * as PIXI from 'pixi.js';
 import Matter from 'matter-js';
 import {
-  GROUND_Y, PLAYER_COLOR, ENEMY_COLOR, GAME_WIDTH,
+  GROUND_Y, PLAYER_COLOR, ENEMY_COLOR,
   JUMP_VELOCITY,
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
   CHAR_HEAL_RANGE, CHAR_HEAL_RATE, SAFE_ZONE_HEAL_RATE, MEDIC_PASSIVE_HEAL_RATE, HIT_JUMP_CHANCE,
-  PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, RANGED_KITE_THRESHOLD,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
@@ -22,6 +21,7 @@ import type { Side } from './Tower';
 import type { Coin, CoinKind } from './Coin';
 import { COIN_PALETTE } from './Coin';
 import type { PlatformData } from './Platform';
+import type { BlockData } from './Block';
 
 export interface CharacterConfig {
   type:        'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier';
@@ -51,8 +51,10 @@ export interface UpdateContext {
   enemyTowerFrontX:  number;
   enemyTowerY:       number;
   homeTowerFrontX:   number;   // the collecting character's own tower
+  worldWidth:        number;
   coins:             Coin[];
   platforms:         PlatformData[];
+  blocks:            BlockData[];
   navGraph:          NavGraph;
   onFire?:           (req: FireRequest) => void;
   onDamageTower?:    (dmg: number) => void;
@@ -82,6 +84,9 @@ export class Character {
   private jumpVx     = 0;
   private isAirborne = false;
   private floorY     = GROUND_Y;
+  // World bounds between tower faces — set each tick from UpdateContext, used in syncToBody.
+  private boundL     = 0;
+  private boundR     = 0;
   get isOnPlatform(): boolean { return this.floorY < GROUND_Y; }
 
   /** Damage events emitted this tick; Game.ts reads and clears each frame. */
@@ -1017,7 +1022,7 @@ export class Character {
         : 1;
     }
 
-    this.syncFromBody(ctx.platforms);
+    this.syncFromBody(ctx.platforms, ctx.blocks);
 
     const preX = this.x;
     if (this._behavior === 'collecting') {
@@ -1036,10 +1041,10 @@ export class Character {
     this.tickPromoAnim(ctx.dt);
 
     // Hard boundary: characters are blocked at each tower's front face (solid collision).
-    const boundL = PLAYER_TOWER_X + TOWER_WIDTH / 2;   // player tower right face
-    const boundR = ENEMY_TOWER_X  - TOWER_WIDTH / 2;   // enemy tower left face
-    if (this.x < boundL) { this.x = boundL; this.jumpVx = 0; }
-    if (this.x > boundR) { this.x = boundR; this.jumpVx = 0; }
+    this.boundL = Math.min(ctx.homeTowerFrontX, ctx.enemyTowerFrontX);
+    this.boundR = Math.max(ctx.homeTowerFrontX, ctx.enemyTowerFrontX);
+    if (this.x < this.boundL) { this.x = this.boundL; this.jumpVx = 0; }
+    if (this.x > this.boundR) { this.x = this.boundR; this.jumpVx = 0; }
 
     this.syncPosition();
   }
@@ -1061,10 +1066,8 @@ export class Character {
     if (this.isAirborne) {
       this.x += this.jumpVx * dt;
       // Enforce tower faces while airborne (clamp in update() runs before syncToBody).
-      const boundL = PLAYER_TOWER_X + TOWER_WIDTH / 2;
-      const boundR = ENEMY_TOWER_X  - TOWER_WIDTH / 2;
-      if (this.x < boundL) { this.x = boundL; this.jumpVx = 0; }
-      if (this.x > boundR) { this.x = boundR; this.jumpVx = 0; }
+      if (this.x < this.boundL) { this.x = this.boundL; this.jumpVx = 0; }
+      if (this.x > this.boundR) { this.x = this.boundR; this.jumpVx = 0; }
     }
     // Character bodies have no Matter.js platform collision (mask: CAT_GROUND only).
     // Without pinning, gravity pulls the body through the platform to the ground,
@@ -1077,13 +1080,13 @@ export class Character {
     Matter.Body.setVelocity(this.body, { x: 0, y: onPlatform ? 0 : this.body.velocity.y });
   }
 
-  syncFromBody(platforms: PlatformData[]) {
+  syncFromBody(platforms: PlatformData[], blocks: BlockData[]) {
     const halfH     = this.config.height / 2;
     const prevFeetY = (this.body as unknown as { positionPrev: { y: number } }).positionPrev.y + halfH;
     this.y          = this.body.position.y + halfH;
 
     if (this.isAirborne) {
-      // Platform landing: detect feet crossing the surface while falling (tunneling-safe).
+      // Platform/block landing: detect feet crossing the surface while falling (tunneling-safe).
       if (this.body.velocity.y >= 0) {
         for (const p of platforms) {
           if (this.x >= p.x && this.x <= p.x + p.width && prevFeetY <= p.y && this.y >= p.y) {
@@ -1093,6 +1096,17 @@ export class Character {
             this.isAirborne = false;
             this.jumpVx     = 0;
             this.floorY     = p.y;
+            return;
+          }
+        }
+        for (const b of blocks) {
+          if (this.x >= b.x && this.x <= b.x + b.width && prevFeetY <= b.y && this.y >= b.y) {
+            this.y = b.y;
+            Matter.Body.setPosition(this.body, { x: this.body.position.x, y: b.y - halfH });
+            Matter.Body.setVelocity(this.body, { x: 0, y: 0 });
+            this.isAirborne = false;
+            this.jumpVx     = 0;
+            this.floorY     = b.y;
             return;
           }
         }
@@ -1107,9 +1121,10 @@ export class Character {
         this.y          = GROUND_Y;
       }
     } else if (this.floorY < GROUND_Y) {
-      // On platform — detect walking off edge horizontally.
-      const onPlat = platforms.some(p => this.x >= p.x && this.x <= p.x + p.width);
-      if (!onPlat) this.isAirborne = true;
+      // On elevated surface — detect walking off edge horizontally.
+      const onPlat  = platforms.some(p => this.x >= p.x && this.x <= p.x + p.width);
+      const onBlock = blocks.some(b => this.x >= b.x && this.x <= b.x + b.width);
+      if (!onPlat && !onBlock) this.isAirborne = true;
     }
   }
 
@@ -1364,7 +1379,7 @@ export class Character {
     } else {
       // No coins on field — drift toward center drop zone
       this.state = 'marching';
-      const center = GAME_WIDTH / 2;
+      const center = ctx.worldWidth / 2;
       if (Math.abs(this.x - center) > 40) {
         this.x += Math.sign(center - this.x) * this.moveSpeed * 0.5 * dt;
       }

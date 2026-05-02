@@ -1,5 +1,5 @@
 import {
-  GROUND_Y, PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH,
+  GROUND_Y, TOWER_WIDTH,
   JUMP_VELOCITY, CHAR_GRAVITY,
 } from './constants';
 
@@ -49,22 +49,28 @@ export class NavGraph {
    * (Re)build the graph from the current platform list.
    * Call this whenever the map changes.
    */
-  build(platforms: { x: number; y: number; width: number; height?: number }[]): void {
+  build(
+    platforms:    { x: number; y: number; width: number; height?: number }[],
+    playerTowerX: number,
+    enemyTowerX:  number,
+    blocks:       { x: number; y: number; width: number; height?: number }[] = [],
+  ): void {
     this.surfaces = [];
     this.edges    = new Map();
 
-    const groundLeft  = PLAYER_TOWER_X + TOWER_WIDTH / 2;
-    const groundRight = ENEMY_TOWER_X  - TOWER_WIDTH / 2;
+    const groundLeft  = playerTowerX + TOWER_WIDTH / 2;
+    const groundRight = enemyTowerX  - TOWER_WIDTH / 2;
 
     // Surface 0 is always the ground
     this.surfaces.push({ id: 0, x: groundLeft, y: GROUND_Y, width: groundRight - groundLeft });
 
-    for (let i = 0; i < platforms.length; i++) {
+    const elevated = [...platforms, ...blocks];
+    for (let i = 0; i < elevated.length; i++) {
       this.surfaces.push({
         id:    i + 1,
-        x:     platforms[i].x,
-        y:     platforms[i].y,
-        width: platforms[i].width,
+        x:     elevated[i].x,
+        y:     elevated[i].y,
+        width: elevated[i].width,
       });
     }
 

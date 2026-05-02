@@ -1,6 +1,9 @@
 import * as PIXI from 'pixi.js';
 import Matter from 'matter-js';
 import { GROUND_Y, PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH } from './constants';
+
+const DEFAULT_WALL_L = PLAYER_TOWER_X - TOWER_WIDTH / 2;
+const DEFAULT_WALL_R = ENEMY_TOWER_X  + TOWER_WIDTH / 2;
 import type { Physics } from './Physics';
 import type { PlatformData } from './Platform';
 
@@ -35,22 +38,28 @@ export class Coin {
   private bodyInWorld = true;
   private timer             = 0;
   private lifetimeRemaining: number;
+  private readonly wallBoundsL: number;
+  private readonly wallBoundsR: number;
 
   constructor(
     x: number,
     lifetimeSec: number,
     value: number,
-    kind:   CoinKind = 'gold',
-    initVx = 0,
-    initVy = 0,
-    initY  = -20,
-    physics?: Physics,
-    dt     = 1 / 60,
+    kind:       CoinKind = 'gold',
+    initVx      = 0,
+    initVy      = 0,
+    initY       = -20,
+    physics?:   Physics,
+    dt          = 1 / 60,
+    wallBoundsL = DEFAULT_WALL_L,
+    wallBoundsR = DEFAULT_WALL_R,
   ) {
-    this.x     = x;
-    this.y     = initY < 0 ? LAND_Y + initY : initY;
-    this.value = value;
-    this.kind  = kind;
+    this.x           = x;
+    this.y           = initY < 0 ? LAND_Y + initY : initY;
+    this.value       = value;
+    this.kind        = kind;
+    this.wallBoundsL = wallBoundsL;
+    this.wallBoundsR = wallBoundsR;
     this.lifetimeRemaining = lifetimeSec;
 
     this.container = new PIXI.Container();
@@ -85,9 +94,7 @@ export class Coin {
     if (this.isDead || this.isPickedUp) return;
 
     // Kill coin instantly if it travels beyond either tower
-    const leftBound  = PLAYER_TOWER_X - TOWER_WIDTH / 2;
-    const rightBound = ENEMY_TOWER_X  + TOWER_WIDTH / 2;
-    if (this.x < leftBound || this.x > rightBound) {
+    if (this.x < this.wallBoundsL || this.x > this.wallBoundsR) {
       this.isDead = true;
       return;
     }

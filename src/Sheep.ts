@@ -1,7 +1,6 @@
 import * as PIXI from 'pixi.js';
 import Matter from 'matter-js';
 import type { Physics } from './Physics';
-import { PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH } from './constants';
 
 const SHEEP_W  = 34;
 const SHEEP_H  = 22;
@@ -27,10 +26,10 @@ export class Sheep {
   private readonly leftBound:  number;
   private readonly rightBound: number;
 
-  constructor(x: number, physics: Physics) {
+  constructor(x: number, physics: Physics, towerFaceL: number, towerFaceR: number) {
     this.dir        = Math.random() < 0.5 ? 1 : -1;
-    this.leftBound  = PLAYER_TOWER_X + TOWER_WIDTH / 2 + SHEEP_W / 2 + 4;
-    this.rightBound = ENEMY_TOWER_X  - TOWER_WIDTH / 2 - SHEEP_W / 2 - 4;
+    this.leftBound  = towerFaceL + SHEEP_W / 2 + 4;
+    this.rightBound = towerFaceR - SHEEP_W / 2 - 4;
     this.nextStateDuration();
 
     // Drop from above the canvas — body center at y = -150
