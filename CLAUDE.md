@@ -4,7 +4,7 @@ Tower-defense game: PixiJS v7 + Vite + TypeScript (strict).
 
 ## Tech stack
 - **Renderer**: `pixi.js` v7 — imperative `Graphics` API, no sprites/textures
-- **Build**: Vite; `npm run dev` to start, `npm run build` to bundle
+- **Build**: Vite; `npm run dev` to start, `npm run build` to bundle. Multi-page: `index.html` (game) + `map-builder.html` (editor)
 - **Types**: `tsconfig.json` with `strict`, `noUnusedLocals`, `noUnusedParameters` — zero warnings is the bar
 
 ## Config pattern
@@ -25,26 +25,88 @@ Source files import only from `constants.ts`, never directly from `gameConfig.ts
 | `src/Coin.ts` | Coin physics, lifetime, pickup flag |
 | `src/PowerUp.ts` | Power-up physics, visual, pickup, effects |
 | `src/Projectile.ts` | Arc projectile movement and splash damage |
+| `src/Grenade.ts` | Grenade arc, fuse, explosion splash |
 | `src/Tower.ts` | HP, auto-fire, frontX geometry |
-| `src/Platform.ts` | Single platform; exposes `PlatformData` shape |
+| `src/Platform.ts` | One-way elevated surface; exposes `PlatformData` shape |
+| `src/Block.ts` | Solid-from-all-sides environment element; exposes `BlockData` |
 | `src/Background.ts` | Pure visual scene dressing |
+| `src/Sheep.ts` | Sheep NPC — wanders, bounces off walls, blocks characters |
 | `src/DamageLabel.ts` | Floating damage numbers |
 | `src/Physics.ts` | Matter.js world setup, collision categories, body factories |
-| `src/Pathfinding.ts` | NavGraph: grid-based A* path planning for characters |
+| `src/Pathfinding.ts` | NavGraph: A* path planning across ground, platforms, and blocks |
 | `src/CollisionBox.ts` | Debug overlay: renders physics body outlines |
+| `src/maps.ts` | `MapDefinition` type; `DEFAULT_MAP`, `HIGHLANDS_MAP`; `ALL_MAPS` list |
+| `src/map-builder.ts` | Canvas2D drag-and-drop map editor logic |
 | `src/gameConfig.ts` | Single source of truth for all numbers |
 | `src/constants.ts` | Flat re-exports of gameConfig values |
 | `src/names.ts` | `pickName()` — random character display names |
+| `map-builder.html` | Map builder entry point (served at `/map-builder.html`) |
+
+## Map system
+
+### MapDefinition
+`src/maps.ts` defines the `MapDefinition` interface — the single source of truth for each map:
+
+```typescript
+interface MapDefinition {
+  id:           string;
+  name:         string;
+  worldWidth:   number;
+  playerTowerX: number;   // tower centre x
+  enemyTowerX:  number;
+  platforms:    PlatformData[];
+  blocks:       BlockData[];
+  coinBox:      CoinBoxDef;  // { x, y, width, height, spreadDeg }
+}
+```
+
+`ALL_MAPS` is the authoritative list. `DEFAULT_MAP` reproduces the original hardcoded layout.
+
+### Game.build()
+`build()` reads `this.mapDef` (defaults to `DEFAULT_MAP`) and constructs the full scene:
+1. Background + range markers + coin box visuals
+2. `Platform` and `Block` visuals added to `this.world`
+3. `Physics` instance created; platform and block bodies registered
+4. Game layers (coin, sheep, powerup, proj, grenade, unit, label) added
+5. Towers created; nav graph built; tower physics bodies registered
+
+Call `reset(mapDef?)` to switch maps — it removes all stage children and calls `build()` fresh.
+
+### Map builder
+`map-builder.html` / `src/map-builder.ts` — a standalone Canvas2D tool for editing maps. Supports:
+- Drag platforms to move; drag left/right edge to resize
+- Drag tower markers and coin box
+- Block preview (grey rectangles in canvas)
+- JSON export (copies to clipboard) and import
+- Preset loading from `ALL_MAPS`
+
+## Environment elements
+
+### Platform (`src/Platform.ts`)
+One-way elevated surface — characters can jump up through from below, land on top.  
+`PlatformData`: `{ x, y, width, height }` where `y` is the **top surface** (character feet position).  
+Physics: `CAT_PLATFORM` body with one-way passthrough via `updatePlatformPassthrough()`.  
+Character landing is detected **manually** in `syncFromBody` (tunneling-safe crossing check), not via Matter.js collision events.
+
+### Block (`src/Block.ts`)
+Solid-from-all-sides environment element — nothing passes through any face.  
+`BlockData = PlatformData` (same shape). Visual: stone-brick with staggered mortar lines.  
+Physics: `CAT_BLOCK = 0x0100` static body; included in collision masks for characters, coins, power-ups, and sheep.  
+Character landing on blocks is also detected manually in `syncFromBody`, same tunneling-safe pattern as platforms.  
+Blocks are registered with `NavGraph.build()` as walkable surfaces alongside platforms.
+
+> To add a new environment element: add a category bit in `Physics.ts`, create a visual class, add a `createXBody()` factory, add the field to `MapDefinition` in `maps.ts`, wire into `Game.build()` (visual + body), update `Character.syncFromBody`, update `NavGraph.build`.
 
 ## Character system
 
 ### Unit types
-Seven types: `warrior`, `archer`, `rifleman`, `sniper`, `medic`, `heavy`, `tanker`.  
+Eight types: `warrior`, `archer`, `rifleman`, `sniper`, `medic`, `heavy`, `tanker`, `grenadier`.  
 Each has its own `build*Sprite()` method in `Character.ts`. The dispatch is in `buildSprite()`.  
 - Melee: `warrior`, `heavy` — deal damage via `takeDamage()` on contact
 - Ranged: `archer` (arrow), `rifleman` (bullet, fast fire), `sniper` (bullet, long range, slow fire), `tanker` (bullet, slow, high damage)
+- Explosive: `grenadier` (grenade arc, splash damage, fuse delay)
 - Support: `medic` (no attack; heals nearby allies; player-only)
-- `heavy` and `tanker` have custom `width`/`height` overrides in `gameConfig.ts`
+- `heavy`, `tanker`, and `grenadier` have custom `width`/`height` overrides in `gameConfig.ts`
 
 ### Behavior vs State
 - **`behavior`** (`'attacking' | 'collecting' | 'harass' | 'defend'`) — the character's strategic intent; player-controlled or set by CPU AI
@@ -63,7 +125,15 @@ Setting `behavior` via the setter handles side effects automatically:
 - `private static isMeleeType(type)` — true for `warrior`, `heavy`. Used in kiting logic to classify an enemy's type.
 
 ### UpdateContext
-`Character.update(ctx: UpdateContext)` receives everything it needs per-tick. No direct references to `Game.ts` internals. Callbacks:
+`Character.update(ctx: UpdateContext)` receives everything it needs per-tick. No direct references to `Game.ts` internals.
+
+Key fields:
+- `platforms: PlatformData[]` — for landing detection and coin settle checks
+- `blocks: BlockData[]` — for block landing detection and edge walk-off
+- `worldWidth: number` — used to compute movement bounds
+- `homeTowerFrontX / enemyTowerFrontX` — tower face positions
+
+Callbacks:
 - `onFire(req)` — character requests a projectile be spawned
 - `onDamageTower(dmg)` — warrior melee hit on tower
 - `onDepositCoin(value)` — coin deposited at home tower; Game.ts credits the balance
@@ -155,7 +225,7 @@ Power-ups drop from the sky every `POWERUP_DROP_INTERVAL` seconds (default 40 s)
 `POWERUP_INDICATOR_LEAD` seconds before each drop, a floating indicator appears at the top of the world and drifts randomly left/right. Its final X position determines where the power-up spawns. The indicator lives in `this.world` (world space, scrolls with camera).
 
 ### PowerUp physics
-`PowerUp.ts` uses a Matter.js circle body (`CAT_POWERUP`, radius `POWERUP_BODY_RADIUS`). The body collides with ground, platform, walls, and towers. Once settled (speed < 0.05 near a surface), the body is set static and the visual bobs vertically. `updatePlatformPassthrough()` is called each tick for non-settled power-ups — same one-way platform mechanism used by coins.
+`PowerUp.ts` uses a Matter.js circle body (`CAT_POWERUP`, radius `POWERUP_BODY_RADIUS`). The body collides with ground, platform, walls, towers, and blocks. Once settled (speed < 0.05 near a surface), the body is set static and the visual bobs vertically. `updatePlatformPassthrough()` is called each tick for non-settled power-ups — same one-way platform mechanism used by coins.
 
 All tunable values live in `gameConfig.powerUp` → exported from `constants.ts` as `POWERUP_*` constants.
 
@@ -169,35 +239,42 @@ Character X is teleported each tick by AI logic; Y is fully simulated by Matter.
 - `Engine.update(engine, dt * 1000)` — called once per game tick; velocities are in **px/frame** (not px/s)
 - Coin body: `friction: COIN_FRICTION, frictionAir: COIN_FRICTION_AIR, restitution: COIN_BOUNCE_DAMPING`
 - Power-up body: `friction: 0.05, frictionAir: 0.004, restitution: 0.5`
-- Ground/platform bodies: `friction: SURFACE_FRICTION, restitution: 0`
+- Ground/platform/block bodies: `friction: SURFACE_FRICTION, restitution: 0`
 
 ### Collision categories (Physics.ts)
 | Constant | Value | Collides with |
 |---|---|---|
-| `CAT_GROUND` | 0x0001 | characters, coins, power-ups |
-| `CAT_PLATFORM` | 0x0002 | characters (one-way), coins, power-ups |
-| `CAT_CHARACTER` | 0x0004 | ground, tower walls |
-| `CAT_COIN` | 0x0008 | ground, platform, walls, towers |
-| `CAT_WALL` | 0x0010 | coins, power-ups |
-| `CAT_TOWER` | 0x0020 | characters, coins, power-ups |
-| `CAT_POWERUP` | 0x0040 | ground, platform, walls, towers |
+| `CAT_GROUND` | 0x0001 | characters, coins, power-ups, sheep |
+| `CAT_PLATFORM` | 0x0002 | characters (one-way), coins, power-ups, sheep |
+| `CAT_CHARACTER` | 0x0004 | ground, towers, blocks |
+| `CAT_COIN` | 0x0008 | ground, platforms, walls, towers, blocks |
+| `CAT_WALL` | 0x0010 | coins, power-ups, sheep |
+| `CAT_TOWER` | 0x0020 | characters, coins, power-ups, sheep |
+| `CAT_POWERUP` | 0x0040 | ground, platforms, walls, towers, blocks |
+| `CAT_SHEEP` | 0x0080 | ground, platforms, walls, towers, blocks |
+| `CAT_BLOCK` | 0x0100 | characters, coins, power-ups, sheep |
 
 ### Combined friction formula
-Matter.js combines friction as `sqrt(bodyA.friction × bodyB.friction)`. If either surface has `friction: 0`, combined friction = 0 and coins **never decelerate horizontally**. Ground and platform bodies must have `friction > 0` (currently `SURFACE_FRICTION = 0.8`). Character bodies keep `friction: 0` — they teleport X, so surface friction would only cause unintended drag.
+Matter.js combines friction as `sqrt(bodyA.friction × bodyB.friction)`. If either surface has `friction: 0`, combined friction = 0 and coins **never decelerate horizontally**. Ground, platform, and block bodies must have `friction > 0` (currently `SURFACE_FRICTION = 0.8`). Character bodies keep `friction: 0` — they teleport X, so surface friction would only cause unintended drag.
 
-### Platform landing (characters)
-Characters do NOT use Matter.js collision for platform landing — it is handled manually in `syncFromBody` to avoid one-way tunneling issues. Platform bodies use `collisionFilter` to allow coins and power-ups to bounce off them while characters pass through from below.
+### Platform and block landing (characters)
+Characters do NOT use Matter.js collision for platform or block landing — it is handled manually in `syncFromBody(platforms, blocks)` to avoid one-way tunneling issues.
+
+The check is tunneling-safe: it compares `prevFeetY` (position before the physics step) against the surface top Y. If the feet crossed the surface while falling (`velocity.y >= 0`), the character is snapped to the surface.
+
+- **Platforms**: passthrough from below is allowed; landing only on the way down. Bodies use `CAT_PLATFORM` and `updatePlatformPassthrough()` manages the one-way mask each tick.
+- **Blocks**: solid from all sides via `CAT_BLOCK` physics body. Landing detection in `syncFromBody` is identical to platforms. Edge walk-off is also detected for both: if `this.x` is no longer within any platform or block's x-span while `floorY < GROUND_Y`, `isAirborne` is set to `true`.
 
 ### updatePlatformPassthrough
-Called each tick for every live, non-settled coin and non-settled power-up body **before** `physics.step()`. Disables platform collision while the body's top is still below the platform surface (rising through), re-enables it once the body is above. Preserves non-ground/platform mask bits (walls, towers) using:
+Called each tick for every live, non-settled coin, power-up, and sheep body **before** `physics.step()`. Disables platform collision while the body is **rising** through a platform surface, re-enables it once falling. Preserves non-ground/platform mask bits (walls, towers, blocks) using:
 ```typescript
 const extraBits = (body.collisionFilter.mask ?? 0) & ~(CAT_GROUND | CAT_PLATFORM);
 const mask = baseMask | extraBits;
 ```
-Without this, the mask would be rebuilt from scratch each tick, silently stripping wall and tower collision.
+Without this, the mask would be rebuilt from scratch each tick, silently stripping wall, tower, and block collision.
 
 ### Platform coordinate convention
-`p.y` is the **top surface** of the platform. Character feet land at `p.y`. Coins rest at `p.y - 14` (coin centre offset). When checking whether a coin is on a platform: `coin.y <= p.y + 5` (body may be slightly below surface at contact).
+`p.y` is the **top surface** of the platform or block. Character feet land at `p.y`. Coins rest at `p.y - 14` (coin centre offset). When checking whether a coin is on a platform: `coin.y <= p.y + 5` (body may be slightly below surface at contact).
 
 Diagonal jumps: `Character.jump(dirX)` sets both `vy = -JUMP_VELOCITY` and `jumpVx = dirX * moveSpeed`; `jumpVx` is applied to `x` each tick while airborne, zeroed on landing.
 
@@ -237,8 +314,9 @@ Unit selection prioritises cheap warriors when outnumbered or broke; riflemen wh
 - **`noUnusedParameters`**: prefix intentionally-unused params with `_` (e.g. `_dt`). Remove the param entirely if nothing uses it.
 - **`Math.sign(0) = 0` freeze**: whenever a character moves toward a target using `this.x += Math.sign(target.x - this.x) * speed * dt`, if they share the same x the character produces no movement. Ensure the action that was supposed to trigger at that position (pickup, deposit, jump) fires first or add an explicit distance guard.
 - **Coin `isOnGround` lag**: coins can be at ground level but still bouncing for many frames before `isOnGround` becomes true. Never gate character pickup solely on `isOnGround` — pair it with a y-position fallback (`coin.y >= GROUND_Y - 30`).
-- **Combined friction zero**: if ground or platform body has `friction: 0`, coin horizontal velocity never dissipates (`sqrt(0 × x) = 0`). Keep `SURFACE_FRICTION > 0` on static bodies; character bodies must stay at `friction: 0` so AI teleportation is unaffected.
+- **Combined friction zero**: if ground, platform, or block body has `friction: 0`, coin horizontal velocity never dissipates (`sqrt(0 × x) = 0`). Keep `SURFACE_FRICTION > 0` on all static surface bodies; character bodies must stay at `friction: 0` so AI teleportation is unaffected.
 - **`lastMoveDir` vs side direction**: use `lastMoveDir` when you need the character's actual travel direction. `side === 'player' ? 1 : -1` is wrong for collecting characters returning home.
-- **`updatePlatformPassthrough` mask corruption**: this function rebuilds the collision mask each tick. It must preserve non-ground/platform bits using the `extraBits` pattern above. Do not simplify it to `baseMask` alone — this silently strips wall and tower collision from coins and power-ups.
+- **`updatePlatformPassthrough` mask corruption**: this function rebuilds the collision mask each tick. It must preserve non-ground/platform bits using the `extraBits` pattern above. Do not simplify it to `baseMask` alone — this silently strips wall, tower, and block collision from coins and power-ups.
 - **Coin body removal on pickup**: `coin.pickup()` removes the physics body immediately. This prevents the invisible carried-coin body from colliding with the tower during carry. Use the `bodyInWorld` flag pattern (idempotent guard) in any class that wraps a Matter.js body.
 - **Adding a new unit type**: update `CharacterConfig.type` union, `buildSprite()` dispatch + new `build*Sprite()` method, `this.isRanged` getter + `Character.isMeleeType()` if needed, `CHAR_CONFIGS` in `Game.ts`, `CharacterHUD.ts` `TYPE_ICON`/`TYPE_COLOR`, `main.ts` button/cost/handler, `index.html` button + CSS, `constants.ts` export + `CHAR_COST`.
+- **Adding a new environment element**: add a category bit in `Physics.ts`, create a visual class, add a `createXBody()` factory, add the field to `MapDefinition` in `maps.ts`, wire into `Game.build()` (visual + body), update `Character.syncFromBody`, update `NavGraph.build`.
