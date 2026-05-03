@@ -35,7 +35,7 @@ import {
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER, GRENADIER,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
-  GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY,
+  GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY,
   CPU_SPAWN_MIN_MS, CPU_SPAWN_MAX_MS, CPU_FIRST_SPAWN_MAX,
   STARTING_COINS, CHAR_COST,
   PASSIVE_INCOME_RATE, LOW_BALANCE_THRESHOLD, LOW_BALANCE_INCOME_MULT,
@@ -820,6 +820,7 @@ export class Game {
     }
 
     // Update grenades + process AoE explosions
+    const knockbackDecayFactor = Math.exp(-GRENADE_KNOCKBACK_DECAY * dt);
     for (const g of this.grenades) {
       g.update(dt, this.platformData, this.blockData);
       const ex = g.consumeExplosion();
@@ -832,14 +833,15 @@ export class Game {
             c.takeDamage(Math.round(ex.damage * frac), ex.shooter ?? undefined);
 
             // Knockback: push outward from blast centre, stronger at closer range
-            const kFrac = 1 - dist / ex.radius;   // 1 at centre, 0 at edge
+            const kFrac = 1 - dist / ex.radius;
             const dx    = c.x - ex.x;
             const dy    = c.y - ex.y;
-            const len   = Math.hypot(dx, dy) || 1;
+            const len   = dist || 1;
             c.applyKnockback(
               (dx / len) * GRENADE_KNOCKBACK_MAX_VX * kFrac,
               (dy / len) * GRENADE_KNOCKBACK_MAX_VY * kFrac,
               dt,
+              knockbackDecayFactor,
             );
           }
         }

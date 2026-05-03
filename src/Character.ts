@@ -11,7 +11,7 @@ import {
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
   POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
-  GRENADE_MAX_VX, GRENADE_KNOCKBACK_DECAY,
+  GRENADE_MAX_VX,
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
@@ -104,7 +104,8 @@ export class Character {
   private body:      Matter.Body;
   private physics:   Physics;
   private jumpVx      = 0;
-  private knockbackVx = 0;
+  private knockbackVx      = 0;
+  private knockbackDecayFactor = 1;  // precomputed per frame by caller: Math.exp(-decay * dt)
   private isAirborne  = false;
   private floorY     = GROUND_Y;
   // World bounds between tower faces — set each tick from UpdateContext, used in syncToBody.
@@ -1096,14 +1097,15 @@ export class Character {
     });
   }
 
-  applyKnockback(vx: number, vy: number, dt: number) {
-    this.knockbackVx = vx;
-    this.isAirborne  = true;
-    this.jumpVx      = 0;
-    this.clearPath();   // replan from wherever the character lands
+  applyKnockback(vx: number, vy: number, dt: number, decayFactor: number) {
+    this.knockbackVx          = vx;
+    this.knockbackDecayFactor = decayFactor;
+    this.isAirborne           = true;
+    this.jumpVx               = 0;
+    this.clearPath();
     Matter.Body.setVelocity(this.body, {
       x: this.body.velocity.x,
-      y: -Math.abs(vy) * dt,   // px/tick — upward regardless of explosion position
+      y: -Math.abs(vy) * dt,
     });
   }
 
@@ -1112,7 +1114,7 @@ export class Character {
     // sliding effect continues after the character lands.
     if (this.knockbackVx !== 0) {
       this.x += this.knockbackVx * dt;
-      this.knockbackVx *= Math.exp(-GRENADE_KNOCKBACK_DECAY * dt);
+      this.knockbackVx *= this.knockbackDecayFactor;
       if (Math.abs(this.knockbackVx) < 1) this.knockbackVx = 0;
       if (this.x < this.boundL) { this.x = this.boundL; this.knockbackVx = 0; }
       if (this.x > this.boundR) { this.x = this.boundR; this.knockbackVx = 0; }
@@ -1532,7 +1534,7 @@ export class Character {
         this.state = 'marching';
       } else if (toEnemy > 0 && closestDist > this.config.attackRange * 0.8) {
         // Enemy is ahead and not yet in range — use pathfinding to navigate around blocks
-        this.requestPath(clamp(closest.x), GROUND_Y, navGraph, dt);
+        this.requestPath(clamp(closest.x), this.floorY, navGraph, dt);
         this.followPath(dt);
         if (this.state !== 'fighting') this.state = 'marching';
       } else if (toEnemy <= 0) {
@@ -1542,7 +1544,7 @@ export class Character {
           if (this.state !== 'fighting') this.state = 'marching';
         } else if (dir * (safeX - this.x) > 5) {
           // Ranged or enemy too far behind — use pathfinding to drift to safe line
-          this.requestPath(safeX, GROUND_Y, navGraph, dt);
+          this.requestPath(safeX, this.floorY, navGraph, dt);
           this.followPath(dt);
           if (this.state !== 'fighting') this.state = 'marching';
         }
@@ -1555,7 +1557,7 @@ export class Character {
       const dist   = Math.abs(this.x - rallyX);
       const thresh = mate ? 55 : 20;
       if (dist > thresh) {
-        this.requestPath(rallyX, GROUND_Y, navGraph, dt);
+        this.requestPath(rallyX, this.floorY, navGraph, dt);
         this.followPath(dt);
         this.state = 'marching';
       }
@@ -1611,7 +1613,7 @@ export class Character {
     const delta = this.defendTargetX - this.x;
     if (Math.abs(delta) > 5) {
       this.state = 'marching';
-      this.requestPath(this.defendTargetX, GROUND_Y, navGraph, dt);
+      this.requestPath(this.defendTargetX, this.floorY, navGraph, dt);
       this.followPath(dt);
     } else {
       this.state = 'fighting'; // holding the patrol spot

@@ -139,11 +139,11 @@ export class Grenade {
 
         if (fromTop || fromBottom) {
           this.y  = fromTop ? b.y : b.y + b.height;
-          this.bounceY();
+          this.bounce('y');
         }
         if (fromLeft || fromRight) {
           this.x  = fromLeft ? b.x : b.x + b.width;
-          this.bounceX();
+          this.bounce('x');
         }
         break;
       }
@@ -154,7 +154,7 @@ export class Grenade {
       for (const p of platforms) {
         if (this.x >= p.x && this.x <= p.x + p.width && prevY <= p.y && this.y >= p.y) {
           this.y = p.y;
-          this.bounceY();
+          this.bounce('y');
           break;
         }
       }
@@ -163,7 +163,7 @@ export class Grenade {
     // Ground collision — bounce until settled
     if (this.y >= GROUND_Y) {
       this.y = GROUND_Y;
-      this.bounceY();
+      this.bounce('y');
     }
 
     this.gfx.rotation += (this.vx > 0 ? 1 : -1) * 4.5 * dt;
@@ -174,23 +174,14 @@ export class Grenade {
     if (this.elapsed >= this.fuseSec) this.explode();
   }
 
-  private bounceY() {
-    if (Math.abs(this.vy) > 80) {
-      this.vy = -this.vy * 0.42;
-      this.vx *= 0.72;
+  private bounce(axis: 'x' | 'y') {
+    const v = axis === 'x' ? this.vx : this.vy;
+    if (Math.abs(v) > 80) {
+      if (axis === 'x') { this.vx = -this.vx * 0.42; this.vy *= 0.72; }
+      else              { this.vy = -this.vy * 0.42; this.vx *= 0.72; }
     } else {
-      this.vy  = 0;
-      this.vx *= 0.88;
-    }
-  }
-
-  private bounceX() {
-    if (Math.abs(this.vx) > 80) {
-      this.vx = -this.vx * 0.42;
-      this.vy *= 0.72;
-    } else {
-      this.vx  = 0;
-      this.vy *= 0.88;
+      if (axis === 'x') { this.vx = 0; this.vy *= 0.88; }
+      else              { this.vy = 0; this.vx *= 0.88; }
     }
   }
 
