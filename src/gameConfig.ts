@@ -131,10 +131,14 @@ export const GameConfig = {
   },
 
   grenade: {
-    fuseSec:      2.2,     // seconds until explosion
-    splashRadius: 80,    // px — AoE damage radius
-    gravity:      800,   // px/s² — matches character gravity
-    maxVx:        400,   // px/s — max horizontal launch speed
+    fuseSec:             2.2,   // seconds until explosion
+    splashRadius:        150,   // px — AoE damage radius
+    gravity:             800,   // px/s² — matches character gravity
+    maxVx:               400,   // px/s — max horizontal launch speed
+    splashMinDamageFrac: 0.25,  // fraction of full damage dealt at the blast edge
+    knockbackMaxVx:      1500,  // px/s — horizontal knockback at direct hit
+    knockbackMaxVy:      940,   // px/s — upward knockback at direct hit
+    knockbackDecay:      4.0,   // multiplied against knockbackVx each second (e^-decay)
   },
 
   cpu: {

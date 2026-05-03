@@ -11,12 +11,34 @@ import {
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
   POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
-  GRENADE_MAX_VX,
+  GRENADE_MAX_VX, GRENADE_KNOCKBACK_DECAY,
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
+
+// Liang-Barsky segment-AABB intersection test.
+// Returns true if the segment (x0,y0)→(x1,y1) intersects the rectangle.
+function segmentIntersectsAABB(
+  x0: number, y0: number,
+  x1: number, y1: number,
+  b: { x: number; y: number; width: number; height: number },
+): boolean {
+  const dx = x1 - x0, dy = y1 - y0;
+  let tMin = 0, tMax = 1;
+  const check = (p: number, q: number) => {
+    if (p === 0) return q >= 0;
+    const t = q / p;
+    if (p < 0) { if (t > tMax) return false; if (t > tMin) tMin = t; }
+    else        { if (t < tMin) return false; if (t < tMax) tMax = t; }
+    return true;
+  };
+  return check(-dx, x0 - b.x) &&
+         check( dx, b.x + b.width  - x0) &&
+         check(-dy, y0 - b.y) &&
+         check( dy, b.y + b.height - y0);
+}
 import type { Side } from './Tower';
 import type { Coin, CoinKind } from './Coin';
 import { COIN_PALETTE } from './Coin';
@@ -81,13 +103,15 @@ export class Character {
 
   private body:      Matter.Body;
   private physics:   Physics;
-  private jumpVx     = 0;
-  private isAirborne = false;
+  private jumpVx      = 0;
+  private knockbackVx = 0;
+  private isAirborne  = false;
   private floorY     = GROUND_Y;
   // World bounds between tower faces — set each tick from UpdateContext, used in syncToBody.
   private boundL     = 0;
   private boundR     = 0;
   get isOnPlatform(): boolean { return this.floorY < GROUND_Y; }
+  private get isKnockedBack(): boolean { return Math.abs(this.knockbackVx) > 20; }
 
   /** Damage events emitted this tick; Game.ts reads and clears each frame. */
   readonly pendingDamages: { amount: number; x: number; y: number }[] = [];
@@ -136,6 +160,9 @@ export class Character {
   // Seconds since path was built; stale paths are discarded and rebuilt.
   private pathAge      = 0;
   private readonly PATH_TTL = 8;   // s — re-plan after this many seconds
+  // Stuck detection: if the character hasn't moved while following a path, replan.
+  private stuckTimer   = 0;
+  private stuckCheckX  = 0;
 
   /** Read-only view of the current path for debug rendering. */
   get debugPath(): { steps: readonly PathStep[]; currentIdx: number } {
@@ -1025,18 +1052,19 @@ export class Character {
     this.syncFromBody(ctx.platforms, ctx.blocks);
 
     const preX = this.x;
-    if (this._behavior === 'collecting') {
-      this.updateCollecting(ctx);
-    } else if (this._behavior === 'harass') {
-      this.updateHarass(ctx);
-    } else if (this._behavior === 'defend') {
-      this.updateDefending(ctx);
-    } else {
-      this.updateAttacking(ctx);
+    if (!this.isKnockedBack) {
+      if (this._behavior === 'collecting') {
+        this.updateCollecting(ctx);
+      } else if (this._behavior === 'harass') {
+        this.updateHarass(ctx);
+      } else if (this._behavior === 'defend') {
+        this.updateDefending(ctx);
+      } else {
+        this.updateAttacking(ctx);
+      }
+      this.tickRandomJump(ctx.dt, ctx.homeTowerFrontX);
     }
     if (this.x !== preX) this.lastMoveDir = (this.x > preX ? 1 : -1);
-
-    this.tickRandomJump(ctx.dt, ctx.homeTowerFrontX);
     this.tickLegs(ctx.dt);
     this.tickPromoAnim(ctx.dt);
 
@@ -1045,6 +1073,12 @@ export class Character {
     this.boundR = Math.max(ctx.homeTowerFrontX, ctx.enemyTowerFrontX);
     if (this.x < this.boundL) { this.x = this.boundL; this.jumpVx = 0; }
     if (this.x > this.boundR) { this.x = this.boundR; this.jumpVx = 0; }
+
+    // Block horizontal wall collision — character X is teleported by AI so physics
+    // cannot stop side entry; clamp manually. Skip while airborne so jump arcs are
+    // not interrupted (landing is handled by syncFromBody).
+    if (!this.isAirborne) this.clampBlockWalls(ctx.blocks);
+    this.tickStuck(ctx.dt);
 
     this.syncPosition();
   }
@@ -1062,7 +1096,27 @@ export class Character {
     });
   }
 
+  applyKnockback(vx: number, vy: number, dt: number) {
+    this.knockbackVx = vx;
+    this.isAirborne  = true;
+    this.jumpVx      = 0;
+    this.clearPath();   // replan from wherever the character lands
+    Matter.Body.setVelocity(this.body, {
+      x: this.body.velocity.x,
+      y: -Math.abs(vy) * dt,   // px/tick — upward regardless of explosion position
+    });
+  }
+
   syncToBody(dt: number) {
+    // Apply and decay horizontal knockback regardless of airborne state so the
+    // sliding effect continues after the character lands.
+    if (this.knockbackVx !== 0) {
+      this.x += this.knockbackVx * dt;
+      this.knockbackVx *= Math.exp(-GRENADE_KNOCKBACK_DECAY * dt);
+      if (Math.abs(this.knockbackVx) < 1) this.knockbackVx = 0;
+      if (this.x < this.boundL) { this.x = this.boundL; this.knockbackVx = 0; }
+      if (this.x > this.boundR) { this.x = this.boundR; this.knockbackVx = 0; }
+    }
     if (this.isAirborne) {
       this.x += this.jumpVx * dt;
       // Enforce tower faces while airborne (clamp in update() runs before syncToBody).
@@ -1078,6 +1132,22 @@ export class Character {
       y: onPlatform ? this.floorY - this.config.height / 2 : this.body.position.y,
     });
     Matter.Body.setVelocity(this.body, { x: 0, y: onPlatform ? 0 : this.body.velocity.y });
+  }
+
+  private clampBlockWalls(blocks: BlockData[]): void {
+    const charTop = this.y - this.config.height;
+    for (const b of blocks) {
+      // Skip if no vertical overlap (standing on top: this.y === b.y → this.y <= b.y → skipped)
+      if (this.y <= b.y || charTop >= b.y + b.height) continue;
+      // Push to the nearest block edge
+      if (this.x > b.x && this.x < b.x + b.width) {
+        this.x = this.x < b.x + b.width / 2 ? b.x : b.x + b.width;
+        this.knockbackVx = 0;
+        // Fully clear the path so requestPath rebuilds from the clamped position,
+        // which lets findBlockerInPath detect the block and route a jump over it.
+        this.clearPath();
+      }
+    }
   }
 
   syncFromBody(platforms: PlatformData[], blocks: BlockData[]) {
@@ -1152,6 +1222,21 @@ export class Character {
     this.pathTargetKey = '';
   }
 
+  private tickStuck(dt: number): void {
+    const hasActivePath = this.path.length > 0 && this.pathIdx < this.path.length;
+    if (!hasActivePath || this.isAirborne || this.isKnockedBack) {
+      this.stuckTimer  = 0;
+      this.stuckCheckX = this.x;
+      return;
+    }
+    this.stuckTimer += dt;
+    if (this.stuckTimer >= 1.5) {
+      if (Math.abs(this.x - this.stuckCheckX) < 4) this.clearPath();
+      this.stuckTimer  = 0;
+      this.stuckCheckX = this.x;
+    }
+  }
+
   /**
    * Follow the current path one tick.
    * Returns true when the final step is reached; false while still en-route.
@@ -1164,6 +1249,13 @@ export class Character {
 
     // ── walk ─────────────────────────────────────────────────────────────────
     if (step.action === 'walk') {
+      // If the character has already transitioned to a different surface (e.g. fell
+      // off a block before reaching the planned walk target), skip this step so the
+      // character doesn't walk backward to an edge that no longer makes sense.
+      if (!this.isAirborne && Math.abs(this.floorY - step.floorY) > 20) {
+        this.pathIdx++;
+        return this.pathIdx >= this.path.length;
+      }
       const dx = step.targetX - this.x;
       if (Math.abs(dx) <= 10) {
         this.pathIdx++;
@@ -1219,7 +1311,7 @@ export class Character {
   // ── Attacking behaviour ──────────────────────────────────────────────────────
 
   private updateAttacking(ctx: UpdateContext) {
-    const { dt, allChars, enemyTowerFrontX, enemyTowerY, onFire, navGraph } = ctx;
+    const { dt, allChars, enemyTowerFrontX, enemyTowerY, onFire, navGraph, blocks } = ctx;
     if (this.isAirborne) return;   // don't change horizontal intent mid-air
 
     if (this.config.type === 'medic') {
@@ -1234,7 +1326,7 @@ export class Character {
     }
 
     const dir         = this.side === 'player' ? 1 : -1;
-    const nearest     = this.nearestEnemy(allChars, this.config.attackRange);
+    const nearest     = this.nearestEnemy(allChars, this.config.attackRange, blocks);
     const distToTower = Math.abs(this.x - enemyTowerFrontX);
 
     if (nearest !== null) {
@@ -1265,11 +1357,11 @@ export class Character {
   // ── Collecting behaviour ─────────────────────────────────────────────────────
 
   private updateCollecting(ctx: UpdateContext) {
-    const { dt, allChars, coins, platforms, homeTowerFrontX, onFire, onDepositCoin, navGraph } = ctx;
+    const { dt, allChars, coins, homeTowerFrontX, onFire, onDepositCoin, navGraph, blocks } = ctx;
 
     // Attack any enemy that wanders into range without stopping movement
     if (!this.isAirborne) {
-      const nearest = this.nearestEnemy(allChars, this.config.attackRange);
+      const nearest = this.nearestEnemy(allChars, this.config.attackRange, blocks);
       if (nearest) this.attackEnemy(nearest, onFire);
     }
 
@@ -1338,20 +1430,9 @@ export class Character {
     }
 
     if (this.targetCoin) {
-      // Determine which surface the coin rests on.
-      const coinOnPlatform = this.targetCoin.isOnPlatform ||
-        platforms.some(p =>
-          !this.targetCoin!.isOnGround &&
-          this.targetCoin!.x >= p.x && this.targetCoin!.x <= p.x + p.width &&
-          this.targetCoin!.y <= p.y + 5,
-        );
-      const charOnPlatform = this.floorY < GROUND_Y;
-      const coinFloorY     = coinOnPlatform
-        ? (platforms.find(p => this.targetCoin!.x >= p.x && this.targetCoin!.x <= p.x + p.width)?.y ?? GROUND_Y)
-        : GROUND_Y;
-
-      // Navigate to the coin using the pathfinding graph.
-      this.requestPath(this.targetCoin.x, coinFloorY, navGraph, dt);
+      // Navigate to the coin's settled floor level (coin.floorY is correct once settled,
+      // falls back to GROUND_Y for in-flight coins which is fine — pathfinding adjusts en-route).
+      this.requestPath(this.targetCoin.x, this.targetCoin.floorY, navGraph, dt);
       this.followPath(dt);
 
       this.state = 'collecting';
@@ -1359,12 +1440,14 @@ export class Character {
       if (this.isAirborne) return;   // horizontal position handled by physics
 
       // ── Pickup check ──────────────────────────────────────────────────────
-      const dist        = Math.abs(this.x - this.targetCoin.x);
-      const sameSurface = Math.abs(this.floorY - this.targetCoin.floorY) < 30
-        || (charOnPlatform && coinOnPlatform);
+      const dist    = Math.abs(this.x - this.targetCoin.x);
+      const yProx   = Math.abs(this.floorY - this.targetCoin.y);
+      // Same surface: settled floorY match OR character is physically close in Y
+      const sameSurface  = Math.abs(this.floorY - this.targetCoin.floorY) < 30 || yProx < 40;
+      // Reachable: settled on any surface, near ground, or character is close in Y
       const coinReachable = this.targetCoin.isOnGround
         || this.targetCoin.y >= GROUND_Y - 30
-        || (charOnPlatform && coinOnPlatform);
+        || yProx < 40;
 
       if (dist <= CHAR_PICKUP_DIST && sameSurface && coinReachable && this.coinPickupCooldown <= 0) {
         this.coinCarryValue = this.targetCoin.value;
@@ -1389,7 +1472,7 @@ export class Character {
   // ── Harass behaviour ─────────────────────────────────────────────────────────
 
   private updateHarass(ctx: UpdateContext) {
-    const { dt, allChars, enemyTowerFrontX, homeTowerFrontX, onFire, platforms } = ctx;
+    const { dt, allChars, enemyTowerFrontX, homeTowerFrontX, onFire, platforms, blocks, navGraph } = ctx;
     if (this.isAirborne) return;
 
     const dir   = this.side === 'player' ? 1 : -1;
@@ -1400,13 +1483,13 @@ export class Character {
       this.state = 'marching';
       this.x -= dir * this.moveSpeed * dt;
       // Still fire at enemies while retreating
-      const target = this.nearestEnemy(allChars, this.config.attackRange);
+      const target = this.nearestEnemy(allChars, this.config.attackRange, blocks);
       if (target) this.attackEnemy(target, onFire);
       return;
     }
 
     // Attack any enemy in range (no position change)
-    const inRange = this.nearestEnemy(allChars, this.config.attackRange);
+    const inRange = this.nearestEnemy(allChars, this.config.attackRange, blocks);
     if (inRange) {
       this.state = 'fighting';
       this.attackEnemy(inRange, onFire);
@@ -1448,8 +1531,9 @@ export class Character {
         }
         this.state = 'marching';
       } else if (toEnemy > 0 && closestDist > this.config.attackRange * 0.8) {
-        // Enemy is ahead and not yet in range — advance, hard-clamped at safe line
-        this.x = clamp(this.x + dir * this.moveSpeed * dt);
+        // Enemy is ahead and not yet in range — use pathfinding to navigate around blocks
+        this.requestPath(clamp(closest.x), GROUND_Y, navGraph, dt);
+        this.followPath(dt);
         if (this.state !== 'fighting') this.state = 'marching';
       } else if (toEnemy <= 0) {
         if (!this.isRanged && closestDist <= this.config.attackRange * 4) {
@@ -1457,28 +1541,23 @@ export class Character {
           this.x -= dir * this.moveSpeed * dt;
           if (this.state !== 'fighting') this.state = 'marching';
         } else if (dir * (safeX - this.x) > 5) {
-          // Ranged or enemy too far behind — drift to safe line
-          this.x = clamp(this.x + dir * this.moveSpeed * 0.4 * dt);
+          // Ranged or enemy too far behind — use pathfinding to drift to safe line
+          this.requestPath(safeX, GROUND_Y, navGraph, dt);
+          this.followPath(dt);
           if (this.state !== 'fighting') this.state = 'marching';
         }
       }
       // else: enemy is ahead and within attack range — hold position
     } else {
-      // No enemies — group up with the nearest teammate, or rally near own tower if alone
+      // No enemies — use pathfinding to group up or rally near own tower
       const mate = this.nearestAlly(allChars);
-      if (mate) {
-        const distToMate = Math.abs(this.x - mate.x);
-        if (distToMate > 55) {
-          this.x += Math.sign(mate.x - this.x) * this.moveSpeed * 0.5 * dt;
-          this.state = 'marching';
-        }
-      } else {
-        // No allies on field — return to just in front of own tower
-        const rallyX = homeTowerFrontX + dir * 80;
-        if (Math.abs(this.x - rallyX) > 20) {
-          this.x += Math.sign(rallyX - this.x) * this.moveSpeed * 0.5 * dt;
-          this.state = 'marching';
-        }
+      const rallyX = mate ? mate.x : homeTowerFrontX + dir * 80;
+      const dist   = Math.abs(this.x - rallyX);
+      const thresh = mate ? 55 : 20;
+      if (dist > thresh) {
+        this.requestPath(rallyX, GROUND_Y, navGraph, dt);
+        this.followPath(dt);
+        this.state = 'marching';
       }
     }
   }
@@ -1486,7 +1565,7 @@ export class Character {
   // ── Defend behaviour ─────────────────────────────────────────────────────────
 
   private updateDefending(ctx: UpdateContext) {
-    const { dt, allChars, homeTowerFrontX, onFire } = ctx;
+    const { dt, allChars, homeTowerFrontX, onFire, blocks, navGraph } = ctx;
     if (this.isAirborne) return;
 
     const dir = this.side === 'player' ? 1 : -1;
@@ -1504,12 +1583,15 @@ export class Character {
     this.defendRoamTimer -= dt;
     if (this.defendRoamTimer <= 0) {
       this.defendRoamTimer = 6;
-      const hasEnemy = this.nearestEnemy(allChars, this.config.attackRange) !== null;
-      if (!hasEnemy) this.defendTargetX = pickSpot();
+      const hasEnemy = this.nearestEnemy(allChars, this.config.attackRange, blocks) !== null;
+      if (!hasEnemy) {
+        this.defendTargetX = pickSpot();
+        this.clearPath();
+      }
     }
 
     // Attack any enemy in range
-    const target = this.nearestEnemy(allChars, this.config.attackRange);
+    const target = this.nearestEnemy(allChars, this.config.attackRange, blocks);
     if (target) {
       this.state = 'fighting';
       this.attackEnemy(target, onFire);
@@ -1525,13 +1607,12 @@ export class Character {
       return;
     }
 
-    // No enemies in range — walk to the current patrol spot
+    // No enemies in range — use pathfinding to walk to the current patrol spot
     const delta = this.defendTargetX - this.x;
     if (Math.abs(delta) > 5) {
       this.state = 'marching';
-      this.x += Math.sign(delta) * this.moveSpeed * dt;
-      if (delta > 0) this.x = Math.min(this.x, this.defendTargetX);
-      else           this.x = Math.max(this.x, this.defendTargetX);
+      this.requestPath(this.defendTargetX, GROUND_Y, navGraph, dt);
+      this.followPath(dt);
     } else {
       this.state = 'fighting'; // holding the patrol spot
     }
@@ -1742,7 +1823,17 @@ export class Character {
     }
   }
 
-  private nearestEnemy(chars: Character[], range: number): Character | null {
+  private hasLineOfSight(tx: number, ty: number, blocks: BlockData[]): boolean {
+    const sy = this.bowY;
+    for (const b of blocks) {
+      // Skip: shooter is standing on top of this block
+      if (this.bowY >= b.y && this.x >= b.x && this.x <= b.x + b.width) continue;
+      if (segmentIntersectsAABB(this.x, sy, tx, ty, b)) return false;
+    }
+    return true;
+  }
+
+  private nearestEnemy(chars: Character[], range: number, blocks: BlockData[] = []): Character | null {
     let best: Character | null = null;
     let minDistSq = Infinity;
     const rangeSq = range * range;
@@ -1751,7 +1842,11 @@ export class Character {
       const dx = this.x - t.x;
       const dy = this.y - t.y;
       const distSq = dx * dx + dy * dy;
-      if (distSq <= rangeSq && distSq < minDistSq) { minDistSq = distSq; best = t; }
+      if (distSq <= rangeSq && distSq < minDistSq) {
+        if (blocks.length > 0 && this.isRanged && !this.hasLineOfSight(t.x, t.bowY, blocks)) continue;
+        minDistSq = distSq;
+        best = t;
+      }
     }
     return best;
   }

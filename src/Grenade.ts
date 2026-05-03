@@ -2,6 +2,7 @@ import * as PIXI from 'pixi.js';
 import type { Side } from './Tower';
 import type { Character } from './Character';
 import type { PlatformData } from './Platform';
+import type { BlockData } from './Block';
 import { GROUND_Y } from './constants';
 
 const EXPLODE_DUR = 0.5;   // seconds the explosion ring expands
@@ -98,7 +99,7 @@ export class Grenade {
     this.gfx.endFill();
   }
 
-  update(dt: number, platforms: PlatformData[]) {
+  update(dt: number, platforms: PlatformData[], blocks: BlockData[] = []) {
     if (this.isDead) return;
 
     if (this.exploding) {
@@ -121,17 +122,39 @@ export class Grenade {
     }
 
     this.elapsed += dt;
+    const prevX   = this.x;
     const prevY   = this.y;
     this.vy      += this.gravity * dt;
     this.x       += this.vx * dt;
     this.y       += this.vy * dt;
+
+    // Block collision — solid from all sides; bounce off whichever face was crossed
+    for (const b of blocks) {
+      if (this.x >= b.x && this.x <= b.x + b.width &&
+          this.y >= b.y && this.y <= b.y + b.height) {
+        const fromTop    = prevY <= b.y;
+        const fromBottom = prevY >= b.y + b.height;
+        const fromLeft   = prevX <= b.x;
+        const fromRight  = prevX >= b.x + b.width;
+
+        if (fromTop || fromBottom) {
+          this.y  = fromTop ? b.y : b.y + b.height;
+          this.bounceY();
+        }
+        if (fromLeft || fromRight) {
+          this.x  = fromLeft ? b.x : b.x + b.width;
+          this.bounceX();
+        }
+        break;
+      }
+    }
 
     // Platform collision — one-way, tunneling-safe (same logic as character syncFromBody)
     if (this.vy >= 0) {
       for (const p of platforms) {
         if (this.x >= p.x && this.x <= p.x + p.width && prevY <= p.y && this.y >= p.y) {
           this.y = p.y;
-          this.bounce();
+          this.bounceY();
           break;
         }
       }
@@ -140,7 +163,7 @@ export class Grenade {
     // Ground collision — bounce until settled
     if (this.y >= GROUND_Y) {
       this.y = GROUND_Y;
-      this.bounce();
+      this.bounceY();
     }
 
     this.gfx.rotation += (this.vx > 0 ? 1 : -1) * 4.5 * dt;
@@ -151,13 +174,23 @@ export class Grenade {
     if (this.elapsed >= this.fuseSec) this.explode();
   }
 
-  private bounce() {
+  private bounceY() {
     if (Math.abs(this.vy) > 80) {
       this.vy = -this.vy * 0.42;
       this.vx *= 0.72;
     } else {
       this.vy  = 0;
       this.vx *= 0.88;
+    }
+  }
+
+  private bounceX() {
+    if (Math.abs(this.vx) > 80) {
+      this.vx = -this.vx * 0.42;
+      this.vy *= 0.72;
+    } else {
+      this.vx  = 0;
+      this.vy *= 0.88;
     }
   }
 

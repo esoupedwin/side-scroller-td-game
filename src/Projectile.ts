@@ -7,6 +7,7 @@ import {
 } from './constants';
 import type { Character } from './Character';
 import type { Tower, Side } from './Tower';
+import type { BlockData } from './Block';
 
 export type ProjectileKind = 'arrow' | 'bullet';
 
@@ -143,6 +144,7 @@ export class Projectile {
     characters: Character[],
     playerTower: Tower,
     enemyTower:  Tower,
+    blocks:      BlockData[] = [],
   ) {
     if (this.isDead) return;
 
@@ -161,6 +163,15 @@ export class Projectile {
     const yLerp   = this.sy + (this.ty - this.sy) * t;
     const arcDrop = -this.arcHeight * 4 * t * (1 - t);
     this.y = yLerp + arcDrop;
+
+    // Block collision — kill the projectile if it enters a solid block mid-flight
+    for (const b of blocks) {
+      if (this.x >= b.x && this.x <= b.x + b.width &&
+          this.y >= b.y && this.y <= b.y + b.height) {
+        this.isDead = true;
+        return;
+      }
+    }
 
     // Angle follows instantaneous velocity
     const vx = (this.tx - this.sx) / this.travelTime;

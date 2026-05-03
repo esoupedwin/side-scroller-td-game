@@ -247,7 +247,11 @@ export const GRENADIER = {
 };
 
 // ── Grenade ──────────────────────────────────────────────────────────────────
-export const GRENADE_FUSE_S       = gr.fuseSec;
-export const GRENADE_SPLASH_R     = gr.splashRadius;
-export const GRENADE_GRAVITY      = gr.gravity;
-export const GRENADE_MAX_VX       = gr.maxVx;
+export const GRENADE_FUSE_S            = gr.fuseSec;
+export const GRENADE_SPLASH_R          = gr.splashRadius;
+export const GRENADE_GRAVITY           = gr.gravity;
+export const GRENADE_MAX_VX            = gr.maxVx;
+export const GRENADE_SPLASH_MIN_FRAC   = gr.splashMinDamageFrac;
+export const GRENADE_KNOCKBACK_MAX_VX  = gr.knockbackMaxVx;
+export const GRENADE_KNOCKBACK_MAX_VY  = gr.knockbackMaxVy;
+export const GRENADE_KNOCKBACK_DECAY   = gr.knockbackDecay;

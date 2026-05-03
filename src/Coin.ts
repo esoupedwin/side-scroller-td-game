@@ -90,7 +90,7 @@ export class Coin {
     this.gfx.beginFill(hi, 0.85);   this.gfx.drawCircle(-3, -3, 2.5);  this.gfx.endFill();
   }
 
-  update(dt: number, platforms: PlatformData[] = []) {
+  update(dt: number, platforms: PlatformData[] = [], blocks: PlatformData[] = []) {
     if (this.isDead || this.isPickedUp) return;
 
     // Kill coin instantly if it travels beyond either tower
@@ -111,17 +111,21 @@ export class Coin {
         this.body.velocity.y * this.body.velocity.y,
       );
 
-      // Settle when nearly stopped and close to a surface (ground or platform).
+      // Settle when nearly stopped and close to a surface (ground, platform, or block).
       if (speed < 0.05) {
         const platBelow = platforms.find(
           p => this.x >= p.x && this.x <= p.x + p.width &&
                this.y >= p.y - 35 && this.y <= p.y + 5,
         );
+        const blockBelow = blocks.find(
+          b => this.x >= b.x && this.x <= b.x + b.width &&
+               this.y >= b.y - 35 && this.y <= b.y + 5,
+        );
         const nearGround = this.y >= GROUND_Y - 35;
 
-        if (platBelow || nearGround) {
+        if (platBelow || blockBelow || nearGround) {
           this.isOnGround = true;
-          this.floorY     = platBelow ? platBelow.y : GROUND_Y;
+          this.floorY     = platBelow ? platBelow.y : blockBelow ? blockBelow.y : GROUND_Y;
           Matter.Body.setStatic(this.body, true);
           this.y = this.floorY === GROUND_Y ? LAND_Y : this.floorY - 14;
         }

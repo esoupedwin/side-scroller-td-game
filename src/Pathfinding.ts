@@ -10,6 +10,7 @@ export interface NavSurface {
   x:     number;   // left edge
   y:     number;   // top surface Y (character feet position)
   width: number;
+  solid: boolean;  // true = block (impassable sides); false = platform (one-way, walkable under)
 }
 
 export interface PathStep {
@@ -26,6 +27,21 @@ const JUMP_TOTAL_TIME = (2 * JUMP_VELOCITY) / CHAR_GRAVITY;                     
 // Horizontal clearance a character moving at max speed can cover during a full jump.
 // Used to decide whether a platform edge is reachable from a given ground position.
 const MAX_JUMP_H_RANGE = 120 * JUMP_TOTAL_TIME;  // 120 px/s × 1.3 s ≈ 156 px
+
+// Time (seconds) from jump start until the character falls back down to height `dy`.
+// Uses the positive root of: dy = JUMP_VELOCITY*t - 0.5*CHAR_GRAVITY*t²
+function arcLandingTime(dy: number): number {
+  const d = JUMP_VELOCITY * JUMP_VELOCITY - 2 * CHAR_GRAVITY * dy;
+  if (d <= 0) return JUMP_TOTAL_TIME;
+  return (JUMP_VELOCITY + Math.sqrt(d)) / CHAR_GRAVITY;
+}
+
+// Representative speed for positioning the jump trigger under a one-way platform.
+// Errs toward slower characters so the trigger stays reachable for all unit types.
+const PLATFORM_JUMP_SPEED = 80;   // px/s
+
+// How far before a solid block's near edge to start the jump (block cannot be entered).
+const BLOCK_JUMP_LEAD = 40;       // px
 
 // ── Internal graph types ─────────────────────────────────────────────────────
 
@@ -62,16 +78,13 @@ export class NavGraph {
     const groundRight = enemyTowerX  - TOWER_WIDTH / 2;
 
     // Surface 0 is always the ground
-    this.surfaces.push({ id: 0, x: groundLeft, y: GROUND_Y, width: groundRight - groundLeft });
+    this.surfaces.push({ id: 0, x: groundLeft, y: GROUND_Y, width: groundRight - groundLeft, solid: false });
 
-    const elevated = [...platforms, ...blocks];
-    for (let i = 0; i < elevated.length; i++) {
-      this.surfaces.push({
-        id:    i + 1,
-        x:     elevated[i].x,
-        y:     elevated[i].y,
-        width: elevated[i].width,
-      });
+    for (let i = 0; i < platforms.length; i++) {
+      this.surfaces.push({ id: i + 1, x: platforms[i].x, y: platforms[i].y, width: platforms[i].width, solid: false });
+    }
+    for (let i = 0; i < blocks.length; i++) {
+      this.surfaces.push({ id: platforms.length + i + 1, x: blocks[i].x, y: blocks[i].y, width: blocks[i].width, solid: true });
     }
 
     for (const s of this.surfaces) this.edges.set(s.id, []);
@@ -139,18 +152,46 @@ export class NavGraph {
     const fromSurf = this.surfaceAt(fromFloorY);
     const toSurf   = this.surfaceAt(toFloorY);
 
-    // Same surface or unknown — direct walk
+    // Same surface or unknown — check for solid blocks in the direct path before falling back to a walk
     if (!fromSurf || !toSurf || fromSurf.id === toSurf.id) {
+      if (fromSurf) {
+        const blocker = this.findBlockerInPath(fromSurf.id, fromX, toX, fromSurf.y);
+        if (blocker) {
+          return this.buildSteps([fromSurf.id, blocker.id, fromSurf.id], fromX, toX, toFloorY);
+        }
+      }
       return [{ action: 'walk', targetX: toX, floorY: toFloorY }];
     }
 
     const surfPath = this.astar(fromSurf.id, toSurf.id, toX, toFloorY);
-    void fromX;   // kept for future use (start-position-aware edge selection)
     if (!surfPath || surfPath.length < 2) {
       return [{ action: 'walk', targetX: toX, floorY: toFloorY }];
     }
 
-    return this.buildSteps(surfPath, toX, toFloorY);
+    return this.buildSteps(surfPath, fromX, toX, toFloorY);
+  }
+
+  /**
+   * Returns the first solid surface (block) that lies between fromX and toX
+   * at a height above fromFloorY and is reachable by a jump from fromSurfId.
+   * Platforms are excluded — characters can walk under them.
+   */
+  private findBlockerInPath(fromSurfId: number, fromX: number, toX: number, fromFloorY: number): NavSurface | null {
+    const dir      = toX > fromX ? 1 : -1;
+    const minX     = Math.min(fromX, toX);
+    const maxX     = Math.max(fromX, toX);
+    const fromEdges = this.edges.get(fromSurfId) ?? [];
+
+    const candidates = this.surfaces.filter(s =>
+      s.id !== fromSurfId &&
+      s.solid &&                                                    // only blocks, not platforms
+      s.y < fromFloorY &&                                           // elevated above current floor
+      s.x < maxX && s.x + s.width > minX &&                        // in horizontal range
+      fromEdges.some(e => e.toId === s.id && e.action === 'jump'),  // reachable by jump
+    );
+
+    if (candidates.length === 0) return null;
+    return candidates.sort((a, b) => dir > 0 ? a.x - b.x : b.x - a.x)[0];
   }
 
   // ── Private: A* over surfaces ─────────────────────────────────────────────
@@ -198,8 +239,9 @@ export class NavGraph {
 
   // ── Private: surface sequence → PathStep list ─────────────────────────────
 
-  private buildSteps(surfPath: number[], toX: number, toFloorY: number): PathStep[] {
+  private buildSteps(surfPath: number[], fromX: number, toX: number, toFloorY: number): PathStep[] {
     const steps: PathStep[] = [];
+    let curX = fromX;
 
     for (let i = 0; i < surfPath.length - 1; i++) {
       const curId  = surfPath[i];
@@ -215,13 +257,31 @@ export class NavGraph {
       const landX = isLastTransition ? toX : edge.landX;
 
       if (edge.action === 'jump') {
-        // Walk to jump trigger, then jump
-        steps.push({ action: 'walk', targetX: edge.triggerX, floorY: cur.y });
-        steps.push({ action: 'jump', targetX: landX, floorY: next.y, jumpTriggerX: edge.triggerX });
+        const approachFromLeft = curX < next.x + next.width / 2;
+        const dy               = cur.y - next.y;  // height to climb (positive)
+        let jumpTriggerX: number;
+
+        if (next.solid) {
+          // Solid block: cannot enter horizontally — jump from BLOCK_JUMP_LEAD px
+          // before the near edge so the arc carries the character up and over.
+          jumpTriggerX = approachFromLeft
+            ? next.x - BLOCK_JUMP_LEAD
+            : next.x + next.width + BLOCK_JUMP_LEAD;
+        } else {
+          // One-way platform: characters can walk under it, so position the trigger
+          // directly below the intended landing spot using the physics arc distance.
+          const hDist = PLATFORM_JUMP_SPEED * arcLandingTime(dy);
+          jumpTriggerX = approachFromLeft ? landX - hDist : landX + hDist;
+        }
+
+        steps.push({ action: 'walk', targetX: jumpTriggerX, floorY: cur.y });
+        steps.push({ action: 'jump', targetX: landX, floorY: next.y, jumpTriggerX });
+        curX = landX;
       } else {
         // Walk to the fall-off edge, then fall
         steps.push({ action: 'walk', targetX: edge.triggerX, floorY: cur.y });
         steps.push({ action: 'fall', targetX: landX, floorY: next.y });
+        curX = landX;
       }
     }
 

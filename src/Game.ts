@@ -9,7 +9,7 @@ export interface CpuStrategyInfo {
   decision: string;   // most recent significant action
 }
 import { Physics } from './Physics';
-import { buildBackground, buildTowerRangeMarkers, buildCoinBox } from './Background';
+import { buildBackground, buildGround, buildTowerRangeMarkers, buildCoinBox } from './Background';
 import { DEFAULT_MAP, loadMapWithOverride, type MapDefinition } from './maps';
 import { Tower } from './Tower';
 import type { TowerShot } from './Tower';
@@ -34,7 +34,8 @@ import {
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER, GRENADIER,
-  GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX,
+  GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
+  GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY,
   CPU_SPAWN_MIN_MS, CPU_SPAWN_MAX_MS, CPU_FIRST_SPAWN_MAX,
   STARTING_COINS, CHAR_COST,
   PASSIVE_INCOME_RATE, LOW_BALANCE_THRESHOLD, LOW_BALANCE_INCOME_MULT,
@@ -306,6 +307,9 @@ export class Game {
         type: 'passthrough' as const, label: 'Coin Box',
       },
     ];
+
+    // Ground plane — drawn above all game objects so units appear grounded.
+    buildGround(this.world, m.worldWidth);
 
     // Debug overlay — drawn on top of everything in world space.
     this.collisionDebugLayer = new PIXI.Graphics();
@@ -707,7 +711,7 @@ export class Game {
     }
 
     // Update coins
-    for (const coin of this.coins) coin.update(dt, this.platformData);
+    for (const coin of this.coins) coin.update(dt, this.platformData, this.blockData);
 
     // Update sheep
     if (this.sheep) this.sheep.update(dt);
@@ -808,7 +812,7 @@ export class Game {
     // Update projectiles
     for (const p of this.projectiles) {
       const wasAlive = !p.isDead;
-      p.update(dt, liveChars, this.playerTower, this.enemyTower);
+      p.update(dt, liveChars, this.playerTower, this.enemyTower, this.blockData);
       // Startle the sheep when a projectile lands within 55 px of it
       if (wasAlive && p.isDead && this.sheep && Math.abs(p.x - this.sheep.x) <= 55) {
         this.sheep.reactToHit(p.x);
@@ -817,14 +821,37 @@ export class Game {
 
     // Update grenades + process AoE explosions
     for (const g of this.grenades) {
-      g.update(dt, this.platformData);
+      g.update(dt, this.platformData, this.blockData);
       const ex = g.consumeExplosion();
       if (ex) {
         for (const c of liveChars) {
           if (c.side === g.side) continue;
-          if (Math.hypot(c.x - ex.x, c.y - ex.y) <= ex.radius) {
-            c.takeDamage(ex.damage, ex.shooter ?? undefined);
+          const dist = Math.hypot(c.x - ex.x, c.y - ex.y);
+          if (dist <= ex.radius) {
+            const frac = 1 - (dist / ex.radius) * (1 - GRENADE_SPLASH_MIN_FRAC);
+            c.takeDamage(Math.round(ex.damage * frac), ex.shooter ?? undefined);
+
+            // Knockback: push outward from blast centre, stronger at closer range
+            const kFrac = 1 - dist / ex.radius;   // 1 at centre, 0 at edge
+            const dx    = c.x - ex.x;
+            const dy    = c.y - ex.y;
+            const len   = Math.hypot(dx, dy) || 1;
+            c.applyKnockback(
+              (dx / len) * GRENADE_KNOCKBACK_MAX_VX * kFrac,
+              (dy / len) * GRENADE_KNOCKBACK_MAX_VY * kFrac,
+              dt,
+            );
           }
+        }
+        // Tower damage — find closest point on the enemy tower rect to the blast centre
+        const targetTower = g.side === 'player' ? this.enemyTower : this.playerTower;
+        const towerLeft   = targetTower.x - TOWER_WIDTH / 2;
+        const towerRight  = targetTower.x + TOWER_WIDTH / 2;
+        const towerTop    = GROUND_Y - TOWER_HEIGHT;
+        const nearX = Math.max(towerLeft,  Math.min(towerRight, ex.x));
+        const nearY = Math.max(towerTop,   Math.min(GROUND_Y,   ex.y));
+        if (Math.hypot(nearX - ex.x, nearY - ex.y) <= ex.radius) {
+          targetTower.takeDamage(ex.damage);
         }
         if (this.sheep && Math.hypot(this.sheep.x - ex.x, this.sheep.y - ex.y) <= ex.radius + 20) {
           this.sheep.reactToHit(ex.x);

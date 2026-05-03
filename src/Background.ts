@@ -27,16 +27,6 @@ export function buildBackground(stage: PIXI.Container, worldWidth: number) {
   g.closePath();
   g.endFill();
 
-  // Ground
-  g.beginFill(0x4a7c59);
-  g.drawRect(0, GROUND_Y, worldWidth, GAME_HEIGHT - GROUND_Y);
-  g.endFill();
-
-  // Ground stripe
-  g.beginFill(0x3d6b4a);
-  g.drawRect(0, GROUND_Y, worldWidth, 6);
-  g.endFill();
-
   // Stars
   g.beginFill(0xffffff);
   const rng = mulberry32(42);
@@ -48,6 +38,18 @@ export function buildBackground(stage: PIXI.Container, worldWidth: number) {
   }
   g.endFill();
 
+  stage.addChild(g);
+}
+
+/** Ground plane — must be added to stage LAST so it renders above all game objects. */
+export function buildGround(stage: PIXI.Container, worldWidth: number) {
+  const g = new PIXI.Graphics();
+  g.beginFill(0x4a7c59);
+  g.drawRect(0, GROUND_Y, worldWidth, GAME_HEIGHT - GROUND_Y);
+  g.endFill();
+  g.beginFill(0x3d6b4a);
+  g.drawRect(0, GROUND_Y, worldWidth, 6);
+  g.endFill();
   stage.addChild(g);
 }
 
