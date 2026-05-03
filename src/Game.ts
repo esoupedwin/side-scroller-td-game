@@ -10,7 +10,7 @@ export interface CpuStrategyInfo {
 }
 import { Physics } from './Physics';
 import { buildBackground, buildTowerRangeMarkers, buildCoinBox } from './Background';
-import { DEFAULT_MAP, type MapDefinition } from './maps';
+import { DEFAULT_MAP, loadMapWithOverride, type MapDefinition } from './maps';
 import { Tower } from './Tower';
 import type { TowerShot } from './Tower';
 import { Character, RANK_NAMES, type CharacterConfig, type FireRequest, type UpdateContext } from './Character';
@@ -107,7 +107,7 @@ export class Game {
   private powerUpIndicatorMoveTimer   = 0;
   private powerUpTypePreview: PowerUpType = 'heal';
   private powerUpLastCountdown        = -1;
-  private mapDef:        MapDefinition = DEFAULT_MAP;
+  private mapDef:        MapDefinition = loadMapWithOverride(DEFAULT_MAP);
   private platforms:     Platform[]    = [];
   private readonly platformData: PlatformData[] = [];
   private blocks:        Block[]       = [];

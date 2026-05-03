@@ -69,3 +69,27 @@ export const HIGHLANDS_MAP: MapDefinition = {
 };
 
 export const ALL_MAPS: MapDefinition[] = [DEFAULT_MAP, HIGHLANDS_MAP];
+
+// ── localStorage persistence ──────────────────────────────────────────────────
+
+const STORAGE_KEY = 'coin_saved_maps';
+
+function loadStoredMaps(): Record<string, MapDefinition> {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}'); }
+  catch { return {}; }
+}
+
+/** Persist a map by id so the game picks it up on next load. */
+export function saveMapToStorage(map: MapDefinition): void {
+  const all = loadStoredMaps();
+  all[map.id] = map;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+}
+
+/**
+ * Return the stored version of the map if one exists, otherwise the original.
+ * Called at game startup so saved edits are reflected immediately on refresh.
+ */
+export function loadMapWithOverride(map: MapDefinition): MapDefinition {
+  return loadStoredMaps()[map.id] ?? map;
+}

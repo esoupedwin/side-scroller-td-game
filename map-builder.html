@@ -135,15 +135,19 @@
       <select id="preset-select"><option value="">— select —</option></select>
       <label>Map name:</label>
       <input type="text" id="input-name" value="New Map" />
+      <button id="btn-save-to-game" class="primary" style="margin-left:8px;">Save to Game</button>
+      <span style="color:#445; font-size:10px; font-style:italic;">changes apply after refreshing the game</span>
+      <span style="flex:1"></span>
       <span id="plat-count" style="color:#556; font-size:11px;">0 platform(s)</span>
+      <span id="block-count" style="color:#556; font-size:11px;">0 block(s)</span>
     </div>
 
     <!-- Canvas -->
     <canvas id="builder-canvas"></canvas>
 
     <p class="hint">
-      Click to select a platform · Drag to move · Drag left/right edge to resize ·
-      Drag tower or coin box · Delete key removes selected platform
+      Click to select a platform or block · Drag to move · Drag left/right edge to resize ·
+      Drag tower or coin box · Delete key removes selected item
     </p>
 
     <!-- Tower + coin box controls -->
@@ -176,6 +180,21 @@
         <label>Y:</label><input type="number" id="input-plat-y" value="0" />
         <label>W:</label><input type="number" id="input-plat-w" value="360" />
         <label>H:</label><input type="number" id="input-plat-h" value="14" />
+      </div>
+    </div>
+
+    <!-- Block controls -->
+    <div class="section">
+      <div class="section-title">Blocks</div>
+      <button id="btn-add-block" class="primary">+ Add Block</button>
+      <button id="btn-delete-block" class="danger">Delete Selected</button>
+
+      <div id="block-panel" style="display:none; flex-wrap:wrap; gap:8px; align-items:center; width:100%;">
+        <span id="block-label" style="color:#aaa; font-weight:bold; font-size:12px;">Block 1</span>
+        <label>X:</label><input type="number" id="input-block-x" value="0" />
+        <label>Y:</label><input type="number" id="input-block-y" value="0" />
+        <label>W:</label><input type="number" id="input-block-w" value="200" />
+        <label>H:</label><input type="number" id="input-block-h" value="40" />
       </div>
     </div>
 
