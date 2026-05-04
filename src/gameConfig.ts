@@ -230,6 +230,11 @@ export const GameConfig = {
     indicatorDriftSpeed: 0.667, // fraction of full drift speed (1 = original, 2/3 = 3× slower)
   },
 
+  cheats: {
+    playerCoinGrant: 100,   // K key — coins added to player balance
+    cpuCoinGrant:    100,   // L key — coins added to CPU balance
+  },
+
   promotions: {
     killAP:            1,     // achievement points per kill
     coinAP:            2,     // AP per successful coin deposit

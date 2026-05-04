@@ -1,7 +1,9 @@
 import type { Character } from './Character';
 import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
-import { GROUND_Y } from './constants';
+import { GROUND_Y, JUMP_VELOCITY, CHAR_GRAVITY } from './constants';
+
+const MAX_JUMP_HEIGHT = (JUMP_VELOCITY * JUMP_VELOCITY) / (2 * CHAR_GRAVITY) + 10;
 
 type EntryCategory = 'event' | 'anomaly' | 'snapshot';
 
@@ -40,15 +42,23 @@ interface TickInput {
 interface CharTrack {
   lastAirborneLogTime: number;
   lastStuckLogTime:    number;
+  lastThrashLogTime:   number;
   lastBehavior:        string;
   lastState:           string;
   noMoveSince:         number;
   lastX:               number;
+  // Counter snapshots from the start of the current "no-move" window.
+  noMoveClamps:        number;
+  noMoveRebuilds:      number;
+  // Sliding 1-second window for path-rebuild rate.
+  rebuildWindowStart:  number;
+  rebuildWindowBase:   number;
 }
 
 const SNAPSHOT_INTERVAL_S = 1.5;
 const ANOMALY_DEBOUNCE_S  = 2;
 const STUCK_THRESHOLD_S   = 2;
+const THRASH_REBUILDS_PER_SEC = 8;   // path rebuilt this often = something keeps clearing it
 
 export class Diagnostics {
   private active            = false;
@@ -104,20 +114,24 @@ export class Diagnostics {
     this.knownIds = liveIds;
 
     for (const c of chars) {
+      const info = c.diagnosticInfo;
       let track = this.trackById.get(c.id);
       if (!track) {
         track = {
           lastAirborneLogTime: -Infinity,
           lastStuckLogTime:    -Infinity,
+          lastThrashLogTime:   -Infinity,
           lastBehavior:        c.behavior,
           lastState:           c.state,
           noMoveSince:         time,
           lastX:               c.x,
+          noMoveClamps:        info.clampedCount,
+          noMoveRebuilds:      info.pathRebuildCount,
+          rebuildWindowStart:  time,
+          rebuildWindowBase:   info.pathRebuildCount,
         };
         this.trackById.set(c.id, track);
       }
-
-      const info = c.diagnosticInfo;
 
       // Behavior / state transitions
       if (c.behavior !== track.lastBehavior) {
@@ -145,25 +159,74 @@ export class Diagnostics {
         }
       }
 
-      // Stuck-with-active-path anomaly
+      // Stuck-with-active-path anomaly. Captures rich context so a remote
+      // reviewer can decide whether the path lacks a jump step, the planned
+      // jump trigger is unreachable, or something keeps clearing the path.
       if (info.pathLen > 0 && !info.isAirborne) {
         if (Math.abs(c.x - track.lastX) > 4) {
-          track.noMoveSince = time;
-          track.lastX       = c.x;
+          track.noMoveSince     = time;
+          track.lastX           = c.x;
+          track.noMoveClamps    = info.clampedCount;
+          track.noMoveRebuilds  = info.pathRebuildCount;
         } else if (time - track.noMoveSince > STUCK_THRESHOLD_S
                 && time - track.lastStuckLogTime > ANOMALY_DEBOUNCE_S * 2) {
           track.lastStuckLogTime = time;
-          const pathStep = info.pathStep
-            ? `${info.pathStep.action}→x${Math.round(info.pathStep.targetX)}@y${Math.round(info.pathStep.floorY)}`
-            : '—';
-          this.note(time, 'anomaly', `Stuck (${STUCK_THRESHOLD_S}s, path active): #${c.id} ${c.name}`, {
-            x: round(c.x), y: round(c.y), floorY: round(info.floorY),
-            behavior: c.behavior, state: c.state, pathLen: info.pathLen, nextStep: pathStep,
-          });
+          const windowS = (time - track.noMoveSince).toFixed(1);
+          const clampDelta   = info.clampedCount     - track.noMoveClamps;
+          const rebuildDelta = info.pathRebuildCount - track.noMoveRebuilds;
+          const pathSummary  = info.pathRemaining.map(s =>
+            s.action === 'jump'
+              ? `jump@x${Math.round(s.jumpTriggerX ?? s.targetX)}→x${Math.round(s.targetX)}@y${Math.round(s.floorY)}`
+              : `${s.action}→x${Math.round(s.targetX)}@y${Math.round(s.floorY)}`,
+          ).join(' | ');
+          const hasJumpStep  = info.pathRemaining.some(s => s.action === 'jump');
+          const nearestBlock = nearestBlockOnAxis(c.x, blocks);
+          const nearestBlockInfo = nearestBlock
+            ? {
+                gap:      Math.round(nearestBlock.gap),
+                side:     nearestBlock.side,
+                x:        Math.round(nearestBlock.block.x),
+                y:        Math.round(nearestBlock.block.y),
+                width:    Math.round(nearestBlock.block.width),
+                height:   Math.round(nearestBlock.block.height),
+                topAbove: Math.round(GROUND_Y - nearestBlock.block.y),
+                jumpable: (GROUND_Y - nearestBlock.block.y) <= MAX_JUMP_HEIGHT,
+              }
+            : null;
+          this.note(time, 'anomaly',
+            `Stuck (${windowS}s no movement, path active): #${c.id} ${c.name}`, {
+              x: round(c.x), y: round(c.y), floorY: round(info.floorY),
+              behavior: c.behavior, state: c.state,
+              pathLen: info.pathLen, hasJumpStep, path: pathSummary,
+              clampsInWindow: clampDelta, pathRebuildsInWindow: rebuildDelta,
+              nearestBlock: nearestBlockInfo,
+              maxJumpHeight: Math.round(MAX_JUMP_HEIGHT),
+            });
         }
       } else {
-        track.noMoveSince = time;
-        track.lastX       = c.x;
+        track.noMoveSince     = time;
+        track.lastX           = c.x;
+        track.noMoveClamps    = info.clampedCount;
+        track.noMoveRebuilds  = info.pathRebuildCount;
+      }
+
+      // Path-thrash anomaly: path rebuilt many times in a 1-second window.
+      // Hits when something (e.g. clamp clearing) repeatedly invalidates it.
+      const windowDur = time - track.rebuildWindowStart;
+      if (windowDur >= 1) {
+        const rebuildsInWindow = info.pathRebuildCount - track.rebuildWindowBase;
+        if (rebuildsInWindow >= THRASH_REBUILDS_PER_SEC
+            && time - track.lastThrashLogTime > ANOMALY_DEBOUNCE_S) {
+          track.lastThrashLogTime = time;
+          this.note(time, 'anomaly',
+            `Path thrash: #${c.id} ${c.name} rebuilt path ${rebuildsInWindow}× in ${windowDur.toFixed(1)}s`, {
+              x: round(c.x), y: round(c.y), floorY: round(info.floorY),
+              behavior: c.behavior, state: c.state,
+              clampedCountTotal: info.clampedCount,
+            });
+        }
+        track.rebuildWindowStart = time;
+        track.rebuildWindowBase  = info.pathRebuildCount;
       }
     }
 
@@ -270,6 +333,24 @@ export class Diagnostics {
 }
 
 function round(n: number): number { return Math.round(n); }
+
+/**
+ * Returns the block whose horizontal span is nearest the character's x
+ * (touching counts as gap=0). `side` is which side of the block the
+ * character sits on, useful for understanding clamp/jump geometry.
+ */
+function nearestBlockOnAxis(x: number, blocks: BlockData[]):
+  { block: BlockData; gap: number; side: 'left' | 'right' | 'inside' } | null {
+  let best: { block: BlockData; gap: number; side: 'left' | 'right' | 'inside' } | null = null;
+  for (const b of blocks) {
+    let gap: number; let side: 'left' | 'right' | 'inside';
+    if (x < b.x)              { gap = b.x - x;                   side = 'left'; }
+    else if (x > b.x + b.width){ gap = x - (b.x + b.width);      side = 'right'; }
+    else                       { gap = 0;                         side = 'inside'; }
+    if (best === null || gap < best.gap) best = { block: b, gap, side };
+  }
+  return best;
+}
 
 function formatTime(t: number): string {
   const total = Math.max(0, t);

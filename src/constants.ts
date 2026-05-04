@@ -101,6 +101,10 @@ export const PROJ_TOWER_SPLASH   = proj.towerSplashBonus;
 export const DMG_LABEL_LIFETIME  = ui.damageLabel.lifetimeSec;
 export const DMG_LABEL_RISE      = ui.damageLabel.risePx;
 
+// ── Dev cheats ───────────────────────────────────────────────────────────────
+export const CHEAT_PLAYER_COIN_GRANT = GameConfig.cheats.playerCoinGrant;
+export const CHEAT_CPU_COIN_GRANT    = GameConfig.cheats.cpuCoinGrant;
+
 // ── Power-ups ────────────────────────────────────────────────────────────────
 export const POWERUP_PICKUP_DIST    = pu.pickupDist;
 export const POWERUP_LIFETIME_S     = pu.lifetimeSec;

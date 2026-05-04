@@ -161,6 +161,9 @@ export class Character {
   // Seconds since path was built; stale paths are discarded and rebuilt.
   private pathAge      = 0;
   private readonly PATH_TTL = 8;   // s — re-plan after this many seconds
+  // Diagnostic counters (lifetime).
+  clampedCount      = 0;
+  pathRebuildCount  = 0;
   // Stuck detection: if the character hasn't moved while following a path, replan.
   private stuckTimer   = 0;
   private stuckCheckX  = 0;
@@ -227,17 +230,28 @@ export class Character {
   // ── Diagnostic introspection (read-only snapshot of internal state) ────────
 
   get diagnosticInfo(): {
-    isAirborne: boolean;
-    floorY:     number;
-    pathLen:    number;
-    pathStep:   { action: string; targetX: number; floorY: number } | null;
+    isAirborne:        boolean;
+    floorY:            number;
+    pathLen:           number;
+    pathStep:          { action: string; targetX: number; floorY: number } | null;
+    pathRemaining:     { action: string; targetX: number; floorY: number; jumpTriggerX?: number }[];
+    clampedCount:      number;
+    pathRebuildCount:  number;
   } {
-    const step = this.path[this.pathIdx];
+    const remaining = this.path.slice(this.pathIdx).map(s => ({
+      action:       s.action,
+      targetX:      s.targetX,
+      floorY:       s.floorY,
+      jumpTriggerX: s.jumpTriggerX,
+    }));
     return {
-      isAirborne: this.isAirborne,
-      floorY:     this.floorY,
-      pathLen:    Math.max(0, this.path.length - this.pathIdx),
-      pathStep:   step ? { action: step.action, targetX: step.targetX, floorY: step.floorY } : null,
+      isAirborne:       this.isAirborne,
+      floorY:           this.floorY,
+      pathLen:          remaining.length,
+      pathStep:         remaining[0] ?? null,
+      pathRemaining:    remaining,
+      clampedCount:     this.clampedCount,
+      pathRebuildCount: this.pathRebuildCount,
     };
   }
 
@@ -1162,6 +1176,7 @@ export class Character {
       if (this.x > b.x && this.x < b.x + b.width) {
         this.x = this.x < b.x + b.width / 2 ? b.x : b.x + b.width;
         this.knockbackVx = 0;
+        this.clampedCount++;
         // Fully clear the path so requestPath rebuilds from the clamped position,
         // which lets findBlockerInPath detect the block and route a jump over it.
         this.clearPath();
@@ -1235,6 +1250,7 @@ export class Character {
     this.pathIdx      = 0;
     this.pathTargetKey = key;
     this.pathAge      = 0;
+    this.pathRebuildCount++;
   }
 
   /** Invalidate the current path (e.g. after a coin is picked up, target changes). */

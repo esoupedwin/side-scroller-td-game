@@ -49,6 +49,7 @@ import {
   CPU_URGENT_MAX_FACTOR, CPU_COMFORT_MIN_FACTOR,
   CPU_NEUTRAL_MIN_FACTOR, CPU_NEUTRAL_MAX_FACTOR,
   POWERUP_DROP_INTERVAL, POWERUP_INDICATOR_LEAD,
+  CHEAT_PLAYER_COIN_GRANT, CHEAT_CPU_COIN_GRANT,
 } from './constants';
 
 function spawnBoost(): number {
@@ -141,12 +142,20 @@ export class Game {
       this.collisionDebugLayer.visible = this.showCollisionBoxes;
     }
     if (e.key === 'k' || e.key === 'K') {
-      this.coinBalance += 100;
+      this.coinBalance += CHEAT_PLAYER_COIN_GRANT;
       this.notifyCoins();
+      this.diagnostics.noteEvent(this.elapsedSeconds, `Cheat K: player +${CHEAT_PLAYER_COIN_GRANT}`, {
+        playerTotal: Math.floor(this.coinBalance),
+        cpuTotal:    Math.floor(this.cpuCoinBalance),
+      });
     }
     if (e.key === 'l' || e.key === 'L') {
-      this.cpuCoinBalance += 10;
+      this.cpuCoinBalance += CHEAT_CPU_COIN_GRANT;
       this.notifyCpuCoins();
+      this.diagnostics.noteEvent(this.elapsedSeconds, `Cheat L: CPU +${CHEAT_CPU_COIN_GRANT}`, {
+        playerTotal: Math.floor(this.coinBalance),
+        cpuTotal:    Math.floor(this.cpuCoinBalance),
+      });
     }
   };
   private readonly onKeyUp = (e: KeyboardEvent) => { this.keysDown.delete(e.key); };
@@ -753,6 +762,11 @@ export class Game {
           } else {
             this.cpuCoinBalance += value;
           }
+          this.diagnostics.noteEvent(this.elapsedSeconds,
+            `Coin deposit: #${c.id} ${c.name} (${c.side}) +${value}`, {
+              playerTotal: Math.floor(this.coinBalance),
+              cpuTotal:    Math.floor(this.cpuCoinBalance),
+            });
         },
       };
 
