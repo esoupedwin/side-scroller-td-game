@@ -1183,8 +1183,8 @@ export class Character {
         this.x = this.x < b.x + b.width / 2 ? b.x : b.x + b.width;
         this.knockbackVx = 0;
         this.clampedCount++;
-        // Fully clear the path so requestPath rebuilds from the clamped position,
-        // which lets findBlockerInPath detect the block and route a jump over it.
+        // Clear the path so requestPath replans from the clamped position
+        // (the new subsegment) and routes a jump over the block.
         this.clearPath();
       }
     }

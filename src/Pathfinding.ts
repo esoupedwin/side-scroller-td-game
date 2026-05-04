@@ -77,14 +77,38 @@ export class NavGraph {
     const groundLeft  = playerTowerX + TOWER_WIDTH / 2;
     const groundRight = enemyTowerX  - TOWER_WIDTH / 2;
 
-    // Surface 0 is always the ground
-    this.surfaces.push({ id: 0, x: groundLeft, y: GROUND_Y, width: groundRight - groundLeft, solid: false });
+    let nextId = 0;
 
-    for (let i = 0; i < platforms.length; i++) {
-      this.surfaces.push({ id: i + 1, x: platforms[i].x, y: platforms[i].y, width: platforms[i].width, solid: false });
-    }
-    for (let i = 0; i < blocks.length; i++) {
-      this.surfaces.push({ id: platforms.length + i + 1, x: blocks[i].x, y: blocks[i].y, width: blocks[i].width, solid: true });
+    // A solid block obstructs a non-solid surface when its bounding box
+    // straddles that surface's plane (top above, bottom at or below). This
+    // splits the surface into walkable subsegments — A* must then route a
+    // jump over the block to cross.
+    const splitSurface = (sx: number, sy: number, sw: number) => {
+      const blockers = blocks
+        .filter(b =>
+          b.y < sy &&
+          b.y + (b.height ?? 0) >= sy &&
+          b.x < sx + sw && b.x + b.width > sx,
+        )
+        .map(b => ({ left: Math.max(b.x, sx), right: Math.min(b.x + b.width, sx + sw) }))
+        .sort((a, b) => a.left - b.left);
+
+      let cursor = sx;
+      for (const blk of blockers) {
+        if (blk.left > cursor) {
+          this.surfaces.push({ id: nextId++, x: cursor, y: sy, width: blk.left - cursor, solid: false });
+        }
+        cursor = Math.max(cursor, blk.right);
+      }
+      if (cursor < sx + sw) {
+        this.surfaces.push({ id: nextId++, x: cursor, y: sy, width: sx + sw - cursor, solid: false });
+      }
+    };
+
+    splitSurface(groundLeft, GROUND_Y, groundRight - groundLeft);
+    for (const p of platforms) splitSurface(p.x, p.y, p.width);
+    for (const b of blocks) {
+      this.surfaces.push({ id: nextId++, x: b.x, y: b.y, width: b.width, solid: true });
     }
 
     for (const s of this.surfaces) this.edges.set(s.id, []);
@@ -135,12 +159,20 @@ export class NavGraph {
     }
   }
 
-  /** Surface the character is currently standing on, matched by floorY. */
-  surfaceAt(floorY: number): NavSurface | null {
+  /**
+   * Surface the character is on. With non-solid surfaces split into
+   * subsegments by intersecting solid blocks, an x is required to pick
+   * the correct subsegment when multiple share the same y.
+   */
+  surfaceAt(floorY: number, x?: number): NavSurface | null {
+    let yMatch: NavSurface | null = null;
     for (const s of this.surfaces) {
-      if (Math.abs(s.y - floorY) < 15) return s;
+      if (Math.abs(s.y - floorY) >= 15) continue;
+      if (x === undefined) return s;
+      if (x >= s.x && x <= s.x + s.width) return s;
+      yMatch = yMatch ?? s;     // fallback to any same-y surface if x misses every span
     }
-    return null;
+    return yMatch;
   }
 
   /**
@@ -149,17 +181,10 @@ export class NavGraph {
    * when surfaces are unknown or unreachable.
    */
   findPath(fromX: number, fromFloorY: number, toX: number, toFloorY: number): PathStep[] {
-    const fromSurf = this.surfaceAt(fromFloorY);
-    const toSurf   = this.surfaceAt(toFloorY);
+    const fromSurf = this.surfaceAt(fromFloorY, fromX);
+    const toSurf   = this.surfaceAt(toFloorY, toX);
 
-    // Same surface or unknown — check for solid blocks in the direct path before falling back to a walk
     if (!fromSurf || !toSurf || fromSurf.id === toSurf.id) {
-      if (fromSurf) {
-        const blocker = this.findBlockerInPath(fromSurf.id, fromX, toX, fromSurf.y);
-        if (blocker) {
-          return this.buildSteps([fromSurf.id, blocker.id, fromSurf.id], fromX, toX, toFloorY);
-        }
-      }
       return [{ action: 'walk', targetX: toX, floorY: toFloorY }];
     }
 
@@ -169,29 +194,6 @@ export class NavGraph {
     }
 
     return this.buildSteps(surfPath, fromX, toX, toFloorY);
-  }
-
-  /**
-   * Returns the first solid surface (block) that lies between fromX and toX
-   * at a height above fromFloorY and is reachable by a jump from fromSurfId.
-   * Platforms are excluded — characters can walk under them.
-   */
-  private findBlockerInPath(fromSurfId: number, fromX: number, toX: number, fromFloorY: number): NavSurface | null {
-    const dir      = toX > fromX ? 1 : -1;
-    const minX     = Math.min(fromX, toX);
-    const maxX     = Math.max(fromX, toX);
-    const fromEdges = this.edges.get(fromSurfId) ?? [];
-
-    const candidates = this.surfaces.filter(s =>
-      s.id !== fromSurfId &&
-      s.solid &&                                                    // only blocks, not platforms
-      s.y < fromFloorY &&                                           // elevated above current floor
-      s.x < maxX && s.x + s.width > minX &&                        // in horizontal range
-      fromEdges.some(e => e.toId === s.id && e.action === 'jump'),  // reachable by jump
-    );
-
-    if (candidates.length === 0) return null;
-    return candidates.sort((a, b) => dir > 0 ? a.x - b.x : b.x - a.x)[0];
   }
 
   // ── Private: A* over surfaces ─────────────────────────────────────────────
