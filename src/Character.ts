@@ -164,6 +164,9 @@ export class Character {
   // Diagnostic counters (lifetime).
   clampedCount      = 0;
   pathRebuildCount  = 0;
+  // Last path produced by requestPath (preserved across clearPath() so the
+  // diagnostic system can still inspect what pathfinding most recently chose).
+  private lastBuiltPath: PathStep[] = [];
   // Stuck detection: if the character hasn't moved while following a path, replan.
   private stuckTimer   = 0;
   private stuckCheckX  = 0;
@@ -235,21 +238,24 @@ export class Character {
     pathLen:           number;
     pathStep:          { action: string; targetX: number; floorY: number } | null;
     pathRemaining:     { action: string; targetX: number; floorY: number; jumpTriggerX?: number }[];
+    lastBuiltPath:     { action: string; targetX: number; floorY: number; jumpTriggerX?: number }[];
     clampedCount:      number;
     pathRebuildCount:  number;
   } {
-    const remaining = this.path.slice(this.pathIdx).map(s => ({
+    const mapStep = (s: PathStep) => ({
       action:       s.action,
       targetX:      s.targetX,
       floorY:       s.floorY,
       jumpTriggerX: s.jumpTriggerX,
-    }));
+    });
+    const remaining = this.path.slice(this.pathIdx).map(mapStep);
     return {
       isAirborne:       this.isAirborne,
       floorY:           this.floorY,
       pathLen:          remaining.length,
       pathStep:         remaining[0] ?? null,
       pathRemaining:    remaining,
+      lastBuiltPath:    this.lastBuiltPath.map(mapStep),
       clampedCount:     this.clampedCount,
       pathRebuildCount: this.pathRebuildCount,
     };
@@ -1251,6 +1257,7 @@ export class Character {
     this.pathTargetKey = key;
     this.pathAge      = 0;
     this.pathRebuildCount++;
+    this.lastBuiltPath = this.path.slice();
   }
 
   /** Invalidate the current path (e.g. after a coin is picked up, target changes). */

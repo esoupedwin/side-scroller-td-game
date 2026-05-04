@@ -159,9 +159,8 @@ export class Diagnostics {
         }
       }
 
-      // Stuck-with-active-path anomaly. Captures rich context so a remote
-      // reviewer can decide whether the path lacks a jump step, the planned
-      // jump trigger is unreachable, or something keeps clearing the path.
+      // Stuck-with-active-path anomaly. Triggers when the character has a
+      // current path but x hasn't moved for STUCK_THRESHOLD_S.
       if (info.pathLen > 0 && !info.isAirborne) {
         if (Math.abs(c.x - track.lastX) > 4) {
           track.noMoveSince     = time;
@@ -174,34 +173,9 @@ export class Diagnostics {
           const windowS = (time - track.noMoveSince).toFixed(1);
           const clampDelta   = info.clampedCount     - track.noMoveClamps;
           const rebuildDelta = info.pathRebuildCount - track.noMoveRebuilds;
-          const pathSummary  = info.pathRemaining.map(s =>
-            s.action === 'jump'
-              ? `jump@x${Math.round(s.jumpTriggerX ?? s.targetX)}→x${Math.round(s.targetX)}@y${Math.round(s.floorY)}`
-              : `${s.action}→x${Math.round(s.targetX)}@y${Math.round(s.floorY)}`,
-          ).join(' | ');
-          const hasJumpStep  = info.pathRemaining.some(s => s.action === 'jump');
-          const nearestBlock = nearestBlockOnAxis(c.x, blocks);
-          const nearestBlockInfo = nearestBlock
-            ? {
-                gap:      Math.round(nearestBlock.gap),
-                side:     nearestBlock.side,
-                x:        Math.round(nearestBlock.block.x),
-                y:        Math.round(nearestBlock.block.y),
-                width:    Math.round(nearestBlock.block.width),
-                height:   Math.round(nearestBlock.block.height),
-                topAbove: Math.round(GROUND_Y - nearestBlock.block.y),
-                jumpable: (GROUND_Y - nearestBlock.block.y) <= MAX_JUMP_HEIGHT,
-              }
-            : null;
           this.note(time, 'anomaly',
-            `Stuck (${windowS}s no movement, path active): #${c.id} ${c.name}`, {
-              x: round(c.x), y: round(c.y), floorY: round(info.floorY),
-              behavior: c.behavior, state: c.state,
-              pathLen: info.pathLen, hasJumpStep, path: pathSummary,
-              clampsInWindow: clampDelta, pathRebuildsInWindow: rebuildDelta,
-              nearestBlock: nearestBlockInfo,
-              maxJumpHeight: Math.round(MAX_JUMP_HEIGHT),
-            });
+            `Stuck (${windowS}s no movement, path active): #${c.id} ${c.name}`,
+            buildBlockerContext(c, info, blocks, { clampsInWindow: clampDelta, pathRebuildsInWindow: rebuildDelta }));
         }
       } else {
         track.noMoveSince     = time;
@@ -211,7 +185,9 @@ export class Diagnostics {
       }
 
       // Path-thrash anomaly: path rebuilt many times in a 1-second window.
-      // Hits when something (e.g. clamp clearing) repeatedly invalidates it.
+      // Triggers even when the path is being cleared every frame (so Stuck
+      // can't fire). Carries the same blocker context as Stuck so a reviewer
+      // can see WHY the path keeps thrashing.
       const windowDur = time - track.rebuildWindowStart;
       if (windowDur >= 1) {
         const rebuildsInWindow = info.pathRebuildCount - track.rebuildWindowBase;
@@ -219,11 +195,12 @@ export class Diagnostics {
             && time - track.lastThrashLogTime > ANOMALY_DEBOUNCE_S) {
           track.lastThrashLogTime = time;
           this.note(time, 'anomaly',
-            `Path thrash: #${c.id} ${c.name} rebuilt path ${rebuildsInWindow}× in ${windowDur.toFixed(1)}s`, {
-              x: round(c.x), y: round(c.y), floorY: round(info.floorY),
-              behavior: c.behavior, state: c.state,
-              clampedCountTotal: info.clampedCount,
-            });
+            `Path thrash: #${c.id} ${c.name} rebuilt path ${rebuildsInWindow}× in ${windowDur.toFixed(1)}s`,
+            buildBlockerContext(c, info, blocks, {
+              rebuildsInThisWindow: rebuildsInWindow,
+              clampedCountTotal:    info.clampedCount,
+              pathRebuildsTotal:    info.pathRebuildCount,
+            }));
         }
         track.rebuildWindowStart = time;
         track.rebuildWindowBase  = info.pathRebuildCount;
@@ -333,6 +310,57 @@ export class Diagnostics {
 }
 
 function round(n: number): number { return Math.round(n); }
+
+type CharLike = { id: number; name: string; x: number; y: number; behavior: string; state: string };
+type DiagInfo = Character['diagnosticInfo'];
+
+function formatPath(steps: { action: string; targetX: number; floorY: number; jumpTriggerX?: number }[]): string {
+  if (steps.length === 0) return '(empty)';
+  return steps.map(s =>
+    s.action === 'jump'
+      ? `jump@x${Math.round(s.jumpTriggerX ?? s.targetX)}→x${Math.round(s.targetX)}@y${Math.round(s.floorY)}`
+      : `${s.action}→x${Math.round(s.targetX)}@y${Math.round(s.floorY)}`,
+  ).join(' | ');
+}
+
+/**
+ * Build the rich context payload shared by Stuck and Path-thrash anomalies.
+ * Includes both the current and last-built paths, jump-step presence,
+ * nearest-block geometry and jumpability.
+ */
+function buildBlockerContext(
+  c: CharLike,
+  info: DiagInfo,
+  blocks: BlockData[],
+  extra: Record<string, unknown>,
+): Record<string, unknown> {
+  const remaining = info.pathRemaining;
+  const lastBuilt = info.lastBuiltPath;
+  const hasJumpStep     = remaining.some(s => s.action === 'jump');
+  const lastHadJumpStep = lastBuilt.some(s => s.action === 'jump');
+  const nearest = nearestBlockOnAxis(c.x, blocks);
+  const nearestBlockInfo = nearest
+    ? {
+        gap:      Math.round(nearest.gap),
+        side:     nearest.side,
+        x:        Math.round(nearest.block.x),
+        y:        Math.round(nearest.block.y),
+        width:    Math.round(nearest.block.width),
+        height:   Math.round(nearest.block.height),
+        topAbove: Math.round(GROUND_Y - nearest.block.y),
+        jumpable: (GROUND_Y - nearest.block.y) <= MAX_JUMP_HEIGHT,
+      }
+    : null;
+  return {
+    x: round(c.x), y: round(c.y), floorY: round(info.floorY),
+    behavior: c.behavior, state: c.state,
+    pathLen: info.pathLen, hasJumpStep, path: formatPath(remaining),
+    lastBuiltPathLen: lastBuilt.length, lastHadJumpStep, lastBuiltPath: formatPath(lastBuilt),
+    nearestBlock: nearestBlockInfo,
+    maxJumpHeight: Math.round(MAX_JUMP_HEIGHT),
+    ...extra,
+  };
+}
 
 /**
  * Returns the block whose horizontal span is nearest the character's x
