@@ -224,6 +224,23 @@ export class Character {
     this.syncPosition();
   }
 
+  // ── Diagnostic introspection (read-only snapshot of internal state) ────────
+
+  get diagnosticInfo(): {
+    isAirborne: boolean;
+    floorY:     number;
+    pathLen:    number;
+    pathStep:   { action: string; targetX: number; floorY: number } | null;
+  } {
+    const step = this.path[this.pathIdx];
+    return {
+      isAirborne: this.isAirborne,
+      floorY:     this.floorY,
+      pathLen:    Math.max(0, this.path.length - this.pathIdx),
+      pathStep:   step ? { action: step.action, targetX: step.targetX, floorY: step.floorY } : null,
+    };
+  }
+
   // ── Behavior toggle ──────────────────────────────────────────────────────────
 
   get behavior(): 'attacking' | 'collecting' | 'harass' | 'defend' { return this._behavior; }

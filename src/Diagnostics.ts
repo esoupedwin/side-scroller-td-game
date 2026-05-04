@@ -1,0 +1,286 @@
+import type { Character } from './Character';
+import type { PlatformData } from './Platform';
+import type { BlockData } from './Block';
+import { GROUND_Y } from './constants';
+
+type EntryCategory = 'event' | 'anomaly' | 'snapshot';
+
+interface LogEntry {
+  t:        number;
+  category: EntryCategory;
+  msg:      string;
+  data?:    Record<string, unknown>;
+}
+
+interface CharSnapshot {
+  id:       number;
+  name:     string;
+  side:     string;
+  type:     string;
+  rank:     number;
+  hp:       number;
+  maxHp:    number;
+  x:        number;
+  y:        number;
+  floorY:   number;
+  airborne: boolean;
+  behavior: string;
+  state:    string;
+  pathLen:  number;
+  pathStep: string | null;
+}
+
+interface TickInput {
+  time:      number;
+  chars:     Character[];
+  platforms: PlatformData[];
+  blocks:    BlockData[];
+}
+
+interface CharTrack {
+  lastAirborneLogTime: number;
+  lastStuckLogTime:    number;
+  lastBehavior:        string;
+  lastState:           string;
+  noMoveSince:         number;
+  lastX:               number;
+}
+
+const SNAPSHOT_INTERVAL_S = 1.5;
+const ANOMALY_DEBOUNCE_S  = 2;
+const STUCK_THRESHOLD_S   = 2;
+
+export class Diagnostics {
+  private active            = false;
+  private startedAtGameTime = 0;
+  private log:               LogEntry[] = [];
+  private nextSnapshotAt    = 0;
+  private trackById:        Map<number, CharTrack> = new Map();
+  private knownIds:         Set<number>            = new Set();
+
+  isActive(): boolean { return this.active; }
+  entryCount(): number { return this.log.length; }
+
+  start(now: number) {
+    this.active            = true;
+    this.startedAtGameTime = now;
+    this.log               = [];
+    this.nextSnapshotAt    = now;
+    this.trackById.clear();
+    this.knownIds.clear();
+    this.note(now, 'event', 'Diagnose mode started');
+  }
+
+  stop(now: number) {
+    if (!this.active) return;
+    this.note(now, 'event', 'Diagnose mode stopped');
+    this.active = false;
+  }
+
+  /** Manual event log from outside (spawn, death, tower hit, etc.). */
+  noteEvent(now: number, msg: string, data?: Record<string, unknown>) {
+    if (!this.active) return;
+    this.note(now, 'event', msg, data);
+  }
+
+  private note(now: number, category: EntryCategory, msg: string, data?: Record<string, unknown>) {
+    this.log.push({ t: now, category, msg, data });
+  }
+
+  tick(input: TickInput) {
+    if (!this.active) return;
+    const { time, chars, platforms, blocks } = input;
+
+    const liveIds = new Set<number>();
+    for (const c of chars) {
+      liveIds.add(c.id);
+      if (!this.knownIds.has(c.id)) {
+        this.note(time, 'event', `Spawn #${c.id} ${c.name} (${c.side} ${c.config.type})`);
+      }
+    }
+    for (const id of this.knownIds) {
+      if (!liveIds.has(id)) this.note(time, 'event', `Despawn #${id}`);
+    }
+    this.knownIds = liveIds;
+
+    for (const c of chars) {
+      let track = this.trackById.get(c.id);
+      if (!track) {
+        track = {
+          lastAirborneLogTime: -Infinity,
+          lastStuckLogTime:    -Infinity,
+          lastBehavior:        c.behavior,
+          lastState:           c.state,
+          noMoveSince:         time,
+          lastX:               c.x,
+        };
+        this.trackById.set(c.id, track);
+      }
+
+      const info = c.diagnosticInfo;
+
+      // Behavior / state transitions
+      if (c.behavior !== track.lastBehavior) {
+        this.note(time, 'event', `Behavior #${c.id} ${c.name}: ${track.lastBehavior} → ${c.behavior}`);
+        track.lastBehavior = c.behavior;
+      }
+      if (c.state !== track.lastState) {
+        this.note(time, 'event', `State #${c.id} ${c.name}: ${track.lastState} → ${c.state}`);
+        track.lastState = c.state;
+      }
+
+      // Walking-in-air anomaly: not airborne, on elevated surface, but no
+      // platform/block matches both the character's x and floorY.
+      if (!info.isAirborne && info.floorY < GROUND_Y - 0.5) {
+        const onPlat  = platforms.some(p =>
+          c.x >= p.x && c.x <= p.x + p.width && Math.abs(p.y - info.floorY) < 1);
+        const onBlock = blocks.some(b =>
+          c.x >= b.x && c.x <= b.x + b.width && Math.abs(b.y - info.floorY) < 1);
+        if (!onPlat && !onBlock && time - track.lastAirborneLogTime > ANOMALY_DEBOUNCE_S) {
+          track.lastAirborneLogTime = time;
+          this.note(time, 'anomaly', `Walking in air: #${c.id} ${c.name}`, {
+            x: round(c.x), y: round(c.y), floorY: round(info.floorY),
+            behavior: c.behavior, state: c.state,
+          });
+        }
+      }
+
+      // Stuck-with-active-path anomaly
+      if (info.pathLen > 0 && !info.isAirborne) {
+        if (Math.abs(c.x - track.lastX) > 4) {
+          track.noMoveSince = time;
+          track.lastX       = c.x;
+        } else if (time - track.noMoveSince > STUCK_THRESHOLD_S
+                && time - track.lastStuckLogTime > ANOMALY_DEBOUNCE_S * 2) {
+          track.lastStuckLogTime = time;
+          const pathStep = info.pathStep
+            ? `${info.pathStep.action}→x${Math.round(info.pathStep.targetX)}@y${Math.round(info.pathStep.floorY)}`
+            : '—';
+          this.note(time, 'anomaly', `Stuck (${STUCK_THRESHOLD_S}s, path active): #${c.id} ${c.name}`, {
+            x: round(c.x), y: round(c.y), floorY: round(info.floorY),
+            behavior: c.behavior, state: c.state, pathLen: info.pathLen, nextStep: pathStep,
+          });
+        }
+      } else {
+        track.noMoveSince = time;
+        track.lastX       = c.x;
+      }
+    }
+
+    for (const id of Array.from(this.trackById.keys())) {
+      if (!liveIds.has(id)) this.trackById.delete(id);
+    }
+
+    if (time >= this.nextSnapshotAt) {
+      this.nextSnapshotAt = time + SNAPSHOT_INTERVAL_S;
+      const snaps: CharSnapshot[] = chars.map(c => {
+        const info = c.diagnosticInfo;
+        return {
+          id:       c.id,
+          name:     c.name,
+          side:     c.side,
+          type:     c.config.type,
+          rank:     c.rank,
+          hp:       Math.round(c.hp),
+          maxHp:    Math.round(c.maxHp),
+          x:        round(c.x),
+          y:        round(c.y),
+          floorY:   round(info.floorY),
+          airborne: info.isAirborne,
+          behavior: c.behavior,
+          state:    c.state,
+          pathLen:  info.pathLen,
+          pathStep: info.pathStep
+            ? `${info.pathStep.action}→x${Math.round(info.pathStep.targetX)}@y${Math.round(info.pathStep.floorY)}`
+            : null,
+        };
+      });
+      this.log.push({ t: time, category: 'snapshot', msg: 'snapshot', data: { chars: snaps } });
+    }
+  }
+
+  produceMarkdown(): string {
+    const lines: string[] = [];
+    lines.push('# Tower Defence — Diagnostic Report');
+    lines.push('');
+    lines.push(`Generated: ${new Date().toISOString()}`);
+    lines.push(`Entries: ${this.log.length}`);
+
+    if (this.log.length === 0) {
+      lines.push('');
+      lines.push('_No events recorded. Click "Diagnose" to begin logging, then play for a while._');
+      return lines.join('\n') + '\n';
+    }
+
+    const start = this.startedAtGameTime;
+    const end   = this.log[this.log.length - 1].t;
+    lines.push(`Span: ${formatTime(start)} → ${formatTime(end)} (${(end - start).toFixed(1)}s of game time)`);
+    lines.push('');
+
+    const events    = this.log.filter(l => l.category === 'event');
+    const anomalies = this.log.filter(l => l.category === 'anomaly');
+    const snapshots = this.log.filter(l => l.category === 'snapshot');
+
+    lines.push(`## Anomalies (${anomalies.length})`);
+    lines.push('');
+    lines.push('Automatically detected behavior that likely indicates a bug.');
+    lines.push('');
+    if (anomalies.length === 0) {
+      lines.push('_None detected during this session._');
+    } else {
+      for (const a of anomalies) {
+        lines.push(`- \`${formatTime(a.t)}\` **${a.msg}**${formatData(a.data)}`);
+      }
+    }
+    lines.push('');
+
+    lines.push(`## Events (${events.length})`);
+    lines.push('');
+    if (events.length === 0) {
+      lines.push('_None._');
+    } else {
+      for (const e of events) {
+        lines.push(`- \`${formatTime(e.t)}\` ${e.msg}${formatData(e.data)}`);
+      }
+    }
+    lines.push('');
+
+    lines.push(`## Snapshots (${snapshots.length}, every ${SNAPSHOT_INTERVAL_S}s)`);
+    lines.push('');
+    for (const s of snapshots) {
+      const chars = (s.data as { chars: CharSnapshot[] }).chars;
+      lines.push(`### \`${formatTime(s.t)}\` — ${chars.length} live`);
+      lines.push('');
+      if (chars.length === 0) {
+        lines.push('_(no live characters)_');
+        lines.push('');
+        continue;
+      }
+      lines.push('| ID | Name | Side | Type | Behavior | State | x | y | floorY | air | hp | path |');
+      lines.push('|---:|------|------|------|----------|-------|--:|--:|-------:|:---:|----|------|');
+      for (const c of chars) {
+        const path = c.pathLen > 0 ? `${c.pathLen}: ${c.pathStep ?? ''}` : '—';
+        lines.push(`| ${c.id} | ${c.name} | ${c.side} | ${c.type} | ${c.behavior} | ${c.state} | ${c.x} | ${c.y} | ${c.floorY} | ${c.airborne ? '✓' : ''} | ${c.hp}/${c.maxHp} | ${path} |`);
+      }
+      lines.push('');
+    }
+
+    return lines.join('\n') + '\n';
+  }
+}
+
+function round(n: number): number { return Math.round(n); }
+
+function formatTime(t: number): string {
+  const total = Math.max(0, t);
+  const m = Math.floor(total / 60);
+  const s = total - m * 60;
+  return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+}
+
+function formatData(d?: Record<string, unknown>): string {
+  if (!d) return '';
+  const parts = Object.entries(d).map(([k, v]) =>
+    `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`);
+  return ' — ' + parts.join(', ');
+}

@@ -28,6 +28,7 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 import type { CollisionBoxData } from './CollisionBox';
 import { NavGraph } from './Pathfinding';
+import { Diagnostics } from './Diagnostics';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
   VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
@@ -120,6 +121,10 @@ export class Game {
   private readonly keysDown = new Set<string>();
 
   private navGraph!: NavGraph;
+
+  readonly diagnostics = new Diagnostics();
+
+  get elapsedSeconds(): number { return GAME_DURATION_SEC - this.timeRemaining; }
 
   // Collision-box debug overlay (toggled with 'B')
   private collisionDebugLayer!: PIXI.Graphics;
@@ -761,6 +766,13 @@ export class Game {
     if (this.sheep) this.physics.updatePlatformPassthrough(this.sheep.body);
     this.physics.step(dt);
     for (const c of liveChars) c.syncFromBody(this.platformData, this.blockData);
+
+    this.diagnostics.tick({
+      time:      GAME_DURATION_SEC - this.timeRemaining,
+      chars:     liveChars,
+      platforms: this.platformData,
+      blocks:    this.blockData,
+    });
 
     // Tower fire
     const fireShot = (shot: TowerShot, side: 'player' | 'enemy') =>

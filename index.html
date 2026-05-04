@@ -95,6 +95,25 @@
         color: #bbb;
         white-space: nowrap;
       }
+      .dev-btn {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.12);
+        color: #bbb;
+        font-family: inherit;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding: 3px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .dev-btn:hover { background: rgba(255,255,255,0.12); color: #ddd; }
+      .dev-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .dev-btn.is-active {
+        background: rgba(230,57,70,0.18);
+        border-color: rgba(230,57,70,0.55);
+        color: #ff8a93;
+      }
 
       /* ── Countdown timer (top-centre) ──────────────────────────────────────── */
       #countdown {
@@ -404,6 +423,12 @@
             <span class="dev-item-label">Last Decision</span>
             <span id="cpu-decision" style="font-size:10px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px;">—</span>
           </div>
+        </div>
+
+        <div class="dev-item" style="gap:6px; margin-left:auto;">
+          <button id="diagnose-btn" class="dev-btn">Diagnose</button>
+          <button id="diagnose-export-btn" class="dev-btn" disabled>Produce Diagnostic Data</button>
+          <span id="diagnose-status" style="font-size:9px; color:#666;">idle</span>
         </div>
       </div>
     </div>

@@ -52,6 +52,45 @@ restartBtn.addEventListener('click', () => {
   game.reset();  // reset() calls onCoinsChanged which re-evaluates button states
 });
 
+// ── Diagnose mode ──────────────────────────────────────────────────────────
+const diagnoseBtn       = document.getElementById('diagnose-btn')        as HTMLButtonElement;
+const diagnoseExportBtn = document.getElementById('diagnose-export-btn') as HTMLButtonElement;
+const diagnoseStatusEl  = document.getElementById('diagnose-status')!;
+
+function refreshDiagnoseUi() {
+  const active = game.diagnostics.isActive();
+  diagnoseBtn.classList.toggle('is-active', active);
+  diagnoseBtn.textContent = active ? 'Diagnose: ON' : 'Diagnose';
+  const count = game.diagnostics.entryCount();
+  diagnoseExportBtn.disabled = count === 0;
+  diagnoseStatusEl.textContent = active
+    ? `recording — ${count} entries`
+    : count > 0 ? `${count} entries ready` : 'idle';
+}
+
+diagnoseBtn.addEventListener('click', () => {
+  if (game.diagnostics.isActive()) game.diagnostics.stop(game.elapsedSeconds);
+  else                              game.diagnostics.start(game.elapsedSeconds);
+  refreshDiagnoseUi();
+});
+
+diagnoseExportBtn.addEventListener('click', () => {
+  const md   = game.diagnostics.produceMarkdown();
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  a.href     = url;
+  a.download = `diagnostic-${ts}.md`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+setInterval(refreshDiagnoseUi, 500);
+refreshDiagnoseUi();
+
 function handleCpuCoinsChanged(coins: number) {
   cpuCoinAmountEl.textContent = String(coins);
 }
