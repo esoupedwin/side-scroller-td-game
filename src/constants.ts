@@ -7,6 +7,7 @@ const ui    = GameConfig.ui;
 const promo = GameConfig.promotions;
 const pu    = GameConfig.powerUp;
 const gr    = GameConfig.grenade;
+const rkt   = GameConfig.rocket;
 
 export const VIEWPORT_WIDTH   = canvas.width;        // visible canvas width (1248 px)
 export const GAME_WIDTH       = GameConfig.worldWidth; // scrollable world width (2246 px)
@@ -149,6 +150,7 @@ export const CHAR_COST = {
   heavy:     ch.heavy.cost,
   tanker:    ch.tanker.cost,
   grenadier: ch.grenadier.cost,
+  rocketeer: ch.rocketeer.cost,
 } as const;
 
 export const CHAR_WIDTH  = ch.width;
@@ -250,6 +252,18 @@ export const GRENADIER = {
   height:      ch.height,
 };
 
+export const ROCKETEER = {
+  type:        ch.rocketeer.type,
+  hp:          ch.rocketeer.hp,
+  speed:       ch.rocketeer.speed,
+  attackRange: ch.rocketeer.attackRange,
+  attackPower: ch.rocketeer.attackPower,
+  fireRate:    ch.rocketeer.fireRate,
+  critical:    ch.rocketeer.critical,
+  width:       ch.width,
+  height:      ch.height,
+};
+
 // ── Grenade ──────────────────────────────────────────────────────────────────
 export const GRENADE_FUSE_S            = gr.fuseSec;
 export const GRENADE_SPLASH_R          = gr.splashRadius;
@@ -259,3 +273,14 @@ export const GRENADE_SPLASH_MIN_FRAC   = gr.splashMinDamageFrac;
 export const GRENADE_KNOCKBACK_MAX_VX  = gr.knockbackMaxVx;
 export const GRENADE_KNOCKBACK_MAX_VY  = gr.knockbackMaxVy;
 export const GRENADE_KNOCKBACK_DECAY   = gr.knockbackDecay;
+
+// ── Rocket ───────────────────────────────────────────────────────────────────
+export const ROCKET_FUSE_S             = rkt.fuseSec;
+export const ROCKET_HIT_RADIUS         = rkt.hitRadius;
+export const ROCKET_SPLASH_R           = rkt.splashRadius;
+export const ROCKET_GRAVITY            = rkt.gravity;
+export const ROCKET_LAUNCH_VX          = rkt.launchVx;
+export const ROCKET_SPLASH_MIN_FRAC    = rkt.splashMinDamageFrac;
+export const ROCKET_KNOCKBACK_MAX_VX   = rkt.knockbackMaxVx;
+export const ROCKET_KNOCKBACK_MAX_VY   = rkt.knockbackMaxVy;
+export const ROCKET_KNOCKBACK_DECAY    = rkt.knockbackDecay;

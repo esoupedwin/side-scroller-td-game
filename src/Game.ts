@@ -16,6 +16,7 @@ import type { TowerShot } from './Tower';
 import { Character, RANK_NAMES, type CharacterConfig, type FireRequest, type UpdateContext } from './Character';
 import { Projectile } from './Projectile';
 import { Grenade } from './Grenade';
+import { Rocket } from './Rocket';
 import { CharacterHUD } from './CharacterHUD';
 import { Coin, type CoinKind } from './Coin';
 import { PowerUp, type PowerUpType } from './PowerUp';
@@ -34,9 +35,11 @@ import {
   VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER, GRENADIER,
+  WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER, GRENADIER, ROCKETEER,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
   GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY,
+  ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX, ROCKET_SPLASH_MIN_FRAC,
+  ROCKET_HIT_RADIUS, ROCKET_KNOCKBACK_MAX_VX, ROCKET_KNOCKBACK_MAX_VY, ROCKET_KNOCKBACK_DECAY,
   CPU_SPAWN_MIN_MS, CPU_SPAWN_MAX_MS, CPU_FIRST_SPAWN_MAX,
   STARTING_COINS, CHAR_COST,
   PASSIVE_INCOME_RATE, LOW_BALANCE_THRESHOLD, LOW_BALANCE_INCOME_MULT,
@@ -75,6 +78,7 @@ const CHAR_CONFIGS = {
   heavy:     HEAVY,
   tanker:    TANKER,
   grenadier: GRENADIER,
+  rocketeer: ROCKETEER,
 } as const;
 
 export class Game {
@@ -85,12 +89,14 @@ export class Game {
   private characters:   Character[]  = [];
   private projectiles:  Projectile[] = [];
   private grenades:     Grenade[]    = [];
+  private rockets:      Rocket[]     = [];
   private coins:        Coin[]       = [];
   private powerUps:     PowerUp[]    = [];
   private sheep:        Sheep | null = null;
-  private unitLayer!:   PIXI.Container;
+  private unitLayer!:    PIXI.Container;
   private projLayer!:    PIXI.Container;
   private grenadeLayer!: PIXI.Container;
+  private rocketLayer!:  PIXI.Container;
   private coinLayer!:    PIXI.Container;
   private sheepLayer!:   PIXI.Container;
   private powerUpLayer!: PIXI.Container;
@@ -270,6 +276,7 @@ export class Game {
     this.powerUpLayer  = new PIXI.Container();
     this.projLayer     = new PIXI.Container();
     this.grenadeLayer  = new PIXI.Container();
+    this.rocketLayer   = new PIXI.Container();
     this.unitLayer     = new PIXI.Container();
     this.labelLayer    = new PIXI.Container();
     this.world.addChild(this.coinLayer);
@@ -277,6 +284,7 @@ export class Game {
     this.world.addChild(this.powerUpLayer);
     this.world.addChild(this.projLayer);
     this.world.addChild(this.grenadeLayer);
+    this.world.addChild(this.rocketLayer);
     this.world.addChild(this.unitLayer);
     this.world.addChild(this.labelLayer);
 
@@ -425,7 +433,7 @@ export class Game {
   // ── Spawn ────────────────────────────────────────────────────────────────────
 
   /** Returns false if the player cannot afford this unit. */
-  spawnPlayer(type: 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier'): boolean {
+  spawnPlayer(type: 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer'): boolean {
     if (this.isOver) return false;
     const cost = CHAR_COST[type];
     if (this.coinBalance < cost) return false;
@@ -845,6 +853,56 @@ export class Game {
       }
     }
 
+    // Update rockets + process AoE explosions (proximity hit → detonate)
+    const rocketKnockbackDecay = Math.exp(-ROCKET_KNOCKBACK_DECAY * dt);
+    for (const r of this.rockets) {
+      r.update(dt, this.platformData, this.blockData);
+      // Check proximity to any live enemy — detonates on contact
+      if (!r.isDead) {
+        for (const c of liveChars) {
+          if (c.side === r.side) continue;
+          const charCenterY = c.y - c.config.height * 0.5;
+          if (Math.hypot(c.x - r.x, charCenterY - r.y) <= ROCKET_HIT_RADIUS) {
+            r.triggerHit();
+            break;
+          }
+        }
+      }
+      const ex = r.consumeExplosion();
+      if (ex) {
+        for (const c of liveChars) {
+          if (c.side === r.side) continue;
+          const dist = Math.hypot(c.x - ex.x, c.y - ex.y);
+          if (dist <= ex.radius) {
+            const frac = 1 - (dist / ex.radius) * (1 - ROCKET_SPLASH_MIN_FRAC);
+            c.takeDamage(Math.round(ex.damage * frac), ex.shooter ?? undefined);
+            const kFrac = 1 - dist / ex.radius;
+            const dx    = c.x - ex.x;
+            const dy    = c.y - ex.y;
+            const len   = dist || 1;
+            c.applyKnockback(
+              (dx / len) * ROCKET_KNOCKBACK_MAX_VX * kFrac,
+              (dy / len) * ROCKET_KNOCKBACK_MAX_VY * kFrac,
+              dt,
+              rocketKnockbackDecay,
+            );
+          }
+        }
+        const targetTower = r.side === 'player' ? this.enemyTower : this.playerTower;
+        const towerLeft   = targetTower.x - TOWER_WIDTH / 2;
+        const towerRight  = targetTower.x + TOWER_WIDTH / 2;
+        const towerTop    = GROUND_Y - TOWER_HEIGHT;
+        const nearX = Math.max(towerLeft,  Math.min(towerRight, ex.x));
+        const nearY = Math.max(towerTop,   Math.min(GROUND_Y,   ex.y));
+        if (Math.hypot(nearX - ex.x, nearY - ex.y) <= ex.radius) {
+          targetTower.takeDamage(ex.damage);
+        }
+        if (this.sheep && Math.hypot(this.sheep.x - ex.x, this.sheep.y - ex.y) <= ex.radius + 20) {
+          this.sheep.reactToHit(ex.x);
+        }
+      }
+    }
+
     // Update grenades + process AoE explosions
     const knockbackDecayFactor = Math.exp(-GRENADE_KNOCKBACK_DECAY * dt);
     for (const g of this.grenades) {
@@ -911,6 +969,10 @@ export class Game {
     });
     this.grenades = this.grenades.filter(g => {
       if (g.isDead) { this.grenadeLayer.removeChild(g.container); g.destroy(); return false; }
+      return true;
+    });
+    this.rockets = this.rockets.filter(r => {
+      if (r.isDead) { this.rocketLayer.removeChild(r.container); r.destroy(); return false; }
       return true;
     });
     this.coins = this.coins.filter(coin => {
@@ -1198,6 +1260,14 @@ export class Game {
       );
       this.grenades.push(g);
       this.grenadeLayer.addChild(g.container);
+    } else if (req.projectileKind === 'rocket') {
+      const r = new Rocket(
+        req.side, req.sx, req.sy, req.tx,
+        req.damage, ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX,
+        req.shooter ?? null,
+      );
+      this.rockets.push(r);
+      this.rocketLayer.addChild(r.container);
     } else {
       const p = new Projectile(req.side, req.sx, req.sy, req.tx, req.ty, req.damage, req.projectileKind, req.shooter ?? null);
       this.projectiles.push(p);
@@ -1220,6 +1290,7 @@ export class Game {
     for (const c of this.characters)    { c.destroy(); }
     for (const p of this.projectiles)   { p.destroy(); }
     for (const g of this.grenades)      { g.destroy(); }
+    for (const r of this.rockets)       { r.destroy(); }
     for (const coin of this.coins)      { coin.destroy(); }
     for (const pu of this.powerUps)     { pu.destroy(); }
     for (const l of this.damageLabels)  { l.destroy(); }
@@ -1228,6 +1299,7 @@ export class Game {
     this.characters   = [];
     this.projectiles  = [];
     this.grenades     = [];
+    this.rockets      = [];
     this.coins        = [];
     this.powerUps     = [];
     this.damageLabels = [];

@@ -14,6 +14,7 @@ const spawnMedicBtn    = document.getElementById('spawn-medic-btn')    as HTMLBu
 const spawnHeavyBtn    = document.getElementById('spawn-heavy-btn')    as HTMLButtonElement;
 const spawnTankerBtn      = document.getElementById('spawn-tanker-btn')      as HTMLButtonElement;
 const spawnGrenadierBtn   = document.getElementById('spawn-grenadier-btn')   as HTMLButtonElement;
+const spawnRocketeerBtn   = document.getElementById('spawn-rocketeer-btn')   as HTMLButtonElement;
 
 // Populate costs from config so the HTML never goes stale
 (document.getElementById('warrior-cost')  as HTMLElement).textContent = `${CHAR_COST.warrior}  💰`;
@@ -24,6 +25,7 @@ const spawnGrenadierBtn   = document.getElementById('spawn-grenadier-btn')   as 
 (document.getElementById('heavy-cost')    as HTMLElement).textContent = `${CHAR_COST.heavy}    💰`;
 (document.getElementById('tanker-cost')     as HTMLElement).textContent = `${CHAR_COST.tanker}    💰`;
 (document.getElementById('grenadier-cost') as HTMLElement).textContent = `${CHAR_COST.grenadier} 💰`;
+(document.getElementById('rocketeer-cost') as HTMLElement).textContent = `${CHAR_COST.rocketeer} 💰`;
 const countdownEl    = document.getElementById('countdown')!;
 const gameOverEl     = document.getElementById('game-over')!;
 const goTitle        = document.getElementById('game-over-title')!;
@@ -45,6 +47,7 @@ spawnMedicBtn.addEventListener   ('click', () => game.spawnPlayer('medic'));
 spawnHeavyBtn.addEventListener   ('click', () => game.spawnPlayer('heavy'));
 spawnTankerBtn.addEventListener     ('click', () => game.spawnPlayer('tanker'));
 spawnGrenadierBtn.addEventListener  ('click', () => game.spawnPlayer('grenadier'));
+spawnRocketeerBtn.addEventListener  ('click', () => game.spawnPlayer('rocketeer'));
 
 restartBtn.addEventListener('click', () => {
   gameOver = false;
@@ -104,6 +107,7 @@ const TYPE_ICON: Record<string, string> = {
   heavy:     '🔨',
   tanker:    '🪖',
   grenadier: '💣',
+  rocketeer: '🚀',
 };
 
 function handleCpuCharsChanged(chars: { id: number; type: string; behavior: string }[]) {
@@ -161,6 +165,7 @@ function handleCoinsChanged(coins: number) {
   spawnHeavyBtn.disabled    = gameOver || coins < CHAR_COST.heavy;
   spawnTankerBtn.disabled      = gameOver || coins < CHAR_COST.tanker;
   spawnGrenadierBtn.disabled   = gameOver || coins < CHAR_COST.grenadier;
+  spawnRocketeerBtn.disabled   = gameOver || coins < CHAR_COST.rocketeer;
 }
 
 function handleTimeChanged(seconds: number) {

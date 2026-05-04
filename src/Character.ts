@@ -46,7 +46,7 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 
 export interface CharacterConfig {
-  type:        'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier';
+  type:        'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer';
   hp:          number;
   speed:       number;
   attackRange: number;
@@ -62,7 +62,7 @@ export interface FireRequest {
   sx: number; sy: number;
   tx: number; ty: number;
   damage:         number;
-  projectileKind: 'arrow' | 'bullet' | 'grenade';
+  projectileKind: 'arrow' | 'bullet' | 'grenade' | 'rocket';
   shooter?:       Character;
 }
 
@@ -287,8 +287,9 @@ export class Character {
     else if (this.config.type === 'medic')     this.buildMedicSprite();
     else if (this.config.type === 'heavy')     this.buildHeavySprite();
     else if (this.config.type === 'tanker')    this.buildTankerSprite();
-    else if (this.config.type === 'grenadier') this.buildGrenadierSprite();
-    else                                        this.buildWarriorSprite();
+    else if (this.config.type === 'grenadier')  this.buildGrenadierSprite();
+    else if (this.config.type === 'rocketeer')  this.buildRocketeerSprite();
+    else                                         this.buildWarriorSprite();
   }
 
   // Creates two animated leg containers (added to container before body, so legs render behind).
@@ -729,6 +730,67 @@ export class Character {
     this.container.addChild(g);
   }
 
+  private buildRocketeerSprite() {
+    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const w = this.config.width, h = this.config.height;
+    const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.32, w * 0.32, w * 0.34, h * 0.45, 0.58);
+
+    const g = new PIXI.Graphics();
+
+    // Body — dark military jacket
+    g.beginFill(0x2e3b2e, 0.92);
+    g.drawRoundedRect(-w * 0.50, h * 0.18, w, h * 0.42, 3);
+    g.endFill();
+    // Chest plate / blast vest highlight
+    g.beginFill(0x1e2b1e, 0.7);
+    g.drawRoundedRect(-w * 0.28, h * 0.20, w * 0.56, h * 0.20, 2);
+    g.endFill();
+
+    // Head with visor helmet
+    g.beginFill(color, 0.88);
+    g.drawCircle(0, h * 0.10, w * 0.37);
+    g.endFill();
+    // Helmet dome
+    g.beginFill(0x2e3b2e);
+    g.drawEllipse(0, h * 0.04, w * 0.43, w * 0.28);
+    g.endFill();
+    // Dark visor strip across the face
+    g.beginFill(0x111122, 0.9);
+    g.drawRoundedRect(-w * 0.30, h * 0.07, w * 0.60, h * 0.12, 3);
+    g.endFill();
+    // Visor glint
+    g.beginFill(0x4488cc, 0.35);
+    g.drawRoundedRect(-w * 0.26, h * 0.08, w * 0.22, h * 0.05, 2);
+    g.endFill();
+
+    // Rocket launcher — shoulder-mounted tube, thicker than the grenadier's
+    const tubeY   = h * 0.20;
+    const tubeLen = w * 1.10;
+    const tubeH   = h * 0.14;
+    g.beginFill(0x1e1e28);
+    g.drawRoundedRect(dir > 0 ? -w * 0.08 : -w * 1.02, tubeY, tubeLen, tubeH, 3);
+    g.endFill();
+    // Tube highlight
+    g.beginFill(0xffffff, 0.08);
+    g.drawRoundedRect(dir > 0 ? -w * 0.08 : -w * 1.02, tubeY, tubeLen, tubeH * 0.35, 3);
+    g.endFill();
+    // Muzzle opening at the front
+    g.beginFill(0x080810);
+    g.drawCircle(dir > 0 ? w * 1.02 : -w * 1.02, tubeY + tubeH * 0.5, tubeH * 0.65);
+    g.endFill();
+    // Exhaust ring at back (subtle orange glow)
+    g.lineStyle(1.5, 0xff6600, 0.6);
+    g.drawCircle(dir > 0 ? -w * 0.08 : w * 0.08, tubeY + tubeH * 0.5, tubeH * 0.5);
+    g.lineStyle(0);
+    // Shoulder grip
+    g.beginFill(0x2e3b2e, 0.8);
+    g.drawRoundedRect(-w * 0.10, tubeY - 1, w * 0.20, h * 0.22, 2);
+    g.endFill();
+
+    this.container.addChild(g);
+  }
+
   private buildMedicSprite() {
     const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const w = this.config.width, h = this.config.height;
@@ -1042,7 +1104,7 @@ export class Character {
 
   private get isRanged() {
     const t = this.config.type;
-    return t === 'archer' || t === 'rifleman' || t === 'sniper' || t === 'grenadier';
+    return t === 'archer' || t === 'rifleman' || t === 'sniper' || t === 'grenadier' || t === 'rocketeer';
   }
 
   private static isMeleeType(type: CharacterConfig['type']) {
@@ -1763,9 +1825,10 @@ export class Character {
     }
   }
 
-  private get projectileKind(): 'arrow' | 'bullet' | 'grenade' {
+  private get projectileKind(): 'arrow' | 'bullet' | 'grenade' | 'rocket' {
     const t = this.config.type;
     if (t === 'grenadier') return 'grenade';
+    if (t === 'rocketeer') return 'rocket';
     if (t === 'rifleman' || t === 'sniper' || t === 'tanker') return 'bullet';
     return 'arrow';
   }
@@ -1827,6 +1890,14 @@ export class Character {
           damage, projectileKind: 'grenade',
           shooter: miss ? undefined : this,
         });
+      } else if (this.config.type === 'rocketeer') {
+        // Rockets compute their own arc from tx; fire directly at current position
+        onFire({
+          side: this.side, sx: this.x, sy: this.bowY,
+          tx: target.x,   ty: target.bowY,
+          damage, projectileKind: 'rocket',
+          shooter: miss ? undefined : this,
+        });
       } else {
         const snapped = this.snapFireAngle(this.x, this.bowY, target.x, target.bowY);
         onFire({
@@ -1856,6 +1927,12 @@ export class Character {
           side: this.side, sx: this.x, sy: this.bowY,
           tx: towerFrontX, ty: towerY,
           damage: this.effectiveAtk, projectileKind: 'grenade',
+        });
+      } else if (this.config.type === 'rocketeer') {
+        onFire({
+          side: this.side, sx: this.x, sy: this.bowY,
+          tx: towerFrontX, ty: towerY,
+          damage: this.effectiveAtk, projectileKind: 'rocket',
         });
       } else {
         const snapped = this.snapFireAngle(this.x, this.bowY, towerFrontX, towerY);

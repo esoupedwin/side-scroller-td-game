@@ -124,10 +124,32 @@ export const GameConfig = {
       speed:       65,
       attackRange: 280,
       attackPower: 55,   // grenade AoE damage per target hit
-      fireRate:    2,  
+      fireRate:    2,
       cost:        90,
       critical:    0.08,
     },
+    rocketeer: {
+      type:        'rocketeer' as const,
+      hp:          120,
+      speed:       68,
+      attackRange: 260,
+      attackPower: 70,   // rocket AoE damage per target hit
+      fireRate:    2.5,
+      cost:        120,
+      critical:    0.06,
+    },
+  },
+
+  rocket: {
+    fuseSec:             3.0,   // seconds until explosion if no contact
+    hitRadius:           16,    // px — proximity to enemy triggers detonation
+    splashRadius:        110,   // px — AoE damage radius
+    gravity:             200,   // px/s² — much flatter arc than grenades
+    launchVx:            380,   // px/s — horizontal launch speed
+    splashMinDamageFrac: 0.30,  // fraction of full damage at blast edge
+    knockbackMaxVx:      1200,  // px/s — horizontal knockback at direct hit
+    knockbackMaxVy:      750,   // px/s — upward knockback at direct hit
+    knockbackDecay:      4.0,   // same decay rate as grenades
   },
 
   grenade: {

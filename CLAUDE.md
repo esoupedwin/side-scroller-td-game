@@ -34,6 +34,7 @@ Source files import only from `constants.ts`, never directly from `gameConfig.ts
 | `src/DamageLabel.ts` | Floating damage numbers |
 | `src/Physics.ts` | Matter.js world setup, collision categories, body factories |
 | `src/Pathfinding.ts` | NavGraph: A* path planning across ground, platforms, and blocks |
+| `src/Diagnostics.ts` | Runtime diagnostic logger: anomaly detection, snapshots, markdown reports |
 | `src/CollisionBox.ts` | Debug overlay: renders physics body outlines |
 | `src/maps.ts` | `MapDefinition` type; `DEFAULT_MAP`, `HIGHLANDS_MAP`; `ALL_MAPS` list |
 | `src/map-builder.ts` | Canvas2D drag-and-drop map editor logic |
@@ -278,6 +279,59 @@ Without this, the mask would be rebuilt from scratch each tick, silently strippi
 
 Diagonal jumps: `Character.jump(dirX)` sets both `vy = -JUMP_VELOCITY` and `jumpVx = dirX * moveSpeed`; `jumpVx` is applied to `x` each tick while airborne, zeroed on landing.
 
+## Pathfinding
+
+`NavGraph` in `src/Pathfinding.ts` builds an A* surface graph from the current map and is queried each tick by characters that need multi-step paths.
+
+### Split-surface approach
+
+When `NavGraph.build()` is called, each walkable surface (ground and platforms) is **split into subsegments** at every solid block that straddles that surface's plane:
+
+```typescript
+const splitSurface = (sx, sy, sw) => {
+  const blockers = blocks
+    .filter(b => b.y < sy && b.y + b.height >= sy && b.x < sx+sw && b.x+b.width > sx)
+    .map(b => ({ left: Math.max(b.x, sx), right: Math.min(b.x+b.width, sx+sw) }))
+    .sort((a, b) => a.left - b.left);
+  // emits subsegments for the gaps between blockers
+};
+```
+
+A character on the left subsegment and a character on the right subsegment of the same surface Y have **different surface IDs** — A* must therefore route a jump over the block to connect them. This replaces the old `findBlockerInPath()` workaround, which has been removed.
+
+Block tops are also added as `solid: true` surfaces so characters can be routed up onto them.
+
+### surfaceAt(floorY, x?)
+
+`surfaceAt` accepts an optional `x` to pick the correct subsegment when multiple subsegments share the same Y (the common case once a block splits the ground):
+
+```typescript
+surfaceAt(floorY: number, x?: number): NavSurface | null
+```
+
+- If `x` is provided and falls within a subsegment's span, that subsegment is returned.
+- Falls back to any same-Y surface if no span matches (graceful degradation).
+- `findPath` always passes both `fromX` and `toX` to `surfaceAt`.
+
+### PathStep / followPath
+
+`findPath(fromX, fromFloorY, toX, toFloorY)` returns `PathStep[]` — a minimal walk/jump/fall sequence. `Character.followPath(dt)` executes the current step and advances `pathIdx` when done.
+
+Walk steps include a stale-surface guard: if the character's `floorY` differs from the step's `floorY` by more than 20 px (e.g. the character already fell off the block), the step is skipped rather than walked backward.
+
+### Diagnostics
+
+`src/Diagnostics.ts` is a standalone diagnostic logger. Toggle with the **Diagnose** button in the UI; download the report with **Report**.
+
+Three anomaly types (debounced at 2s per character):
+- **Walking in air** — `isAirborne` is false, `floorY < GROUND_Y`, but no platform/block spans that x and y.
+- **Stuck** — character has an active path but x hasn't moved > 4 px for 2s.
+- **Path thrash** — path rebuilt ≥ 8 times in a 1-second window.
+
+`CharSnapshot` is recorded every 1.5s per live character. `produceMarkdown()` produces a full markdown report with anomaly, event, and snapshot tables.
+
+`Character` exposes a `diagnosticInfo` getter with fields: `isAirborne`, `floorY`, `pathLen`, `pathStep`, `pathRemaining`, `lastBuiltPath`, `clampedCount`, `pathRebuildCount`.
+
 ## CPU AI
 
 `tickCpuCollectAI()` runs each tick before character updates:
@@ -323,3 +377,4 @@ Unit selection prioritises cheap warriors when outnumbered or broke; riflemen wh
 - **Per-frame precomputation pattern**: constants derived from `dt` (e.g. `Math.exp(-decay * dt)`) are identical for every character in the same tick. Compute them once in `Game.tick()` and pass to the relevant method rather than recomputing inside each character's update. Current example: `knockbackDecayFactor` precomputed in the grenade explosion loop and stored via `applyKnockback`.
 - **Grenade knockback abstraction**: `Character` has no direct knowledge of grenade constants. `Game.ts` computes `knockbackDecayFactor = Math.exp(-GRENADE_KNOCKBACK_DECAY * dt)` and passes it into `applyKnockback(vx, vy, dt, decayFactor)`. Adding a new knockback source follows the same pattern.
 - **`requestPath` floor level**: always pass the character's actual `this.floorY` (not a hardcoded `GROUND_Y`) as the destination floor when the behavior should keep the character at its current elevation (harass, defend, rally). Only pass a specific surface Y when navigating to a different surface is intentional (e.g. chasing a coin on a platform).
+- **`surfaceAt` x parameter**: since `NavGraph.build()` splits each surface into subsegments at block intersections, multiple subsegments can share the same `floorY`. Always pass `x` to `surfaceAt` so the correct subsegment is selected. Omitting `x` returns an arbitrary same-Y surface, which causes A* to route from the wrong starting node and may produce a path that walks backward into a block.

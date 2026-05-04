@@ -10,6 +10,7 @@ const TYPE_ICON: Record<string, string> = {
   heavy:     '🔨',
   tanker:    '🪖',
   grenadier: '💣',
+  rocketeer: '🚀',
 };
 
 const TYPE_COLOR: Record<string, string> = {
@@ -21,6 +22,7 @@ const TYPE_COLOR: Record<string, string> = {
   heavy:     '#8899bb',
   tanker:    '#8b4513',
   grenadier: '#6b7a2a',
+  rocketeer: '#cc4400',
 };
 
 interface CardEntry {
