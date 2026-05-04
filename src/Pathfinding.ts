@@ -278,10 +278,17 @@ export class NavGraph {
         steps.push({ action: 'jump', targetX: landX, floorY: next.y, jumpTriggerX });
         curX = landX;
       } else {
-        // Walk to the fall-off edge, then fall
-        steps.push({ action: 'walk', targetX: edge.triggerX, floorY: cur.y });
-        steps.push({ action: 'fall', targetX: landX, floorY: next.y });
-        curX = landX;
+        // Walk to the fall-off edge, then fall. Pick the side closer to the final
+        // destination toX rather than the precomputed edge — otherwise a character
+        // who needs to keep travelling past `cur` can drop off the wrong edge and
+        // walk straight back into whatever was in their way.
+        const goingRight = toX > cur.x + cur.width / 2;
+        const fallEdgeX  = goingRight ? cur.x + cur.width : cur.x;
+        const safeLandX  = Math.max(next.x, Math.min(next.x + next.width, fallEdgeX));
+        const fallLandX  = isLastTransition ? toX : safeLandX;
+        steps.push({ action: 'walk', targetX: fallEdgeX, floorY: cur.y });
+        steps.push({ action: 'fall', targetX: fallLandX, floorY: next.y });
+        curX = fallLandX;
       }
     }
 

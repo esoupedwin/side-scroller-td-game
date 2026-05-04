@@ -93,7 +93,7 @@ export class PowerUp {
 
   // ── Update ────────────────────────────────────────────────────────────────
 
-  update(dt: number, platforms: PlatformData[]) {
+  update(dt: number, platforms: PlatformData[], blocks: PlatformData[] = []) {
     if (this.isDead || this.isPickedUp) return;
 
     if (!this.isOnGround) {
@@ -107,11 +107,15 @@ export class PowerUp {
           this.x >= p.x && this.x <= p.x + p.width &&
           this.y >= p.y - 40 && this.y <= p.y + 5,
         );
+        const blockBelow = blocks.find(b =>
+          this.x >= b.x && this.x <= b.x + b.width &&
+          this.y >= b.y - 40 && this.y <= b.y + 5,
+        );
         const nearGround = this.y >= GROUND_Y - 40;
 
-        if (platBelow || nearGround) {
+        if (platBelow || blockBelow || nearGround) {
           this.isOnGround = true;
-          this.floorY     = platBelow ? platBelow.y : GROUND_Y;
+          this.floorY     = platBelow ? platBelow.y : blockBelow ? blockBelow.y : GROUND_Y;
           this.settledY   = this.floorY - POWERUP_BODY_RADIUS;
           Matter.Body.setStatic(this.body, true);
           this.y = this.settledY;

@@ -701,7 +701,7 @@ export class Game {
 
     // Update and pick up power-ups
     for (const pu of this.powerUps) {
-      pu.update(dt, this.platformData);
+      pu.update(dt, this.platformData, this.blockData);
       if (pu.isDead || pu.isPickedUp) continue;
       const idx = pu.tryPickup(liveChars);
       if (idx !== -1) {

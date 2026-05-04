@@ -1194,8 +1194,11 @@ export class Character {
       }
     } else if (this.floorY < GROUND_Y) {
       // On elevated surface — detect walking off edge horizontally.
-      const onPlat  = platforms.some(p => this.x >= p.x && this.x <= p.x + p.width);
-      const onBlock = blocks.some(b => this.x >= b.x && this.x <= b.x + b.width);
+      // Match only the surface at this character's current floorY; a different
+      // platform/block below that happens to overlap in x must not count, or the
+      // character keeps walking at the higher floorY in mid-air.
+      const onPlat  = platforms.some(p => this.x >= p.x && this.x <= p.x + p.width && Math.abs(p.y - this.floorY) < 1);
+      const onBlock = blocks.some(b => this.x >= b.x && this.x <= b.x + b.width && Math.abs(b.y - this.floorY) < 1);
       if (!onPlat && !onBlock) this.isAirborne = true;
     }
   }
