@@ -160,19 +160,34 @@ export class NavGraph {
   }
 
   /**
-   * Surface the character is on. With non-solid surfaces split into
-   * subsegments by intersecting solid blocks, an x is required to pick
-   * the correct subsegment when multiple share the same y.
+   * Surface that contains (x, floorY). Returns null if x lies in a gap (e.g.
+   * inside a solid block's horizontal span on a split surface). Callers that
+   * want a "best effort" surface should use snapToNearestSurface.
    */
   surfaceAt(floorY: number, x?: number): NavSurface | null {
-    let yMatch: NavSurface | null = null;
     for (const s of this.surfaces) {
       if (Math.abs(s.y - floorY) >= 15) continue;
       if (x === undefined) return s;
       if (x >= s.x && x <= s.x + s.width) return s;
-      yMatch = yMatch ?? s;     // fallback to any same-y surface if x misses every span
     }
-    return yMatch;
+    return null;
+  }
+
+  /**
+   * Snap an (x, floorY) to the nearest valid surface span at that floor. Used
+   * when a character or path target falls inside a block — pathfinding can't
+   * route to a position physically inside a block, so we aim at the closest
+   * reachable x on the same floor.
+   */
+  private snapToNearestSurface(floorY: number, x: number): { surface: NavSurface; x: number } | null {
+    let best: { surface: NavSurface; dist: number; x: number } | null = null;
+    for (const s of this.surfaces) {
+      if (Math.abs(s.y - floorY) >= 15) continue;
+      const clampedX = Math.max(s.x, Math.min(s.x + s.width, x));
+      const dist     = Math.abs(clampedX - x);
+      if (!best || dist < best.dist) best = { surface: s, dist, x: clampedX };
+    }
+    return best;
   }
 
   /**
@@ -181,8 +196,24 @@ export class NavGraph {
    * when surfaces are unknown or unreachable.
    */
   findPath(fromX: number, fromFloorY: number, toX: number, toFloorY: number): PathStep[] {
-    const fromSurf = this.surfaceAt(fromFloorY, fromX);
-    const toSurf   = this.surfaceAt(toFloorY, toX);
+    let fromSurf = this.surfaceAt(fromFloorY, fromX);
+    let toSurf   = this.surfaceAt(toFloorY, toX);
+
+    // Target inside a block at toFloorY: snap to the nearest reachable x so
+    // the character heads for a valid spot instead of clamping forever.
+    if (!toSurf) {
+      const snapped = this.snapToNearestSurface(toFloorY, toX);
+      if (snapped) {
+        toSurf = snapped.surface;
+        toX    = snapped.x;
+      }
+    }
+    // Source position can also be transiently inside a block during clamp
+    // transitions; route from the nearest valid edge.
+    if (!fromSurf) {
+      const snapped = this.snapToNearestSurface(fromFloorY, fromX);
+      if (snapped) fromSurf = snapped.surface;
+    }
 
     if (!fromSurf || !toSurf || fromSurf.id === toSurf.id) {
       return [{ action: 'walk', targetX: toX, floorY: toFloorY }];
@@ -287,7 +318,12 @@ export class NavGraph {
         const goingRight = toX > cur.x + cur.width / 2;
         const fallEdgeX  = goingRight ? cur.x + cur.width : cur.x;
         const safeLandX  = Math.max(next.x, Math.min(next.x + next.width, fallEdgeX));
-        const fallLandX  = isLastTransition ? toX : safeLandX;
+        // Always clamp into the destination surface's span — even on the
+        // last transition. If toX lies inside a block at next.y the fall
+        // would otherwise drop the character into the block.
+        const fallLandX  = isLastTransition
+          ? Math.max(next.x, Math.min(next.x + next.width, toX))
+          : safeLandX;
         steps.push({ action: 'walk', targetX: fallEdgeX, floorY: cur.y });
         steps.push({ action: 'fall', targetX: fallLandX, floorY: next.y });
         curX = fallLandX;
