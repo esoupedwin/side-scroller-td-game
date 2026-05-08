@@ -220,7 +220,7 @@ class MapBuilder {
     if (this.drag.kind === 'platform-move') {
       const p = m.platforms[this.drag.idx];
       p.x = Math.round(wx - this.drag.ox);
-      p.y = Math.round(wy - this.drag.oy);
+      p.y = Math.min(GROUND_Y - p.height, Math.round(wy - this.drag.oy));
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'platform-left') {
       const p   = m.platforms[this.drag.idx];
@@ -235,7 +235,7 @@ class MapBuilder {
     } else if (this.drag.kind === 'block-move') {
       const b = m.blocks[this.drag.idx];
       b.x = Math.round(wx - this.drag.ox);
-      b.y = Math.round(wy - this.drag.oy);
+      b.y = Math.min(GROUND_Y - b.height, Math.round(wy - this.drag.oy));
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'block-left') {
       const b  = m.blocks[this.drag.idx];
@@ -249,7 +249,7 @@ class MapBuilder {
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'coinbox') {
       m.coinBox.x = Math.round(wx - this.drag.ox);
-      m.coinBox.y = Math.round(wy - this.drag.oy);
+      m.coinBox.y = Math.min(GROUND_Y - m.coinBox.height, Math.round(wy - this.drag.oy));
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'tower-player') {
       m.playerTowerX = Math.max(TOWER_W / 2 + 5, Math.round(wx));

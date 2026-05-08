@@ -1,5 +1,6 @@
 import type { Character } from './Character';
 import { RANK_NAMES } from './Character';
+import { PROMO_THRESHOLDS } from './constants';
 
 const TYPE_ICON: Record<string, string> = {
   warrior:   '⚔',
@@ -30,6 +31,8 @@ interface CardEntry {
   root:       HTMLElement;
   hpBar:      HTMLElement;
   hpNum:      HTMLElement;
+  xpBar:      HTMLElement;
+  xpNum:      HTMLElement;
   behaviorEl: HTMLElement;
   rankEl:     HTMLElement;
 }
@@ -85,10 +88,21 @@ export class CharacterHUD {
     hpNum.className   = 'char-card-hp-num';
     hpNum.textContent = String(Math.ceil(char.hp));
 
+    // ── XP bar (progress toward next promotion) ─────────────────────────────────
+    const xpTrack = document.createElement('div');
+    xpTrack.className = 'char-card-xp-track';
+    const xpBar = document.createElement('div');
+    xpBar.className   = 'char-card-xp-bar';
+    xpTrack.appendChild(xpBar);
+
+    const xpNum = document.createElement('div');
+    xpNum.className = 'char-card-xp-num';
+
     // ── Rank badge ──────────────────────────────────────────────────────────────
     const rankEl = document.createElement('div');
     rankEl.className = 'char-card-rank';
     this.syncRankEl(rankEl, char.rank);
+    this.syncXpEl(xpBar, xpNum, char.currentAP, char.rank);
 
     // ── Behavior toggle button ──────────────────────────────────────────────────
     const behaviorBtn = document.createElement('button');
@@ -105,16 +119,32 @@ export class CharacterHUD {
       this.syncBehaviorEl(behaviorBtn, char.behavior);
     });
 
-    card.append(header, label, rankEl, hpTrack, hpNum, behaviorBtn);
+    card.append(header, label, rankEl, hpTrack, hpNum, xpTrack, xpNum, behaviorBtn);
     this.container.appendChild(card);
 
-    this.cards.push({ char, root: card, hpBar, hpNum, behaviorEl: behaviorBtn, rankEl });
+    this.cards.push({ char, root: card, hpBar, hpNum, xpBar, xpNum, behaviorEl: behaviorBtn, rankEl });
   }
 
   private syncRankEl(el: HTMLElement, rank: 0 | 1 | 2 | 3) {
     const RANK_COLORS = ['#444', '#cd7f32', '#b0b0b0', '#ffd700'];
     el.textContent = rank === 0 ? 'Private' : '◆'.repeat(rank) + ' ' + RANK_NAMES[rank];
     el.style.color = RANK_COLORS[rank];
+  }
+
+  private syncXpEl(bar: HTMLElement, num: HTMLElement, ap: number, rank: 0 | 1 | 2 | 3) {
+    if (rank >= 3) {
+      bar.style.width  = '100%';
+      num.textContent  = 'MAX';
+      bar.parentElement?.classList.add('char-card-xp-track-max');
+      return;
+    }
+    bar.parentElement?.classList.remove('char-card-xp-track-max');
+    const prev = rank === 0 ? 0 : PROMO_THRESHOLDS[rank - 1];
+    const next = PROMO_THRESHOLDS[rank];
+    const span = next - prev;
+    const into = Math.max(0, Math.min(span, ap - prev));
+    bar.style.width = `${(into / span) * 100}%`;
+    num.textContent = `${Math.floor(ap)} / ${next}`;
   }
 
   private syncBehaviorEl(el: HTMLElement, behavior: 'attacking' | 'collecting' | 'harass' | 'defend') {
@@ -146,6 +176,7 @@ export class CharacterHUD {
       entry.hpNum.textContent = String(Math.ceil(entry.char.hp));
 
       this.syncRankEl(entry.rankEl, entry.char.rank);
+      this.syncXpEl(entry.xpBar, entry.xpNum, entry.char.currentAP, entry.char.rank);
       // Keep behavior label in sync (e.g. if it was reset programmatically)
       this.syncBehaviorEl(entry.behaviorEl, entry.char.behavior);
       return true;

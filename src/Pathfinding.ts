@@ -22,7 +22,12 @@ export interface PathStep {
 
 // ── Physics limits (derived from game constants) ─────────────────────────────
 
-const MAX_JUMP_HEIGHT = (JUMP_VELOCITY * JUMP_VELOCITY) / (2 * CHAR_GRAVITY) + 10; // ≈ 179 px
+// True apex is JUMP_VELOCITY² / (2·CHAR_GRAVITY) ≈ 169 px. Subtract a margin so
+// the planner only creates edges the character can actually clear with room to
+// drop through the target platform's top during descent — without the margin,
+// edges close to the apex are physically unreachable (feet stop just short) and
+// the character lands on whatever intermediate surface is in the way.
+const MAX_JUMP_HEIGHT = (JUMP_VELOCITY * JUMP_VELOCITY) / (2 * CHAR_GRAVITY) - 10; // ≈ 159 px
 const JUMP_TOTAL_TIME = (2 * JUMP_VELOCITY) / CHAR_GRAVITY;                         // ≈ 1.3 s
 // Horizontal clearance a character moving at max speed can cover during a full jump.
 // Used to decide whether a platform edge is reachable from a given ground position.
@@ -317,14 +322,18 @@ export class NavGraph {
         // walk straight back into whatever was in their way.
         const goingRight = toX > cur.x + cur.width / 2;
         const fallEdgeX  = goingRight ? cur.x + cur.width : cur.x;
-        const safeLandX  = Math.max(next.x, Math.min(next.x + next.width, fallEdgeX));
+        // Step past the edge so followPath's 5-px stop tolerance still leaves the
+        // character past the boundary, where syncFromBody flips them airborne.
+        const FALL_STEP_OFF = 10;
+        const stepOffX  = goingRight ? fallEdgeX + FALL_STEP_OFF : fallEdgeX - FALL_STEP_OFF;
+        const safeLandX = Math.max(next.x, Math.min(next.x + next.width, stepOffX));
         // Always clamp into the destination surface's span — even on the
         // last transition. If toX lies inside a block at next.y the fall
         // would otherwise drop the character into the block.
         const fallLandX  = isLastTransition
           ? Math.max(next.x, Math.min(next.x + next.width, toX))
           : safeLandX;
-        steps.push({ action: 'walk', targetX: fallEdgeX, floorY: cur.y });
+        steps.push({ action: 'walk', targetX: stepOffX, floorY: cur.y });
         steps.push({ action: 'fall', targetX: fallLandX, floorY: next.y });
         curX = fallLandX;
       }

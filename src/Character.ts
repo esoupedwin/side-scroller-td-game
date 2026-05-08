@@ -124,6 +124,7 @@ export class Character {
   pendingPromotion = false;
   killedBy: 'character' | 'tower' | null = null;
   private ap            = 0;
+  get currentAP(): number { return this.ap; }
   private rankGfx!:     PIXI.Graphics;
   private promoAnimGfx: PIXI.Graphics | null = null;
   private promoAnimTimer = -1;
@@ -164,6 +165,18 @@ export class Character {
   // Diagnostic counters (lifetime).
   clampedCount      = 0;
   pathRebuildCount  = 0;
+  // Pending jump intent — populated when followPath fires this.jump(), consumed on landing.
+  private pendingJumpLog: { startX: number; startFloorY: number; targetX: number; targetFloorY: number } | null = null;
+  // Per-jump tick-level tracking for diagnostics.
+  private jumpTickCount      = 0;       // ticks where syncToBody saw isAirborne
+  private jumpDurationS      = 0;       // sum of dt over those ticks
+  private jumpExpectedTravel = 0;       // sum of jumpVx * dt
+  private jumpKnockbackTravel = 0;      // sum of knockbackVx * dt while airborne
+  private jumpVxAtStart       = 0;
+  private jumpDtMin           = Infinity;
+  private jumpDtMax           = 0;
+  // Drained each tick by Diagnostics.
+  private jumpOutcomeQueue: { startX: number; startFloorY: number; targetX: number; targetFloorY: number; landX: number; landFloorY: number; jumpVx: number; ticks: number; durationS: number; expectedTravel: number; knockbackTravel: number; dtMin: number; dtMax: number }[] = [];
   // Last path produced by requestPath (preserved across clearPath() so the
   // diagnostic system can still inspect what pathfinding most recently chose).
   private lastBuiltPath: PathStep[] = [];
@@ -1190,6 +1203,13 @@ export class Character {
     if (this.config.type === 'tanker') return;   // tanks cannot jump
     this.jumpVx     = dirX * this.moveSpeed;
     this.isAirborne = true;
+    this.jumpTickCount       = 0;
+    this.jumpDurationS       = 0;
+    this.jumpExpectedTravel  = 0;
+    this.jumpKnockbackTravel = 0;
+    this.jumpVxAtStart       = this.jumpVx;
+    this.jumpDtMin           = Infinity;
+    this.jumpDtMax           = 0;
     Matter.Body.setVelocity(this.body, {
       x: this.body.velocity.x,
       y: -JUMP_VELOCITY * dt,   // px/tick = px/s * s/tick
@@ -1212,17 +1232,27 @@ export class Character {
     // Apply and decay horizontal knockback regardless of airborne state so the
     // sliding effect continues after the character lands.
     if (this.knockbackVx !== 0) {
-      this.x += this.knockbackVx * dt;
+      const kbDelta = this.knockbackVx * dt;
+      this.x += kbDelta;
+      if (this.isAirborne) this.jumpKnockbackTravel += kbDelta;
       this.knockbackVx *= this.knockbackDecayFactor;
       if (Math.abs(this.knockbackVx) < 1) this.knockbackVx = 0;
       if (this.x < this.boundL) { this.x = this.boundL; this.knockbackVx = 0; }
       if (this.x > this.boundR) { this.x = this.boundR; this.knockbackVx = 0; }
     }
     if (this.isAirborne) {
+      const xBefore = this.x;
       this.x += this.jumpVx * dt;
       // Enforce tower faces while airborne (clamp in update() runs before syncToBody).
       if (this.x < this.boundL) { this.x = this.boundL; this.jumpVx = 0; }
       if (this.x > this.boundR) { this.x = this.boundR; this.jumpVx = 0; }
+      this.jumpTickCount++;
+      this.jumpDurationS      += dt;
+      this.jumpExpectedTravel += this.x - xBefore;  // post-clamp delta from this branch
+      if (dt < this.jumpDtMin) this.jumpDtMin = dt;
+      if (dt > this.jumpDtMax) this.jumpDtMax = dt;
+    } else if (this.knockbackVx !== 0) {
+      // knockback delta already applied above; track it for diagnosis even when not airborne
     }
     // Character bodies have no Matter.js platform collision (mask: CAT_GROUND only).
     // Without pinning, gravity pulls the body through the platform to the ground,
@@ -1235,11 +1265,42 @@ export class Character {
     Matter.Body.setVelocity(this.body, { x: 0, y: onPlatform ? 0 : this.body.velocity.y });
   }
 
+  private recordJumpOutcome(landFloorY: number): void {
+    if (!this.pendingJumpLog) return;
+    this.jumpOutcomeQueue.push({
+      ...this.pendingJumpLog,
+      landX: this.x,
+      landFloorY,
+      jumpVx:          this.jumpVxAtStart,
+      ticks:           this.jumpTickCount,
+      durationS:       this.jumpDurationS,
+      expectedTravel:  this.jumpExpectedTravel,
+      knockbackTravel: this.jumpKnockbackTravel,
+      dtMin:           this.jumpDtMin === Infinity ? 0 : this.jumpDtMin,
+      dtMax:           this.jumpDtMax,
+    });
+    this.pendingJumpLog = null;
+  }
+
+  consumeJumpOutcomes(): {
+    startX: number; startFloorY: number; targetX: number; targetFloorY: number;
+    landX: number; landFloorY: number;
+    jumpVx: number; ticks: number; durationS: number; expectedTravel: number; knockbackTravel: number;
+    dtMin: number; dtMax: number;
+  }[] {
+    const out = this.jumpOutcomeQueue;
+    this.jumpOutcomeQueue = [];
+    return out;
+  }
+
   private clampBlockWalls(blocks: BlockData[]): void {
     const charTop = this.y - this.config.height;
     for (const b of blocks) {
-      // Skip if no vertical overlap (standing on top: this.y === b.y → this.y <= b.y → skipped)
-      if (this.y <= b.y || charTop >= b.y + b.height) continue;
+      // Standing on top of this block (or any higher surface): skip lateral clamp.
+      // floorY is set on landing and isn't subject to the per-step gravity drift
+      // that pulls this.y a fraction of a px below floorY between syncToBody pins.
+      if (this.floorY <= b.y) continue;
+      if (charTop >= b.y + b.height) continue;
       // Push to the nearest block edge
       if (this.x > b.x && this.x < b.x + b.width) {
         this.x = this.x < b.x + b.width / 2 ? b.x : b.x + b.width;
@@ -1268,6 +1329,7 @@ export class Character {
             this.isAirborne = false;
             this.jumpVx     = 0;
             this.floorY     = p.y;
+            this.recordJumpOutcome(p.y);
             return;
           }
         }
@@ -1279,6 +1341,7 @@ export class Character {
             this.isAirborne = false;
             this.jumpVx     = 0;
             this.floorY     = b.y;
+            this.recordJumpOutcome(b.y);
             return;
           }
         }
@@ -1291,6 +1354,7 @@ export class Character {
         this.jumpVx     = 0;
         this.floorY     = GROUND_Y;
         this.y          = GROUND_Y;
+        this.recordJumpOutcome(GROUND_Y);
       }
     } else if (this.floorY < GROUND_Y) {
       // On elevated surface — detect walking off edge horizontally.
@@ -1390,6 +1454,7 @@ export class Character {
       const dx       = triggerX - this.x;
       if (Math.abs(dx) <= 16) {
         const dir = Math.sign(step.targetX - this.x) || 1;
+        this.pendingJumpLog = { startX: this.x, startFloorY: this.floorY, targetX: step.targetX, targetFloorY: step.floorY };
         this.jump(dir, dt);
       } else {
         this.x += Math.sign(dx) * this.moveSpeed * dt;

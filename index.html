@@ -167,7 +167,7 @@
       #char-hud {
         position: absolute;
         top: 0; left: 0; right: 80px; /* leave room for coin counter */
-        height: 84px;
+        height: 110px;
         display: flex;
         align-items: center;
         gap: 6px;
@@ -236,6 +236,31 @@
         font-size: 9px;
         color: #777;
         text-align: right;
+      }
+
+      .char-card-xp-track {
+        height: 3px;
+        background: rgba(255,255,255,0.08);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-top: 1px;
+      }
+      .char-card-xp-bar {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #ffd166, #f4a261);
+        border-radius: 2px;
+        transition: width 0.15s linear;
+      }
+      .char-card-xp-track-max .char-card-xp-bar {
+        background: linear-gradient(90deg, #ffd700, #ffae00);
+        box-shadow: 0 0 4px rgba(255, 215, 0, 0.5);
+      }
+      .char-card-xp-num {
+        font-size: 8px;
+        color: #888;
+        text-align: right;
+        line-height: 1;
       }
 
       .char-card-rank {

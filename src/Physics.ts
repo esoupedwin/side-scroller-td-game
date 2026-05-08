@@ -128,7 +128,7 @@ export class Physics {
       friction: 0, frictionAir: 0, frictionStatic: 0,
       restitution: 0,
       inertia: Infinity, inverseInertia: 0,
-      collisionFilter: { category: CAT_CHARACTER, mask: CAT_GROUND | CAT_TOWER | CAT_BLOCK },
+      collisionFilter: { category: CAT_CHARACTER, mask: CAT_GROUND | CAT_TOWER },
     });
     Matter.Composite.add(this.engine.world, body);
     return body;

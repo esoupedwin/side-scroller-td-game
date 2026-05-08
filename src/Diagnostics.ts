@@ -3,7 +3,7 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 import { GROUND_Y, JUMP_VELOCITY, CHAR_GRAVITY } from './constants';
 
-const MAX_JUMP_HEIGHT = (JUMP_VELOCITY * JUMP_VELOCITY) / (2 * CHAR_GRAVITY) + 10;
+const MAX_JUMP_HEIGHT = (JUMP_VELOCITY * JUMP_VELOCITY) / (2 * CHAR_GRAVITY) - 10;
 
 type EntryCategory = 'event' | 'anomaly' | 'snapshot';
 
@@ -141,6 +141,48 @@ export class Diagnostics {
       if (c.state !== track.lastState) {
         this.note(time, 'event', `State #${c.id} ${c.name}: ${track.lastState} → ${c.state}`);
         track.lastState = c.state;
+      }
+
+      // Jump outcomes: every landing produced since the previous tick.
+      for (const o of c.consumeJumpOutcomes()) {
+        const onTarget = Math.abs(o.landFloorY - o.targetFloorY) < 1;
+        const targetSurface =
+          o.targetFloorY >= GROUND_Y - 1 ? 'ground' :
+          blocks.some(b => Math.abs(b.y - o.targetFloorY) < 1) ? 'block' :
+          platforms.some(p => Math.abs(p.y - o.targetFloorY) < 1) ? 'platform' : 'unknown';
+        const landSurface =
+          o.landFloorY >= GROUND_Y - 1 ? 'ground' :
+          blocks.some(b => Math.abs(b.y - o.landFloorY) < 1) ? 'block' :
+          platforms.some(p => Math.abs(p.y - o.landFloorY) < 1) ? 'platform' : 'unknown';
+        const actualTravel  = o.landX - o.startX;
+        const sumOfDeltas   = o.expectedTravel + o.knockbackTravel;
+        const unexplained   = actualTravel - sumOfDeltas;
+        const data = {
+          startX:          round(o.startX),
+          startFloorY:     round(o.startFloorY),
+          targetX:         round(o.targetX),
+          targetFloorY:    round(o.targetFloorY),
+          targetSurface,
+          landX:           round(o.landX),
+          landFloorY:      round(o.landFloorY),
+          landSurface,
+          xOvershoot:      round(o.landX - o.targetX),
+          jumpVx:          round(o.jumpVx),
+          ticks:           o.ticks,
+          durationS:       Number(o.durationS.toFixed(3)),
+          actualTravel:    round(actualTravel),
+          jumpVxTravel:    round(o.expectedTravel),       // sum of jumpVx*dt
+          knockbackTravel: round(o.knockbackTravel),
+          unexplainedX:    round(unexplained),            // actual − (jumpVx*dt + knockback*dt)
+          dtMinMs:         Number((o.dtMin * 1000).toFixed(2)),
+          dtMaxMs:         Number((o.dtMax * 1000).toFixed(2)),
+          dtAvgMs:         o.ticks > 0 ? Number(((o.durationS / o.ticks) * 1000).toFixed(2)) : 0,
+        };
+        if (onTarget) {
+          this.note(time, 'event', `Jump #${c.id} ${c.name}: hit ${targetSurface} (Δx=${data.xOvershoot})`, data);
+        } else {
+          this.note(time, 'anomaly', `Jump miss #${c.id} ${c.name}: aimed ${targetSurface} y=${data.targetFloorY}, landed ${landSurface} y=${data.landFloorY}`, data);
+        }
       }
 
       // Walking-in-air anomaly: not airborne, on elevated surface, but no
