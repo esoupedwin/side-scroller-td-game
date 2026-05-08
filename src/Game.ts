@@ -190,9 +190,10 @@ export class Game {
   private readonly onGameOver:         (winner: 'player' | 'enemy', reason: 'tower' | 'timeout') => void;
   private readonly onCoinsChanged:     (amount: number) => void;
   private readonly onCpuCoinsChanged:  (amount: number) => void;
-  private readonly onCpuCharsChanged:    (chars: { id: number; type: string; behavior: string }[]) => void;
+  private readonly onCpuCharsChanged:    (chars: { id: number; name: string; type: string; behavior: string }[]) => void;
   private readonly onCpuStrategyChanged: (info: CpuStrategyInfo) => void;
   private readonly onTimeChanged:        (seconds: number) => void;
+  private readonly onEnemyTowerHpChanged: (hp: number, maxHp: number) => void;
   private readonly tickFn:               (dt: number) => void;
 
   private lastCpuCharsSig     = '';
@@ -203,6 +204,7 @@ export class Game {
   private cpuStrategyInfo: CpuStrategyInfo = {
     stance: 'economy', score: 0, unitAdv: 0, towerAdv: 0, coinAdv: 0, decision: '—',
   };
+  private lastNotifiedEnemyTowerHp = -1;
 
   constructor(
     canvas:              HTMLCanvasElement,
@@ -210,9 +212,10 @@ export class Game {
     onGameOver:          (winner: 'player' | 'enemy', reason: 'tower' | 'timeout') => void,
     onCoinsChanged:      (amount: number) => void,
     onCpuCoinsChanged:   (amount: number) => void,
-    onCpuCharsChanged:    (chars: { id: number; type: string; behavior: string }[]) => void,
+    onCpuCharsChanged:    (chars: { id: number; name: string; type: string; behavior: string }[]) => void,
     onCpuStrategyChanged: (info: CpuStrategyInfo) => void,
     onTimeChanged:        (seconds: number) => void,
+    onEnemyTowerHpChanged: (hp: number, maxHp: number) => void,
   ) {
     this.onGameOver             = onGameOver;
     this.onCoinsChanged         = onCoinsChanged;
@@ -220,6 +223,7 @@ export class Game {
     this.onCpuCharsChanged      = onCpuCharsChanged;
     this.onCpuStrategyChanged   = onCpuStrategyChanged;
     this.onTimeChanged          = onTimeChanged;
+    this.onEnemyTowerHpChanged  = onEnemyTowerHpChanged;
     this.hud            = new CharacterHUD(hudEl);
     this.tickFn         = (_dt) => this.tick();
 
@@ -241,6 +245,7 @@ export class Game {
 
     this.notifyCoins();
     this.notifyCpuCoins();
+    this.notifyEnemyTowerHp();
     this.onTimeChanged(GAME_DURATION_SEC);
   }
 
@@ -642,6 +647,7 @@ export class Game {
     this.notifyCoins();
     this.notifyCpuCoins();
     this.notifyCpuChars();
+    this.notifyEnemyTowerHp();
 
     const liveChars = this.characters.filter(c => !c.isDead);
     this.cpuStance = this.assessCpuStance(liveChars);
@@ -1140,12 +1146,19 @@ export class Game {
     this.onCpuStrategyChanged({ ...i });
   }
 
+  private notifyEnemyTowerHp() {
+    const hp = Math.ceil(this.enemyTower.hp);
+    if (hp === this.lastNotifiedEnemyTowerHp) return;
+    this.lastNotifiedEnemyTowerHp = hp;
+    this.onEnemyTowerHpChanged(hp, TOWER_HP);
+  }
+
   private notifyCpuChars() {
     const cpuChars = this.characters.filter(c => c.side === 'enemy' && !c.isDead);
     const sig = cpuChars.map(c => `${c.id}:${c.behavior}`).join(',');
     if (sig === this.lastCpuCharsSig) return;
     this.lastCpuCharsSig = sig;
-    this.onCpuCharsChanged(cpuChars.map(c => ({ id: c.id, type: c.config.type, behavior: c.behavior })));
+    this.onCpuCharsChanged(cpuChars.map(c => ({ id: c.id, name: c.name, type: c.config.type, behavior: c.behavior })));
   }
 
   // ── CPU collect AI ───────────────────────────────────────────────────────────
@@ -1322,6 +1335,7 @@ export class Game {
     this.cpuCoinBalance        = STARTING_COINS;
     this.lastNotifiedCoins     = -1;
     this.lastNotifiedCpuCoins  = -1;
+    this.lastNotifiedEnemyTowerHp = -1;
     this.timeRemaining         = GAME_DURATION_SEC;
     this.lastNotifiedTime      = -1;
 
@@ -1336,6 +1350,7 @@ export class Game {
 
     this.notifyCoins();
     this.notifyCpuCoins();
+    this.notifyEnemyTowerHp();
     this.onTimeChanged(GAME_DURATION_SEC);
   }
 

@@ -152,7 +152,7 @@ export class Character {
     vy:   number;
     life: number;
   }> = [];
-  private _behavior:    'attacking' | 'collecting' | 'harass' | 'defend' = 'attacking';
+  private _behavior:    'attacking' | 'collecting' | 'harass' | 'defend' | 'rush' = 'attacking';
 
   // ── Pathfinding state ─────────────────────────────────────────────────────
   private path:        PathStep[] = [];
@@ -276,9 +276,9 @@ export class Character {
 
   // ── Behavior toggle ──────────────────────────────────────────────────────────
 
-  get behavior(): 'attacking' | 'collecting' | 'harass' | 'defend' { return this._behavior; }
+  get behavior(): 'attacking' | 'collecting' | 'harass' | 'defend' | 'rush' { return this._behavior; }
 
-  set behavior(val: 'attacking' | 'collecting' | 'harass' | 'defend') {
+  set behavior(val: 'attacking' | 'collecting' | 'harass' | 'defend' | 'rush') {
     if (val === this._behavior) return;
     if (this._behavior === 'collecting') {
       this.targetCoin = null;
@@ -1172,6 +1172,8 @@ export class Character {
         this.updateHarass(ctx);
       } else if (this._behavior === 'defend') {
         this.updateDefending(ctx);
+      } else if (this._behavior === 'rush') {
+        this.updateRushing(ctx);
       } else {
         this.updateAttacking(ctx);
       }
@@ -1524,6 +1526,44 @@ export class Character {
       this.requestPath(enemyTowerFrontX, GROUND_Y, navGraph, dt);
       this.followPath(dt);
     }
+  }
+
+  // ── Rush behaviour ───────────────────────────────────────────────────────────
+  // Charge straight to the enemy tower, dodging enemy characters by jumping over
+  // them. No firing, no engagement — just push.
+
+  private updateRushing(ctx: UpdateContext) {
+    const { dt, allChars, enemyTowerFrontX, enemyTowerY, onFire, navGraph } = ctx;
+    if (this.isAirborne) return;
+
+    const dir         = this.side === 'player' ? 1 : -1;
+    const distToTower = Math.abs(this.x - enemyTowerFrontX);
+
+    if (distToTower <= this.config.attackRange) {
+      this.state = 'fighting';
+      this.attackTower(enemyTowerFrontX, enemyTowerY, onFire, ctx.onDamageTower);
+      return;
+    }
+
+    // Dodge enemies directly in front by jumping over them.
+    const RUSH_DODGE_LOOKAHEAD = 90;
+    const RUSH_FLOOR_TOL       = 25;
+    const blocker = allChars.find(c =>
+      !c.isDead && c.side !== this.side &&
+      dir * (c.x - this.x) > 0 &&
+      dir * (c.x - this.x) < RUSH_DODGE_LOOKAHEAD &&
+      Math.abs(c.floorY - this.floorY) < RUSH_FLOOR_TOL,
+    );
+
+    if (blocker && this.config.type !== 'tanker') {
+      this.jump(dir, dt);
+      this.state = 'marching';
+      return;
+    }
+
+    this.state = 'marching';
+    this.requestPath(enemyTowerFrontX, GROUND_Y, navGraph, dt);
+    this.followPath(dt);
   }
 
   // ── Collecting behaviour ─────────────────────────────────────────────────────

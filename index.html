@@ -312,6 +312,13 @@
       .char-card-behavior.char-card-behavior-defend:hover {
         background: rgba(100,180,255,0.25);
       }
+      .char-card-behavior.char-card-behavior-rush {
+        background: rgba(229,57,53,0.18);
+        color: #ff6b6b;
+      }
+      .char-card-behavior.char-card-behavior-rush:hover {
+        background: rgba(229,57,53,0.28);
+      }
 
       /* Death fade-out */
       @keyframes card-die {
@@ -431,6 +438,10 @@
         <div class="dev-item">
           <span class="dev-item-label">CPU Coins</span>
           <span class="dev-item-value" id="cpu-coin-amount">150</span>
+        </div>
+        <div class="dev-item">
+          <span class="dev-item-label">Enemy Tower HP</span>
+          <span class="dev-item-value" id="enemy-tower-hp">—</span>
         </div>
         <div class="dev-item" style="gap:8px; flex-wrap:wrap;">
           <span class="dev-item-label">CPU Units</span>

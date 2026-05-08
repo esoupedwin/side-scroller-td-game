@@ -6,6 +6,7 @@ const hudEl            = document.getElementById('char-hud')!;
 const coinAmountEl     = document.getElementById('coin-amount')!;
 const cpuCoinAmountEl  = document.getElementById('cpu-coin-amount')!;
 const cpuCharsListEl   = document.getElementById('cpu-chars-list')!;
+const enemyTowerHpEl   = document.getElementById('enemy-tower-hp')!;
 const spawnWarriorBtn  = document.getElementById('spawn-warrior-btn')  as HTMLButtonElement;
 const spawnArcherBtn   = document.getElementById('spawn-archer-btn')   as HTMLButtonElement;
 const spawnRiflemanBtn = document.getElementById('spawn-rifleman-btn') as HTMLButtonElement;
@@ -37,7 +38,7 @@ container.insertBefore(canvas, container.firstChild);
 
 let gameOver = false;
 
-let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged);
+let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged, handleEnemyTowerHpChanged);
 
 spawnWarriorBtn.addEventListener ('click', () => game.spawnPlayer('warrior'));
 spawnArcherBtn.addEventListener  ('click', () => game.spawnPlayer('archer'));
@@ -110,7 +111,13 @@ const TYPE_ICON: Record<string, string> = {
   rocketeer: '🚀',
 };
 
-function handleCpuCharsChanged(chars: { id: number; type: string; behavior: string }[]) {
+function handleEnemyTowerHpChanged(hp: number, maxHp: number) {
+  enemyTowerHpEl.textContent = `${hp} / ${maxHp}`;
+  const ratio = Math.max(0, hp / maxHp);
+  enemyTowerHpEl.style.color = ratio < 0.28 ? '#e63946' : ratio < 0.6 ? '#f4a261' : '#e0e0e0';
+}
+
+function handleCpuCharsChanged(chars: { id: number; name: string; type: string; behavior: string }[]) {
   if (chars.length === 0) {
     cpuCharsListEl.textContent = '—';
     return;
@@ -118,7 +125,7 @@ function handleCpuCharsChanged(chars: { id: number; type: string; behavior: stri
   cpuCharsListEl.innerHTML = chars
     .map(c => {
       const label = c.behavior === 'collecting' ? 'Collect' : c.behavior === 'harass' ? 'Harass' : 'Attack';
-      return `<span class="dev-char-badge">#${c.id}${TYPE_ICON[c.type] ?? ''} ${label}</span>`;
+      return `<span class="dev-char-badge">${c.name}${TYPE_ICON[c.type] ?? ''} ${label}</span>`;
     })
     .join('');
 }

@@ -115,7 +115,8 @@ export class CharacterHUD {
       char.behavior =
         char.behavior === 'attacking'  ? 'collecting' :
         char.behavior === 'collecting' ? 'harass'     :
-        char.behavior === 'harass'     ? 'defend'     : 'attacking';
+        char.behavior === 'harass'     ? 'defend'     :
+        char.behavior === 'defend'     ? 'rush'       : 'attacking';
       this.syncBehaviorEl(behaviorBtn, char.behavior);
     });
 
@@ -147,8 +148,8 @@ export class CharacterHUD {
     num.textContent = `${Math.floor(ap)} / ${next}`;
   }
 
-  private syncBehaviorEl(el: HTMLElement, behavior: 'attacking' | 'collecting' | 'harass' | 'defend') {
-    el.classList.remove('char-card-behavior-collect', 'char-card-behavior-harass', 'char-card-behavior-defend');
+  private syncBehaviorEl(el: HTMLElement, behavior: 'attacking' | 'collecting' | 'harass' | 'defend' | 'rush') {
+    el.classList.remove('char-card-behavior-collect', 'char-card-behavior-harass', 'char-card-behavior-defend', 'char-card-behavior-rush');
     if (behavior === 'collecting') {
       el.textContent = '💰 Collect';
       el.classList.add('char-card-behavior-collect');
@@ -158,6 +159,9 @@ export class CharacterHUD {
     } else if (behavior === 'defend') {
       el.textContent = '🛡 Defend';
       el.classList.add('char-card-behavior-defend');
+    } else if (behavior === 'rush') {
+      el.textContent = '⚡ Rush';
+      el.classList.add('char-card-behavior-rush');
     } else {
       el.textContent = '⚔ Attack';
     }
