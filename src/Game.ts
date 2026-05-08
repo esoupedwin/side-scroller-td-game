@@ -163,6 +163,11 @@ export class Game {
         cpuTotal:    Math.floor(this.cpuCoinBalance),
       });
     }
+    if (e.key === 'j' || e.key === 'J') {
+      this.spawnCoin(COIN_VALUE, 'gold');
+      this.resetCoinDropTimer();
+      this.diagnostics.noteEvent(this.elapsedSeconds, 'Cheat J: forced gold coin drop');
+    }
   };
   private readonly onKeyUp = (e: KeyboardEvent) => { this.keysDown.delete(e.key); };
 
