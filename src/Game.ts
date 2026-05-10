@@ -868,7 +868,7 @@ export class Game {
     const rocketKnockbackDecay = Math.exp(-ROCKET_KNOCKBACK_DECAY * dt);
     for (const r of this.rockets) {
       r.update(dt, this.platformData, this.blockData);
-      // Check proximity to any live enemy — detonates on contact
+      // Detonate on enemy character contact (proximity sphere)
       if (!r.isDead) {
         for (const c of liveChars) {
           if (c.side === r.side) continue;
@@ -877,6 +877,16 @@ export class Game {
             r.triggerHit();
             break;
           }
+        }
+      }
+      // Detonate on enemy tower contact (AABB)
+      if (!r.isDead) {
+        const targetTower = r.side === 'player' ? this.enemyTower : this.playerTower;
+        const tLeft = targetTower.x - TOWER_WIDTH / 2;
+        const tRight = targetTower.x + TOWER_WIDTH / 2;
+        const tTop  = GROUND_Y - TOWER_HEIGHT;
+        if (r.x >= tLeft && r.x <= tRight && r.y >= tTop) {
+          r.triggerHit();
         }
       }
       const ex = r.consumeExplosion();
