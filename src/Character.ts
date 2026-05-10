@@ -1317,6 +1317,9 @@ export class Character {
 
   syncFromBody(platforms: PlatformData[], blocks: BlockData[]) {
     const halfH     = this.config.height / 2;
+    // positionPrev is an internal Matter.js field not exposed in the public types;
+    // it gives the body's position from before the last physics step, which is
+    // required for the tunneling-safe platform/block landing check below.
     const prevFeetY = (this.body as unknown as { positionPrev: { y: number } }).positionPrev.y + halfH;
     this.y          = this.body.position.y + halfH;
 
@@ -1376,6 +1379,8 @@ export class Character {
    * far enough or the existing path has gone stale.
    */
   private requestPath(toX: number, toFloorY: number, navGraph: NavGraph, dt: number): void {
+    // Quantise target to a 20 px grid so minor positional drift (e.g. an enemy
+    // character drifting a few pixels) doesn't trigger a full path rebuild every tick.
     const key = `${Math.round(toX / 20) * 20},${Math.round(toFloorY)}`;
     this.pathAge += dt;
     if (key === this.pathTargetKey && this.pathAge < this.PATH_TTL && this.path.length > 0) return;
@@ -1939,9 +1944,13 @@ export class Character {
   }
 
   /**
-   * Snaps the firing direction to the nearest allowed angle:
-   * horizontal (0°), 45° upward, or 90° straight up.
-   * The bullet always travels at the original distance so splash still lands near the target.
+   * Snaps the firing direction to the nearest of three allowed angles:
+   *   • Horizontal      (0° / 180°, depending on direction)
+   *   • 45° upward      (-π/4 or -3π/4 in screen-space where Y↓)
+   *   • Straight up     (-π/2)
+   * Downward angles are intentionally excluded — characters cannot fire below their
+   * current floor. The projectile travels the original distance so splash damage
+   * still lands close to the intended target.
    */
   private snapFireAngle(sx: number, sy: number, tx: number, ty: number): { tx: number; ty: number } {
     const dx   = tx - sx;
@@ -2060,6 +2069,12 @@ export class Character {
     return true;
   }
 
+  /**
+   * Returns the nearest living enemy within `range` px.
+   * Ranged characters additionally require an unobstructed line of sight through blocks.
+   * Enemies more than 30 px below the shooter are excluded — projectiles cannot arc
+   * downward and melee cannot swing through a platform floor.
+   */
   private nearestEnemy(chars: Character[], range: number, blocks: BlockData[] = []): Character | null {
     let best: Character | null = null;
     let minDistSq = Infinity;

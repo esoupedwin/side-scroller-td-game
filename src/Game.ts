@@ -881,36 +881,13 @@ export class Game {
       }
       const ex = r.consumeExplosion();
       if (ex) {
-        for (const c of liveChars) {
-          if (c.side === r.side) continue;
-          const dist = Math.hypot(c.x - ex.x, c.y - ex.y);
-          if (dist <= ex.radius) {
-            const frac = 1 - (dist / ex.radius) * (1 - ROCKET_SPLASH_MIN_FRAC);
-            c.takeDamage(Math.round(ex.damage * frac), ex.shooter ?? undefined);
-            const kFrac = 1 - dist / ex.radius;
-            const dx    = c.x - ex.x;
-            const dy    = c.y - ex.y;
-            const len   = dist || 1;
-            c.applyKnockback(
-              (dx / len) * ROCKET_KNOCKBACK_MAX_VX * kFrac,
-              (dy / len) * ROCKET_KNOCKBACK_MAX_VY * kFrac,
-              dt,
-              rocketKnockbackDecay,
-            );
-          }
-        }
-        const targetTower = r.side === 'player' ? this.enemyTower : this.playerTower;
-        const towerLeft   = targetTower.x - TOWER_WIDTH / 2;
-        const towerRight  = targetTower.x + TOWER_WIDTH / 2;
-        const towerTop    = GROUND_Y - TOWER_HEIGHT;
-        const nearX = Math.max(towerLeft,  Math.min(towerRight, ex.x));
-        const nearY = Math.max(towerTop,   Math.min(GROUND_Y,   ex.y));
-        if (Math.hypot(nearX - ex.x, nearY - ex.y) <= ex.radius) {
-          targetTower.takeDamage(ex.damage);
-        }
-        if (this.sheep && Math.hypot(this.sheep.x - ex.x, this.sheep.y - ex.y) <= ex.radius + 20) {
-          this.sheep.reactToHit(ex.x);
-        }
+        this.processAoE(
+          ex, r.side,
+          ROCKET_SPLASH_MIN_FRAC,
+          ROCKET_KNOCKBACK_MAX_VX, ROCKET_KNOCKBACK_MAX_VY,
+          rocketKnockbackDecay,
+          dt, liveChars,
+        );
       }
     }
 
@@ -920,39 +897,13 @@ export class Game {
       g.update(dt, this.platformData, this.blockData);
       const ex = g.consumeExplosion();
       if (ex) {
-        for (const c of liveChars) {
-          if (c.side === g.side) continue;
-          const dist = Math.hypot(c.x - ex.x, c.y - ex.y);
-          if (dist <= ex.radius) {
-            const frac = 1 - (dist / ex.radius) * (1 - GRENADE_SPLASH_MIN_FRAC);
-            c.takeDamage(Math.round(ex.damage * frac), ex.shooter ?? undefined);
-
-            // Knockback: push outward from blast centre, stronger at closer range
-            const kFrac = 1 - dist / ex.radius;
-            const dx    = c.x - ex.x;
-            const dy    = c.y - ex.y;
-            const len   = dist || 1;
-            c.applyKnockback(
-              (dx / len) * GRENADE_KNOCKBACK_MAX_VX * kFrac,
-              (dy / len) * GRENADE_KNOCKBACK_MAX_VY * kFrac,
-              dt,
-              knockbackDecayFactor,
-            );
-          }
-        }
-        // Tower damage — find closest point on the enemy tower rect to the blast centre
-        const targetTower = g.side === 'player' ? this.enemyTower : this.playerTower;
-        const towerLeft   = targetTower.x - TOWER_WIDTH / 2;
-        const towerRight  = targetTower.x + TOWER_WIDTH / 2;
-        const towerTop    = GROUND_Y - TOWER_HEIGHT;
-        const nearX = Math.max(towerLeft,  Math.min(towerRight, ex.x));
-        const nearY = Math.max(towerTop,   Math.min(GROUND_Y,   ex.y));
-        if (Math.hypot(nearX - ex.x, nearY - ex.y) <= ex.radius) {
-          targetTower.takeDamage(ex.damage);
-        }
-        if (this.sheep && Math.hypot(this.sheep.x - ex.x, this.sheep.y - ex.y) <= ex.radius + 20) {
-          this.sheep.reactToHit(ex.x);
-        }
+        this.processAoE(
+          ex, g.side,
+          GRENADE_SPLASH_MIN_FRAC,
+          GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY,
+          knockbackDecayFactor,
+          dt, liveChars,
+        );
       }
     }
 
@@ -1119,6 +1070,65 @@ export class Game {
           g.endFill();
         }
       }
+    }
+  }
+
+  /**
+   * Apply AoE splash damage, knockback, tower damage, and sheep startle from a
+   * single explosion event. Used by both grenades and rockets so the logic lives
+   * in exactly one place.
+   *
+   * @param ex         Explosion descriptor from consumeExplosion()
+   * @param sourceSide Side that fired — enemies of this side take damage
+   * @param splashMinFrac   Minimum damage fraction at blast edge (0–1)
+   * @param knockbackMaxVx  Max horizontal knockback velocity (px/s)
+   * @param knockbackMaxVy  Max vertical knockback velocity (px/s)
+   * @param knockbackDecay  Pre-computed decay factor: Math.exp(-decay * dt)
+   * @param dt         Frame delta time (seconds)
+   * @param liveChars  All living characters this tick
+   */
+  private processAoE(
+    ex: { x: number; y: number; radius: number; damage: number; shooter: Character | null },
+    sourceSide: 'player' | 'enemy',
+    splashMinFrac: number,
+    knockbackMaxVx: number,
+    knockbackMaxVy: number,
+    knockbackDecay: number,
+    dt: number,
+    liveChars: Character[],
+  ): void {
+    for (const c of liveChars) {
+      if (c.side === sourceSide) continue;
+      const dist = Math.hypot(c.x - ex.x, c.y - ex.y);
+      if (dist <= ex.radius) {
+        // Damage falls off linearly from full at the centre to splashMinFrac at the edge
+        const frac = 1 - (dist / ex.radius) * (1 - splashMinFrac);
+        c.takeDamage(Math.round(ex.damage * frac), ex.shooter ?? undefined);
+        // Knockback: outward from blast centre, stronger at closer range
+        const kFrac = 1 - dist / ex.radius;
+        const dx    = c.x - ex.x;
+        const dy    = c.y - ex.y;
+        const len   = dist || 1;
+        c.applyKnockback(
+          (dx / len) * knockbackMaxVx * kFrac,
+          (dy / len) * knockbackMaxVy * kFrac,
+          dt,
+          knockbackDecay,
+        );
+      }
+    }
+    // Tower damage: use closest point on the tower AABB to the blast centre
+    const targetTower = sourceSide === 'player' ? this.enemyTower : this.playerTower;
+    const towerLeft   = targetTower.x - TOWER_WIDTH / 2;
+    const towerRight  = targetTower.x + TOWER_WIDTH / 2;
+    const towerTop    = GROUND_Y - TOWER_HEIGHT;
+    const nearX = Math.max(towerLeft,  Math.min(towerRight, ex.x));
+    const nearY = Math.max(towerTop,   Math.min(GROUND_Y,   ex.y));
+    if (Math.hypot(nearX - ex.x, nearY - ex.y) <= ex.radius) {
+      targetTower.takeDamage(ex.damage);
+    }
+    if (this.sheep && Math.hypot(this.sheep.x - ex.x, this.sheep.y - ex.y) <= ex.radius + 20) {
+      this.sheep.reactToHit(ex.x);
     }
   }
 

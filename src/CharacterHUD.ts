@@ -2,7 +2,7 @@ import type { Character } from './Character';
 import { RANK_NAMES } from './Character';
 import { PROMO_THRESHOLDS } from './constants';
 
-const TYPE_ICON: Record<string, string> = {
+export const TYPE_ICON: Record<string, string> = {
   warrior:   '⚔',
   archer:    '🏹',
   rifleman:  '🔫',

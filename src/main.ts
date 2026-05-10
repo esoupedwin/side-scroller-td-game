@@ -1,32 +1,30 @@
 import { Game, type CpuStrategyInfo } from './Game';
 import { CHAR_COST } from './constants';
+import { TYPE_ICON } from './CharacterHUD';
 
-const container        = document.getElementById('game-container')!;
-const hudEl            = document.getElementById('char-hud')!;
-const coinAmountEl     = document.getElementById('coin-amount')!;
-const cpuCoinAmountEl  = document.getElementById('cpu-coin-amount')!;
-const cpuCharsListEl   = document.getElementById('cpu-chars-list')!;
-const enemyTowerHpEl   = document.getElementById('enemy-tower-hp')!;
-const spawnWarriorBtn  = document.getElementById('spawn-warrior-btn')  as HTMLButtonElement;
-const spawnArcherBtn   = document.getElementById('spawn-archer-btn')   as HTMLButtonElement;
-const spawnRiflemanBtn = document.getElementById('spawn-rifleman-btn') as HTMLButtonElement;
-const spawnSniperBtn   = document.getElementById('spawn-sniper-btn')   as HTMLButtonElement;
-const spawnMedicBtn    = document.getElementById('spawn-medic-btn')    as HTMLButtonElement;
-const spawnHeavyBtn    = document.getElementById('spawn-heavy-btn')    as HTMLButtonElement;
-const spawnTankerBtn      = document.getElementById('spawn-tanker-btn')      as HTMLButtonElement;
-const spawnGrenadierBtn   = document.getElementById('spawn-grenadier-btn')   as HTMLButtonElement;
-const spawnRocketeerBtn   = document.getElementById('spawn-rocketeer-btn')   as HTMLButtonElement;
+const container       = document.getElementById('game-container')!;
+const hudEl           = document.getElementById('char-hud')!;
+const coinAmountEl    = document.getElementById('coin-amount')!;
+const cpuCoinAmountEl = document.getElementById('cpu-coin-amount')!;
+const cpuCharsListEl  = document.getElementById('cpu-chars-list')!;
+const enemyTowerHpEl  = document.getElementById('enemy-tower-hp')!;
+
+// All spawnable unit types, in display order
+const UNIT_TYPES = [
+  'warrior', 'archer', 'rifleman', 'sniper', 'medic',
+  'heavy', 'tanker', 'grenadier', 'rocketeer',
+] as const;
+type UnitType = typeof UNIT_TYPES[number];
+
+// One spawn button per unit type — keyed by type string for easy lookup
+const spawnBtns = new Map<UnitType, HTMLButtonElement>(
+  UNIT_TYPES.map(t => [t, document.getElementById(`spawn-${t}-btn`) as HTMLButtonElement]),
+);
 
 // Populate costs from config so the HTML never goes stale
-(document.getElementById('warrior-cost')  as HTMLElement).textContent = `${CHAR_COST.warrior}  💰`;
-(document.getElementById('archer-cost')   as HTMLElement).textContent = `${CHAR_COST.archer}   💰`;
-(document.getElementById('rifleman-cost') as HTMLElement).textContent = `${CHAR_COST.rifleman} 💰`;
-(document.getElementById('sniper-cost')   as HTMLElement).textContent = `${CHAR_COST.sniper}   💰`;
-(document.getElementById('medic-cost')    as HTMLElement).textContent = `${CHAR_COST.medic}    💰`;
-(document.getElementById('heavy-cost')    as HTMLElement).textContent = `${CHAR_COST.heavy}    💰`;
-(document.getElementById('tanker-cost')     as HTMLElement).textContent = `${CHAR_COST.tanker}    💰`;
-(document.getElementById('grenadier-cost') as HTMLElement).textContent = `${CHAR_COST.grenadier} 💰`;
-(document.getElementById('rocketeer-cost') as HTMLElement).textContent = `${CHAR_COST.rocketeer} 💰`;
+for (const t of UNIT_TYPES) {
+  (document.getElementById(`${t}-cost`) as HTMLElement).textContent = `${CHAR_COST[t]} 💰`;
+}
 const countdownEl    = document.getElementById('countdown')!;
 const gameOverEl     = document.getElementById('game-over')!;
 const goTitle        = document.getElementById('game-over-title')!;
@@ -40,15 +38,9 @@ let gameOver = false;
 
 let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged, handleEnemyTowerHpChanged);
 
-spawnWarriorBtn.addEventListener ('click', () => game.spawnPlayer('warrior'));
-spawnArcherBtn.addEventListener  ('click', () => game.spawnPlayer('archer'));
-spawnRiflemanBtn.addEventListener('click', () => game.spawnPlayer('rifleman'));
-spawnSniperBtn.addEventListener  ('click', () => game.spawnPlayer('sniper'));
-spawnMedicBtn.addEventListener   ('click', () => game.spawnPlayer('medic'));
-spawnHeavyBtn.addEventListener   ('click', () => game.spawnPlayer('heavy'));
-spawnTankerBtn.addEventListener     ('click', () => game.spawnPlayer('tanker'));
-spawnGrenadierBtn.addEventListener  ('click', () => game.spawnPlayer('grenadier'));
-spawnRocketeerBtn.addEventListener  ('click', () => game.spawnPlayer('rocketeer'));
+for (const t of UNIT_TYPES) {
+  spawnBtns.get(t)!.addEventListener('click', () => game.spawnPlayer(t));
+}
 
 restartBtn.addEventListener('click', () => {
   gameOver = false;
@@ -99,17 +91,6 @@ function handleCpuCoinsChanged(coins: number) {
   cpuCoinAmountEl.textContent = String(coins);
 }
 
-const TYPE_ICON: Record<string, string> = {
-  warrior:   '⚔',
-  archer:    '🏹',
-  rifleman:  '🔫',
-  sniper:    '🎯',
-  medic:     '➕',
-  heavy:     '🔨',
-  tanker:    '🪖',
-  grenadier: '💣',
-  rocketeer: '🚀',
-};
 
 function handleEnemyTowerHpChanged(hp: number, maxHp: number) {
   enemyTowerHpEl.textContent = `${hp} / ${maxHp}`;
@@ -164,15 +145,9 @@ function handleCoinsChanged(coins: number) {
   coinAmountEl.textContent = String(coins);
 
   // Disable spawn buttons when game is over OR when there aren't enough coins
-  spawnWarriorBtn.disabled  = gameOver || coins < CHAR_COST.warrior;
-  spawnArcherBtn.disabled   = gameOver || coins < CHAR_COST.archer;
-  spawnRiflemanBtn.disabled = gameOver || coins < CHAR_COST.rifleman;
-  spawnSniperBtn.disabled   = gameOver || coins < CHAR_COST.sniper;
-  spawnMedicBtn.disabled    = gameOver || coins < CHAR_COST.medic;
-  spawnHeavyBtn.disabled    = gameOver || coins < CHAR_COST.heavy;
-  spawnTankerBtn.disabled      = gameOver || coins < CHAR_COST.tanker;
-  spawnGrenadierBtn.disabled   = gameOver || coins < CHAR_COST.grenadier;
-  spawnRocketeerBtn.disabled   = gameOver || coins < CHAR_COST.rocketeer;
+  for (const [t, btn] of spawnBtns) {
+    btn.disabled = gameOver || coins < CHAR_COST[t];
+  }
 }
 
 function handleTimeChanged(seconds: number) {
