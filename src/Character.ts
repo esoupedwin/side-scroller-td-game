@@ -2066,6 +2066,9 @@ export class Character {
     const rangeSq = range * range;
     for (const t of chars) {
       if (t.isDead || t.side === this.side) continue;
+      // Skip enemies that are meaningfully below — projectiles cannot fire downward,
+      // and melee cannot swing through the floor of a platform.
+      if (t.y > this.y + 30) continue;
       const dx = this.x - t.x;
       const dy = this.y - t.y;
       const distSq = dx * dx + dy * dy;
