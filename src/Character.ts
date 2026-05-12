@@ -12,6 +12,7 @@ import {
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
   POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
   GRENADE_MAX_VX,
+  BULLET_SPLASH, ARROW_SPLASH,
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
@@ -1535,10 +1536,10 @@ export class Character {
 
   // ── Rush behaviour ───────────────────────────────────────────────────────────
   // Charge straight to the enemy tower, dodging enemy characters by jumping over
-  // them. No firing, no engagement — just push.
+  // them. Fires at any enemy in range while moving — does not stop to engage.
 
   private updateRushing(ctx: UpdateContext) {
-    const { dt, allChars, enemyTowerFrontX, enemyTowerY, onFire, navGraph } = ctx;
+    const { dt, allChars, enemyTowerFrontX, enemyTowerY, onFire, blocks, navGraph } = ctx;
     if (this.isAirborne) return;
 
     const dir         = this.side === 'player' ? 1 : -1;
@@ -1549,6 +1550,10 @@ export class Character {
       this.attackTower(enemyTowerFrontX, enemyTowerY, onFire, ctx.onDamageTower);
       return;
     }
+
+    // Opportunistic attack: fire at any enemy in range without stopping movement
+    const nearest = this.nearestEnemy(allChars, this.config.attackRange, blocks);
+    if (nearest) this.attackEnemy(nearest, onFire);
 
     // Dodge enemies directly in front by jumping over them.
     const RUSH_DODGE_LOOKAHEAD = 90;
@@ -1748,8 +1753,11 @@ export class Character {
         }
         this.state = 'marching';
       } else if (toEnemy > 0 && closestDist > this.config.attackRange * 0.8) {
-        // Enemy is ahead and not yet in range — use pathfinding to navigate around blocks
-        this.requestPath(clamp(closest.x), this.floorY, navGraph, dt);
+        // Enemy is ahead and not yet in range — use pathfinding to navigate around blocks.
+        // Pass the enemy's floor (not this.floorY): if the character is on a platform and the
+        // enemy is on the ground/a different surface, using this.floorY snaps the destination
+        // to the current platform's edge and the character can stall there.
+        this.requestPath(clamp(closest.x), closest.floorY, navGraph, dt);
         this.followPath(dt);
         if (this.state !== 'fighting') this.state = 'marching';
       } else if (toEnemy <= 0) {
@@ -2070,8 +2078,23 @@ export class Character {
   }
 
   /**
+   * For snap-firing types, returns true if the snapped landing X lands within the
+   * projectile's splash radius of the target. Non-snap types (melee, grenade, rocket)
+   * always return true — they aim freely.
+   */
+  private canSnapHit(target: Character): boolean {
+    const t = this.config.type;
+    if (t === 'warrior' || t === 'heavy' || t === 'grenadier' || t === 'rocketeer') return true;
+    const snapped = this.snapFireAngle(this.x, this.bowY, target.x, target.bowY);
+    const splash  = this.projectileKind === 'bullet' ? BULLET_SPLASH : ARROW_SPLASH;
+    return Math.abs(snapped.tx - target.x) <= splash;
+  }
+
+  /**
    * Returns the nearest living enemy within `range` px.
    * Ranged characters additionally require an unobstructed line of sight through blocks.
+   * Snap-firing types also require the snapped angle to actually land on the target —
+   * otherwise the bullet would deterministically miss every shot.
    * Enemies more than 30 px below the shooter are excluded — projectiles cannot arc
    * downward and melee cannot swing through a platform floor.
    */
@@ -2089,6 +2112,7 @@ export class Character {
       const distSq = dx * dx + dy * dy;
       if (distSq <= rangeSq && distSq < minDistSq) {
         if (blocks.length > 0 && this.isRanged && !this.hasLineOfSight(t.x, t.bowY, blocks)) continue;
+        if (!this.canSnapHit(t)) continue;
         minDistSq = distSq;
         best = t;
       }
