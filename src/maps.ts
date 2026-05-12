@@ -25,25 +25,26 @@ export interface MapDefinition {
   coinBox:      CoinBoxDef;
 }
 
-/** Reproduces the hardcoded defaults from gameConfig.ts. */
 export const DEFAULT_MAP: MapDefinition = {
   id:           'default',
   name:         'Classic Battlefield',
-  worldWidth:   W,
-  playerTowerX: G.towers.playerX,
-  enemyTowerX:  G.towers.enemyX,
+  worldWidth:   2808,
+  playerTowerX: 60,
+  enemyTowerX:  2748,
   platforms: [
-    { x: W / 2 - 180, y: GY - 140, width: 360, height: 14 },
+    { x: 1219, y: 330, width: 390, height: 70 },
+    { x: 1293, y: 224, width: 240, height: 14 },
   ],
   blocks: [
-    { x: W / 2 - 100, y: GY - 80, width: 200, height: 40 },
+    { x:  540, y: 360, width: 200, height: 40 },
+    { x: 2112, y: 360, width: 200, height: 40 },
   ],
   coinBox: {
-    x:         W / 2,
-    y:         GY - 350,
-    width:     G.coinBox.width,
-    height:    G.coinBox.height,
-    spreadDeg: G.coinBox.spreadDeg,
+    x:         1404,
+    y:         30,
+    width:     48,
+    height:    48,
+    spreadDeg: 25,
   },
 };
 
