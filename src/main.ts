@@ -87,6 +87,21 @@ diagnoseExportBtn.addEventListener('click', () => {
 setInterval(refreshDiagnoseUi, 500);
 refreshDiagnoseUi();
 
+// ── CPU vs CPU dev toggle ──────────────────────────────────────────────────
+const cpuVsCpuBtn = document.getElementById('cpu-vs-cpu-btn') as HTMLButtonElement;
+
+function refreshCpuVsCpuUi() {
+  const on = game.isCpuVsCpu();
+  cpuVsCpuBtn.classList.toggle('is-active', on);
+  cpuVsCpuBtn.textContent = on ? 'CPU vs CPU: ON' : 'CPU vs CPU';
+}
+
+cpuVsCpuBtn.addEventListener('click', () => {
+  game.setCpuVsCpu(!game.isCpuVsCpu());
+  refreshCpuVsCpuUi();
+});
+refreshCpuVsCpuUi();
+
 function handleCpuCoinsChanged(coins: number) {
   cpuCoinAmountEl.textContent = String(coins);
 }

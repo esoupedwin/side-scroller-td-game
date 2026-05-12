@@ -199,6 +199,10 @@ export class Game {
   private lastCpuCharsSig     = '';
   private lastCpuStrategySig  = '';
   private cpuStance: 'push' | 'economy' | 'defend' = 'economy';
+  private playerStance: 'push' | 'economy' | 'defend' = 'economy';
+  private playerSpawnTimer    = 0;
+  private playerSpawnInterval = 0;
+  private cpuVsCpu            = false;
   private timeRemaining    = GAME_DURATION_SEC;
   private lastNotifiedTime = -1;
   private cpuStrategyInfo: CpuStrategyInfo = {
@@ -239,6 +243,7 @@ export class Game {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup',   this.onKeyUp);
     this.resetCpuTimerFirst();
+    if (this.cpuVsCpu) this.resetPlayerSpawnTimerFirst();
     this.resetCoinDropTimer();
     this.resetSilverDropTimer();
     this.app.ticker.add(this.tickFn);
@@ -459,11 +464,24 @@ export class Game {
     return true;
   }
 
+  /** Dev-only: when enabled, the player side is also driven by the CPU AI. */
+  setCpuVsCpu(enabled: boolean): void {
+    if (this.cpuVsCpu === enabled) return;
+    this.cpuVsCpu = enabled;
+    if (enabled) this.resetPlayerSpawnTimerFirst();
+  }
+
+  isCpuVsCpu(): boolean { return this.cpuVsCpu; }
+
   // ── CPU strategic assessment ─────────────────────────────────────────────────
 
-  private assessCpuStance(liveChars: Character[]): 'push' | 'economy' | 'defend' {
-    const playerChars = liveChars.filter(c => c.side === 'player');
-    const cpuChars    = liveChars.filter(c => c.side === 'enemy');
+  private assessCpuStance(self: 'player' | 'enemy', liveChars: Character[]): 'push' | 'economy' | 'defend' {
+    const selfChars = liveChars.filter(c => c.side === self);
+    const oppChars  = liveChars.filter(c => c.side !== self);
+    const selfTower = self === 'enemy' ? this.enemyTower : this.playerTower;
+    const oppTower  = self === 'enemy' ? this.playerTower : this.enemyTower;
+    const selfCoins = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
+    const oppCoins  = self === 'enemy' ? this.coinBalance    : this.cpuCoinBalance;
 
     const typeWeight = (type: string) =>
       type === 'tanker'   ? 2.5 :
@@ -478,59 +496,63 @@ export class Game {
         return s + (c.hp / c.maxHp) * typeWeight(c.config.type) * behaviorMult;
       }, 0);
 
-    const playerStr = threat(playerChars, true);   // collecting chars aren't a real threat
-    const cpuStr    = threat(cpuChars,    false);  // CPU strength unmodified
-    const unitAdv   = cpuStr - playerStr;
-    const towerAdv  = (this.enemyTower.hp / TOWER_HP) - (this.playerTower.hp / TOWER_HP);
-    const coinAdv   = Math.min(1, Math.max(-1, (this.cpuCoinBalance - this.coinBalance) / 120));
+    const oppStr  = threat(oppChars,  true);   // opponent's collectors aren't a real threat
+    const selfStr = threat(selfChars, false);  // own strength unmodified
+    const unitAdv   = selfStr - oppStr;
+    const towerAdv  = (selfTower.hp / TOWER_HP) - (oppTower.hp / TOWER_HP);
+    const coinAdv   = Math.min(1, Math.max(-1, (selfCoins - oppCoins) / 120));
     const score     = unitAdv * 1.5 + towerAdv * 2.5 + coinAdv * 0.5;
 
-    // Store all intermediate values for the dev panel
-    this.cpuStrategyInfo.score    = score;
-    this.cpuStrategyInfo.unitAdv  = unitAdv;
-    this.cpuStrategyInfo.towerAdv = towerAdv;
-    this.cpuStrategyInfo.coinAdv  = coinAdv;
+    // Store intermediate values for the dev panel — only from the canonical CPU (enemy) perspective
+    if (self === 'enemy') {
+      this.cpuStrategyInfo.score    = score;
+      this.cpuStrategyInfo.unitAdv  = unitAdv;
+      this.cpuStrategyInfo.towerAdv = towerAdv;
+      this.cpuStrategyInfo.coinAdv  = coinAdv;
+    }
 
+    let stance: 'push' | 'economy' | 'defend';
     // Critical tower overrides
-    if (this.enemyTower.hp  / TOWER_HP < 0.28) { this.cpuStrategyInfo.stance = 'defend'; return 'defend'; }
-    if (this.playerTower.hp / TOWER_HP < 0.28) { this.cpuStrategyInfo.stance = 'push';   return 'push';   }
+    if (selfTower.hp / TOWER_HP < 0.28)      stance = 'defend';
+    else if (oppTower.hp / TOWER_HP < 0.28)  stance = 'push';
+    else if (score >  0.8)                   stance = 'push';
+    else if (score < -0.7)                   stance = 'defend';
+    else                                     stance = 'economy';
 
-    const stance: 'push' | 'economy' | 'defend' =
-      score >  0.8 ? 'push' :
-      score < -0.7 ? 'defend' : 'economy';
-
-    this.cpuStrategyInfo.stance = stance;
+    if (self === 'enemy') this.cpuStrategyInfo.stance = stance;
     return stance;
   }
 
-  private spawnCpu(liveChars: Character[]) {
+  private spawnCpu(self: 'player' | 'enemy', liveChars: Character[]) {
     if (this.isOver) return;
 
-    const stance   = this.cpuStance;   // assessed every tick
-    const cpuChars = liveChars.filter(c => c.side === 'enemy');
-    const playerCount = liveChars.filter(c => c.side === 'player').length;
-    const pressure    = playerCount - cpuChars.length;
+    const stance   = self === 'enemy' ? this.cpuStance : this.playerStance;
+    const selfChars = liveChars.filter(c => c.side === self);
+    const oppCount  = liveChars.filter(c => c.side !== self).length;
+    const pressure  = oppCount - selfChars.length;
+    const balance   = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
+    const spawnX    = self === 'enemy' ? this.enemyTower.frontX : this.playerTower.frontX;
 
-    // How many CPU units are below half HP
-    const hurting  = cpuChars.filter(c => c.hp / c.config.hp < 0.5).length;
-    const hasMedic = cpuChars.some(c => c.config.type === 'medic');
+    // How many own units are below half HP
+    const hurting  = selfChars.filter(c => c.hp / c.config.hp < 0.5).length;
+    const hasMedic = selfChars.some(c => c.config.type === 'medic');
 
     type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker';
     let order: UnitType[];
 
     if (stance === 'push') {
       // Aggressive push: get a medic if units are hurting, then flood high-damage units
-      const needMedic = hurting >= 1 && !hasMedic && cpuChars.length >= 2;
+      const needMedic = hurting >= 1 && !hasMedic && selfChars.length >= 2;
       if (needMedic) {
         order = ['medic', 'rifleman', 'heavy', 'tanker', 'warrior', 'archer'];
-      } else if (this.cpuCoinBalance >= CHAR_COST.tanker) {
+      } else if (balance >= CHAR_COST.tanker) {
         order = ['tanker', 'rifleman', 'heavy', 'warrior', 'archer'];
       } else {
         order = ['rifleman', 'heavy', 'warrior', 'archer'];
       }
     } else if (stance === 'defend') {
       // Get a medic early — 1 hurting unit is enough to justify it when squad exists
-      const needMedic = hurting >= 1 && !hasMedic && cpuChars.length >= 2;
+      const needMedic = hurting >= 1 && !hasMedic && selfChars.length >= 2;
       if (needMedic) {
         order = ['medic', 'warrior', 'archer', 'sniper'];
       } else if (pressure >= 3) {
@@ -544,30 +566,44 @@ export class Game {
       // Economy: invest in better units; get a medic if the squad is hurting
       if (hurting >= 2 && !hasMedic) {
         order = ['medic', 'archer', 'warrior'];
-      } else if (this.cpuCoinBalance >= CHAR_COST.tanker && cpuChars.length >= 4) {
+      } else if (balance >= CHAR_COST.tanker && selfChars.length >= 4) {
         order = ['tanker', 'sniper', 'rifleman', 'archer', 'heavy', 'warrior'];
-      } else if (this.cpuCoinBalance >= CHAR_COST.sniper && cpuChars.length >= 3) {
+      } else if (balance >= CHAR_COST.sniper && selfChars.length >= 3) {
         order = ['sniper', 'rifleman', 'archer', 'heavy', 'warrior'];
-      } else if (this.cpuCoinBalance >= CHAR_COST.rifleman) {
+      } else if (balance >= CHAR_COST.rifleman) {
         order = ['rifleman', 'archer', 'heavy', 'warrior'];
       } else {
         order = ['archer', 'heavy', 'warrior'];
       }
     }
 
+    const resetTimer = (p: number) => {
+      if (self === 'enemy') this.resetCpuTimer(p);
+      else                  this.resetPlayerSpawnTimer(p);
+    };
+
     for (const type of order) {
-      if (this.cpuCoinBalance < CHAR_COST[type]) continue;
-      this.cpuCoinBalance -= CHAR_COST[type];
-      const c = new Character('enemy', this.enemyTower.frontX, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics);
+      const cost = CHAR_COST[type];
+      if (balance < cost) continue;
+      if (self === 'enemy') {
+        this.cpuCoinBalance -= cost;
+      } else {
+        this.coinBalance -= cost;
+        this.notifyCoins();
+      }
+      const c = new Character(self, spawnX, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics);
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
-      this.cpuStrategyInfo.decision = `Spawned ${type} #${c.id}`;
-      this.resetCpuTimer(pressure);
+      if (self === 'player') this.hud.add(c);
+      if (self === 'enemy')  this.cpuStrategyInfo.decision = `Spawned ${type} #${c.id}`;
+      resetTimer(pressure);
       return;
     }
-    const needCost = Math.min(...order.map(t => CHAR_COST[t]));
-    this.cpuStrategyInfo.decision = `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
-    this.resetCpuTimer(pressure);
+    if (self === 'enemy') {
+      const needCost = Math.min(...order.map(t => CHAR_COST[t]));
+      this.cpuStrategyInfo.decision = `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
+    }
+    resetTimer(pressure);
   }
 
   private allocateCharId(): number {
@@ -613,6 +649,21 @@ export class Game {
     this.cpuSpawnTimer    = 0;
   }
 
+  private resetPlayerSpawnTimerFirst() {
+    this.playerSpawnInterval = Math.random() * CPU_FIRST_SPAWN_MAX;
+    this.playerSpawnTimer    = 0;
+  }
+
+  private resetPlayerSpawnTimer(pressure = 0) {
+    const [min, max] =
+      pressure >= CPU_PRESSURE_THRESHOLD  ? [CPU_SPAWN_MIN_MS,                         CPU_SPAWN_MIN_MS * CPU_URGENT_MAX_FACTOR  ] :
+      pressure <= -CPU_PRESSURE_THRESHOLD ? [CPU_SPAWN_MAX_MS * CPU_COMFORT_MIN_FACTOR, CPU_SPAWN_MAX_MS                          ] :
+                                            [CPU_SPAWN_MIN_MS * CPU_NEUTRAL_MIN_FACTOR, CPU_SPAWN_MAX_MS * CPU_NEUTRAL_MAX_FACTOR ];
+    const stanceMult = this.playerStance === 'push' ? 0.70 : this.playerStance === 'defend' ? 0.72 : 1.0;
+    this.playerSpawnInterval = (min + Math.random() * (max - min)) * stanceMult;
+    this.playerSpawnTimer    = 0;
+  }
+
   private resetCoinDropTimer() {
     const range = COIN_DROP_MAX_MS - COIN_DROP_MIN_MS;
     this.coinDropInterval = COIN_DROP_MIN_MS + Math.random() * range;
@@ -650,13 +701,22 @@ export class Game {
     this.notifyEnemyTowerHp();
 
     const liveChars = this.characters.filter(c => !c.isDead);
-    this.cpuStance = this.assessCpuStance(liveChars);
+    this.cpuStance = this.assessCpuStance('enemy', liveChars);
     this.notifyCpuStrategy();
 
     // CPU auto-spawn (uses liveChars for strategic decisions)
     this.cpuSpawnTimer += ticker.deltaMS;
     if (this.cpuSpawnTimer >= this.cpuSpawnInterval) {
-      this.spawnCpu(liveChars);  // resets timer internally
+      this.spawnCpu('enemy', liveChars);  // resets timer internally
+    }
+
+    // CPU vs CPU: drive the player side with a second AI instance
+    if (this.cpuVsCpu) {
+      this.playerStance = this.assessCpuStance('player', liveChars);
+      this.playerSpawnTimer += ticker.deltaMS;
+      if (this.playerSpawnTimer >= this.playerSpawnInterval) {
+        this.spawnCpu('player', liveChars);  // resets player timer internally
+      }
     }
 
     // Coin drop
@@ -751,8 +811,12 @@ export class Game {
 
     const liveCoins = this.coins.filter(c => !c.isDead);
 
-    this.tickCpuCollectAI(liveChars, liveCoins);
-    this.tickCpuBehaviorAI(liveChars);
+    this.tickCpuCollectAI('enemy', liveChars, liveCoins);
+    this.tickCpuBehaviorAI('enemy', liveChars);
+    if (this.cpuVsCpu) {
+      this.tickCpuCollectAI('player', liveChars, liveCoins);
+      this.tickCpuBehaviorAI('player', liveChars);
+    }
 
     // Update characters
     for (const c of liveChars) {
@@ -1183,14 +1247,16 @@ export class Game {
 
   // ── CPU collect AI ───────────────────────────────────────────────────────────
 
-  private tickCpuCollectAI(liveChars: Character[], liveCoins: Coin[]) {
-    const cpuChars   = liveChars.filter(c => c.side === 'enemy');
-    const collectors = cpuChars.filter(c => c.behavior === 'collecting');
+  private tickCpuCollectAI(self: 'player' | 'enemy', liveChars: Character[], liveCoins: Coin[]) {
+    const stance     = self === 'enemy' ? this.cpuStance : this.playerStance;
+    const selfChars  = liveChars.filter(c => c.side === self);
+    const collectors = selfChars.filter(c => c.behavior === 'collecting');
+    const noteDecision = (msg: string) => { if (self === 'enemy') this.cpuStrategyInfo.decision = msg; };
 
     // Desired collector count by stance — carrying collectors always finish their run
     const wantedCollectors =
-      this.cpuStance === 'push'   ? 1 :
-      this.cpuStance === 'defend' ? (cpuChars.length >= 3 ? 1 : 0) : 2;
+      stance === 'push'   ? 1 :
+      stance === 'defend' ? (selfChars.length >= 3 ? 1 : 0) : 2;
 
     // Recall excess non-carrying collectors
     if (collectors.length > wantedCollectors) {
@@ -1198,17 +1264,17 @@ export class Game {
         if (collectors.filter(x => x.behavior === 'collecting').length <= wantedCollectors) break;
         if (!c.isCarryingCoin) {
           c.behavior = 'attacking';
-          this.cpuStrategyInfo.decision = `← Recalled #${c.id} (${c.config.type})`;
+          noteDecision(`← Recalled #${c.id} (${c.config.type})`);
         }
       }
     }
 
     if (liveCoins.length > 0) {
-      const active = cpuChars.filter(c => c.behavior === 'collecting').length;
+      const active = selfChars.filter(c => c.behavior === 'collecting').length;
       if (active < wantedCollectors) {
         // Prefer light attackers that are marching (not engaged), closest to a coin
         // Exclude medics (no combat), tankers and heavies (too valuable for collection runs)
-        const pool = cpuChars.filter(
+        const pool = selfChars.filter(
           c => c.behavior === 'attacking'
             && c.config.type !== 'medic'
             && c.config.type !== 'tanker'
@@ -1225,14 +1291,14 @@ export class Game {
         }
         if (best) {
           best.behavior = 'collecting';
-          this.cpuStrategyInfo.decision = `→ Collect #${best.id} (${best.config.type})`;
+          noteDecision(`→ Collect #${best.id} (${best.config.type})`);
         }
       }
     } else {
       for (const c of collectors) {
         if (!c.isCarryingCoin) {
           c.behavior = 'attacking';
-          this.cpuStrategyInfo.decision = `← Attack #${c.id} (${c.config.type})`;
+          noteDecision(`← Attack #${c.id} (${c.config.type})`);
         }
       }
     }
@@ -1240,50 +1306,52 @@ export class Game {
 
   // ── CPU behaviour AI ─────────────────────────────────────────────────────────
 
-  private tickCpuBehaviorAI(liveChars: Character[]) {
-    const cpuChars = liveChars.filter(c => c.side === 'enemy');
+  private tickCpuBehaviorAI(self: 'player' | 'enemy', liveChars: Character[]) {
+    const stance    = self === 'enemy' ? this.cpuStance : this.playerStance;
+    const selfChars = liveChars.filter(c => c.side === self);
+    const noteDecision = (msg: string) => { if (self === 'enemy') this.cpuStrategyInfo.decision = msg; };
 
     const isMelee = (type: string) => type === 'warrior' || type === 'heavy' || type === 'tanker';
     const isRangedUnit = (type: string) => type === 'archer' || type === 'rifleman' || type === 'sniper';
 
-    if (this.cpuStance === 'defend') {
+    if (stance === 'defend') {
       // Melee units form the defensive wall at home tower; ranged units harass from safety.
-      for (const c of cpuChars) {
+      for (const c of selfChars) {
         if (c.behavior === 'collecting') continue;
         if (isMelee(c.config.type)) {
           if (c.behavior !== 'defend') {
             c.behavior = 'defend';
-            this.cpuStrategyInfo.decision = `🛡 Defend wall #${c.id} (${c.config.type})`;
+            noteDecision(`🛡 Defend wall #${c.id} (${c.config.type})`);
           }
         } else if (c.config.type !== 'medic') {
           if (c.behavior !== 'harass') {
             c.behavior = 'harass';
-            this.cpuStrategyInfo.decision = `↯ Harass #${c.id} (${c.config.type})`;
+            noteDecision(`↯ Harass #${c.id} (${c.config.type})`);
           }
         }
       }
-    } else if (this.cpuStance === 'push') {
+    } else if (stance === 'push') {
       // Push: ranged units harass (advance safely), melee units charge
-      for (const c of cpuChars) {
+      for (const c of selfChars) {
         if (c.behavior === 'collecting') continue;
         if (c.behavior === 'defend') {
           // Lift any lingering defend assignments
           c.behavior = isRangedUnit(c.config.type) ? 'harass' : 'attacking';
-          this.cpuStrategyInfo.decision = `⇒ Push #${c.id} (${c.config.type})`;
+          noteDecision(`⇒ Push #${c.id} (${c.config.type})`);
         } else if (isRangedUnit(c.config.type) && c.behavior !== 'harass') {
           c.behavior = 'harass';
-          this.cpuStrategyInfo.decision = `↯ Harass push #${c.id} (${c.config.type})`;
+          noteDecision(`↯ Harass push #${c.id} (${c.config.type})`);
         } else if (isMelee(c.config.type) && c.behavior !== 'attacking') {
           c.behavior = 'attacking';
-          this.cpuStrategyInfo.decision = `⇒ Attack #${c.id} (${c.config.type})`;
+          noteDecision(`⇒ Attack #${c.id} (${c.config.type})`);
         }
       }
     } else {
       // Economy: recall all harassers and defenders back to full attack
-      for (const c of cpuChars) {
+      for (const c of selfChars) {
         if (c.behavior === 'harass' || c.behavior === 'defend') {
           c.behavior = 'attacking';
-          this.cpuStrategyInfo.decision = `⇒ Economy attack #${c.id} (${c.config.type})`;
+          noteDecision(`⇒ Economy attack #${c.id} (${c.config.type})`);
         }
       }
     }
@@ -1350,6 +1418,7 @@ export class Game {
     this.lastCpuCharsSig       = '';
     this.lastCpuStrategySig    = '';
     this.cpuStance             = 'economy';
+    this.playerStance          = 'economy';
     this.cpuStrategyInfo       = { stance: 'economy', score: 0, unitAdv: 0, towerAdv: 0, coinAdv: 0, decision: '—' };
     this.coinBalance           = STARTING_COINS;
     this.cpuCoinBalance        = STARTING_COINS;
@@ -1364,6 +1433,7 @@ export class Game {
     this.app.stage.removeChildren();
     this.build();
     this.resetCpuTimerFirst();
+    if (this.cpuVsCpu) this.resetPlayerSpawnTimerFirst();
     this.resetCoinDropTimer();
     this.resetSilverDropTimer();
     this.app.ticker.add(this.tickFn);
