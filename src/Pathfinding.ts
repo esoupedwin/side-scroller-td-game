@@ -41,12 +41,9 @@ function arcLandingTime(dy: number): number {
   return (JUMP_VELOCITY + Math.sqrt(d)) / CHAR_GRAVITY;
 }
 
-// Representative speed for positioning the jump trigger under a one-way platform.
-// Errs toward slower characters so the trigger stays reachable for all unit types.
-const PLATFORM_JUMP_SPEED = 80;   // px/s
-
-// How far before a solid block's near edge to start the jump (block cannot be entered).
-const BLOCK_JUMP_LEAD = 40;       // px
+// Fallback speed for positioning the jump trigger when a caller doesn't pass
+// a character-specific moveSpeed. Errs toward slower characters.
+const DEFAULT_JUMP_SPEED = 80;   // px/s
 
 // ── Internal graph types ─────────────────────────────────────────────────────
 
@@ -199,8 +196,16 @@ export class NavGraph {
    * A* path from (fromX, fromFloorY) to (toX, toFloorY).
    * Returns a minimal list of PathSteps; falls back to a single walk step
    * when surfaces are unknown or unreachable.
+   *
+   * `jumpSpeed` controls where the jump trigger is placed — should be the
+   * character's actual horizontal speed so the arc lands on the destination.
+   * Defaults to DEFAULT_JUMP_SPEED for legacy callers.
    */
-  findPath(fromX: number, fromFloorY: number, toX: number, toFloorY: number): PathStep[] {
+  findPath(
+    fromX: number, fromFloorY: number,
+    toX:   number, toFloorY: number,
+    jumpSpeed: number = DEFAULT_JUMP_SPEED,
+  ): PathStep[] {
     let fromSurf = this.surfaceAt(fromFloorY, fromX);
     let toSurf   = this.surfaceAt(toFloorY, toX);
 
@@ -229,7 +234,7 @@ export class NavGraph {
       return [{ action: 'walk', targetX: toX, floorY: toFloorY }];
     }
 
-    return this.buildSteps(surfPath, fromX, toX, toFloorY);
+    return this.buildSteps(surfPath, fromX, toX, toFloorY, jumpSpeed);
   }
 
   // ── Private: A* over surfaces ─────────────────────────────────────────────
@@ -277,7 +282,13 @@ export class NavGraph {
 
   // ── Private: surface sequence → PathStep list ─────────────────────────────
 
-  private buildSteps(surfPath: number[], fromX: number, toX: number, toFloorY: number): PathStep[] {
+  private buildSteps(
+    surfPath:  number[],
+    fromX:     number,
+    toX:       number,
+    toFloorY:  number,
+    jumpSpeed: number,
+  ): PathStep[] {
     const steps: PathStep[] = [];
     let curX = fromX;
 
@@ -297,24 +308,35 @@ export class NavGraph {
       if (edge.action === 'jump') {
         const approachFromLeft = curX < next.x + next.width / 2;
         const dy               = cur.y - next.y;  // height to climb (positive)
+        // Horizontal distance the character covers during the arc from jump start
+        // to landing at this height. Scales with the character's own moveSpeed —
+        // slow units (archers) and fast units (warriors) both target a reachable
+        // spot instead of a fixed lead that fits only the fast units.
+        const hDist = jumpSpeed * arcLandingTime(dy);
         let jumpTriggerX: number;
+        let actualLandX = landX;
 
         if (next.solid) {
-          // Solid block: cannot enter horizontally — jump from BLOCK_JUMP_LEAD px
-          // before the near edge so the arc carries the character up and over.
-          jumpTriggerX = approachFromLeft
-            ? next.x - BLOCK_JUMP_LEAD
-            : next.x + next.width + BLOCK_JUMP_LEAD;
+          // Solid block: trigger must be outside the block's x-span. Clamp the
+          // landing X so the trigger sits just past the block's near edge — for
+          // slow units this means landing near the edge rather than overshooting
+          // and falling short of the centre.
+          if (approachFromLeft) {
+            actualLandX  = Math.min(landX, next.x + hDist - 1);
+            jumpTriggerX = actualLandX - hDist;
+          } else {
+            actualLandX  = Math.max(landX, next.x + next.width - hDist + 1);
+            jumpTriggerX = actualLandX + hDist;
+          }
         } else {
-          // One-way platform: characters can walk under it, so position the trigger
-          // directly below the intended landing spot using the physics arc distance.
-          const hDist = PLATFORM_JUMP_SPEED * arcLandingTime(dy);
+          // One-way platform: characters can walk under it, so trigger directly
+          // below the intended landing spot.
           jumpTriggerX = approachFromLeft ? landX - hDist : landX + hDist;
         }
 
         steps.push({ action: 'walk', targetX: jumpTriggerX, floorY: cur.y });
-        steps.push({ action: 'jump', targetX: landX, floorY: next.y, jumpTriggerX });
-        curX = landX;
+        steps.push({ action: 'jump', targetX: actualLandX, floorY: next.y, jumpTriggerX });
+        curX = actualLandX;
       } else {
         // Walk to the fall-off edge, then fall. Pick the side closer to the final
         // destination toX rather than the precomputed edge — otherwise a character

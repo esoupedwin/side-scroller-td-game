@@ -1386,7 +1386,7 @@ export class Character {
     this.pathAge += dt;
     if (key === this.pathTargetKey && this.pathAge < this.PATH_TTL && this.path.length > 0) return;
 
-    this.path         = navGraph.findPath(this.x, this.floorY, toX, toFloorY);
+    this.path         = navGraph.findPath(this.x, this.floorY, toX, toFloorY, this.moveSpeed);
     this.pathIdx      = 0;
     this.pathTargetKey = key;
     this.pathAge      = 0;
