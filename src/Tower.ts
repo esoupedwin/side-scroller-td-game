@@ -22,6 +22,7 @@ export class Tower {
   hp: number = TOWER_HP;
   private attackTimer = 0;
   private bar: PIXI.Graphics;
+  private hpText: PIXI.Text;
   private body: PIXI.Graphics;
   private label: PIXI.Text;
 
@@ -60,6 +61,16 @@ export class Tower {
     // HP bar fill
     this.bar = new PIXI.Graphics();
     this.container.addChild(this.bar);
+
+    // HP numeric overlay
+    this.hpText = new PIXI.Text('', {
+      fontSize: 9,
+      fill: 0xffffff,
+      fontWeight: 'bold',
+      stroke: 0x000000,
+      strokeThickness: 2,
+    });
+    this.container.addChild(this.hpText);
     this.drawBar();
 
     // Label
@@ -76,14 +87,18 @@ export class Tower {
   private drawBar() {
     const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const ratio  = Math.max(0, this.hp / TOWER_HP);
-    const cx     = this.side === 'player'
-      ? this.x - TOWER_WIDTH / 2
-      : this.x - TOWER_WIDTH / 2;
+    const cx     = this.x - TOWER_WIDTH / 2;
+    const barY   = GROUND_Y - TOWER_HEIGHT - 32;
+    const barW   = TOWER_WIDTH + 8;
 
     this.bar.clear();
     this.bar.beginFill(color);
-    this.bar.drawRect(cx - 4, GROUND_Y - TOWER_HEIGHT - 32, (TOWER_WIDTH + 8) * ratio, 10);
+    this.bar.drawRect(cx - 4, barY, barW * ratio, 10);
     this.bar.endFill();
+
+    this.hpText.text = `${Math.ceil(this.hp)} / ${TOWER_HP}`;
+    this.hpText.x    = cx - 4 + (barW - this.hpText.width) / 2;
+    this.hpText.y    = barY + (10 - this.hpText.height) / 2;
   }
 
   /** Call each tick; returns a shot descriptor if the tower fires, otherwise null. */
