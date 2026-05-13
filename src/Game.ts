@@ -242,8 +242,8 @@ export class Game {
     this.build();
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup',   this.onKeyUp);
-    this.resetCpuTimerFirst();
-    if (this.cpuVsCpu) this.resetPlayerSpawnTimerFirst();
+    this.resetSpawnTimerFirst('enemy');
+    if (this.cpuVsCpu) this.resetSpawnTimerFirst('player');
     this.resetCoinDropTimer();
     this.resetSilverDropTimer();
     this.app.ticker.add(this.tickFn);
@@ -468,7 +468,7 @@ export class Game {
   setCpuVsCpu(enabled: boolean): void {
     if (this.cpuVsCpu === enabled) return;
     this.cpuVsCpu = enabled;
-    if (enabled) this.resetPlayerSpawnTimerFirst();
+    if (enabled) this.resetSpawnTimerFirst('player');
   }
 
   isCpuVsCpu(): boolean { return this.cpuVsCpu; }
@@ -577,11 +577,6 @@ export class Game {
       }
     }
 
-    const resetTimer = (p: number) => {
-      if (self === 'enemy') this.resetCpuTimer(p);
-      else                  this.resetPlayerSpawnTimer(p);
-    };
-
     for (const type of order) {
       const cost = CHAR_COST[type];
       if (balance < cost) continue;
@@ -596,14 +591,14 @@ export class Game {
       this.unitLayer.addChild(c.container);
       if (self === 'player') this.hud.add(c);
       if (self === 'enemy')  this.cpuStrategyInfo.decision = `Spawned ${type} #${c.id}`;
-      resetTimer(pressure);
+      this.resetSpawnTimer(self, pressure);
       return;
     }
     if (self === 'enemy') {
       const needCost = Math.min(...order.map(t => CHAR_COST[t]));
       this.cpuStrategyInfo.decision = `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
     }
-    resetTimer(pressure);
+    this.resetSpawnTimer(self, pressure);
   }
 
   private allocateCharId(): number {
@@ -633,35 +628,29 @@ export class Game {
 
   // ── Timers ───────────────────────────────────────────────────────────────────
 
-  private resetCpuTimerFirst() {
-    this.cpuSpawnInterval = Math.random() * CPU_FIRST_SPAWN_MAX;
-    this.cpuSpawnTimer    = 0;
+  private setSpawnInterval(self: 'player' | 'enemy', interval: number) {
+    if (self === 'enemy') {
+      this.cpuSpawnInterval = interval;
+      this.cpuSpawnTimer    = 0;
+    } else {
+      this.playerSpawnInterval = interval;
+      this.playerSpawnTimer    = 0;
+    }
   }
 
-  private resetCpuTimer(pressure = 0) {
+  private resetSpawnTimerFirst(self: 'player' | 'enemy') {
+    this.setSpawnInterval(self, Math.random() * CPU_FIRST_SPAWN_MAX);
+  }
+
+  private resetSpawnTimer(self: 'player' | 'enemy', pressure = 0) {
     const [min, max] =
       pressure >= CPU_PRESSURE_THRESHOLD  ? [CPU_SPAWN_MIN_MS,                         CPU_SPAWN_MIN_MS * CPU_URGENT_MAX_FACTOR  ] :
       pressure <= -CPU_PRESSURE_THRESHOLD ? [CPU_SPAWN_MAX_MS * CPU_COMFORT_MIN_FACTOR, CPU_SPAWN_MAX_MS                          ] :
                                             [CPU_SPAWN_MIN_MS * CPU_NEUTRAL_MIN_FACTOR, CPU_SPAWN_MAX_MS * CPU_NEUTRAL_MAX_FACTOR ];
     // Stance modifier: defend and push both need units urgently
-    const stanceMult = this.cpuStance === 'push' ? 0.70 : this.cpuStance === 'defend' ? 0.72 : 1.0;
-    this.cpuSpawnInterval = (min + Math.random() * (max - min)) * stanceMult;
-    this.cpuSpawnTimer    = 0;
-  }
-
-  private resetPlayerSpawnTimerFirst() {
-    this.playerSpawnInterval = Math.random() * CPU_FIRST_SPAWN_MAX;
-    this.playerSpawnTimer    = 0;
-  }
-
-  private resetPlayerSpawnTimer(pressure = 0) {
-    const [min, max] =
-      pressure >= CPU_PRESSURE_THRESHOLD  ? [CPU_SPAWN_MIN_MS,                         CPU_SPAWN_MIN_MS * CPU_URGENT_MAX_FACTOR  ] :
-      pressure <= -CPU_PRESSURE_THRESHOLD ? [CPU_SPAWN_MAX_MS * CPU_COMFORT_MIN_FACTOR, CPU_SPAWN_MAX_MS                          ] :
-                                            [CPU_SPAWN_MIN_MS * CPU_NEUTRAL_MIN_FACTOR, CPU_SPAWN_MAX_MS * CPU_NEUTRAL_MAX_FACTOR ];
-    const stanceMult = this.playerStance === 'push' ? 0.70 : this.playerStance === 'defend' ? 0.72 : 1.0;
-    this.playerSpawnInterval = (min + Math.random() * (max - min)) * stanceMult;
-    this.playerSpawnTimer    = 0;
+    const stance     = self === 'enemy' ? this.cpuStance : this.playerStance;
+    const stanceMult = stance === 'push' ? 0.70 : stance === 'defend' ? 0.72 : 1.0;
+    this.setSpawnInterval(self, (min + Math.random() * (max - min)) * stanceMult);
   }
 
   private resetCoinDropTimer() {
@@ -1432,8 +1421,8 @@ export class Game {
     this.hud.clear();
     this.app.stage.removeChildren();
     this.build();
-    this.resetCpuTimerFirst();
-    if (this.cpuVsCpu) this.resetPlayerSpawnTimerFirst();
+    this.resetSpawnTimerFirst('enemy');
+    if (this.cpuVsCpu) this.resetSpawnTimerFirst('player');
     this.resetCoinDropTimer();
     this.resetSilverDropTimer();
     this.app.ticker.add(this.tickFn);
