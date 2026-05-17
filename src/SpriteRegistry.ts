@@ -21,6 +21,12 @@ const SPRITE_DEFS: Partial<Record<string, SpriteSetDef>> = {
     attack: { path: '/sprites/conscript/attack.png', cols: 6, rows: 2, fps: 12, spriteScale: 4.0 },
     carry:  { path: '/sprites/conscript/carry.png',  cols: 6, rows: 2, fps: 10, spriteScale: 4.0 },
   },
+  warrior: {
+    idle:   { path: '/sprites/warrior/idle.png',   cols: 6, rows: 2, fps:  8, spriteScale: 4.0 },
+    walk:   { path: '/sprites/warrior/walk.png',   cols: 6, rows: 2, fps: 10, spriteScale: 4.0 },
+    attack: { path: '/sprites/warrior/attack.png', cols: 6, rows: 2, fps: 12, spriteScale: 4.0 },
+    carry:  { path: '/sprites/warrior/carry.png',  cols: 6, rows: 2, fps: 10, spriteScale: 4.0 },
+  },
 };
 
 export function getAnimFps(type: string, anim: AnimationName): number {
