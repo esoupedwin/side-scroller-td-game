@@ -25,6 +25,7 @@ import { DamageLabel } from './DamageLabel';
 import { Platform } from './Platform';
 import { Block } from './Block';
 import { pickName } from './names';
+import { getSpriteSet } from './SpriteRegistry';
 import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 import type { CollisionBoxData } from './CollisionBox';
@@ -35,7 +36,7 @@ import {
   VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER, GRENADIER, ROCKETEER,
+  CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER, GRENADIER, ROCKETEER,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
   GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY,
   ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX, ROCKET_SPLASH_MIN_FRAC,
@@ -70,6 +71,7 @@ function withSpawnBoosts(cfg: CharacterConfig): CharacterConfig {
 }
 
 const CHAR_CONFIGS = {
+  conscript: CONSCRIPT,
   warrior:   WARRIOR,
   archer:    ARCHER,
   rifleman:  RIFLEMAN,
@@ -448,7 +450,7 @@ export class Game {
   // ── Spawn ────────────────────────────────────────────────────────────────────
 
   /** Returns false if the player cannot afford this unit. */
-  spawnPlayer(type: 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer'): boolean {
+  spawnPlayer(type: 'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer'): boolean {
     if (this.isOver) return false;
     const cost = CHAR_COST[type];
     if (this.coinBalance < cost) return false;
@@ -457,7 +459,7 @@ export class Game {
     this.notifyCoins();
 
     const config = withSpawnBoosts(CHAR_CONFIGS[type]);
-    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), pickName(), this.physics);
+    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(type) ?? undefined);
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
@@ -586,7 +588,7 @@ export class Game {
         this.coinBalance -= cost;
         this.notifyCoins();
       }
-      const c = new Character(self, spawnX, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics);
+      const c = new Character(self, spawnX, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics, getSpriteSet(type) ?? undefined);
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
       if (self === 'player') this.hud.add(c);

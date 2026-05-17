@@ -11,7 +11,7 @@
 
       /* ── Developer panel ────────────────────────────────────────────────────── */
       #dev-panel {
-        width: 1248px;
+        width: 1900px;
         background: rgba(6, 6, 18, 0.92);
         border: 1px solid rgba(255,255,255,0.07);
         border-radius: 0 0 8px 8px;
@@ -362,6 +362,7 @@
         font-weight: 600;
         opacity: 0.85;
       }
+      #spawn-conscript-btn { background: linear-gradient(135deg, #b07040, #7a4a20); box-shadow: 0 4px 12px rgba(176,112,64,0.45); }
       #spawn-warrior-btn  { background: linear-gradient(135deg, #00b4d8, #0077b6); box-shadow: 0 4px 12px rgba(0,180,216,0.45); }
       #spawn-archer-btn   { background: linear-gradient(135deg, #43aa8b, #2d7a60); box-shadow: 0 4px 12px rgba(67,170,139,0.45); }
       #spawn-rifleman-btn { background: linear-gradient(135deg, #7a8c42, #4a5c22); box-shadow: 0 4px 12px rgba(122,140,66,0.45); }
@@ -388,6 +389,10 @@
       <div id="coin-counter">💰 <span id="coin-amount">150</span></div>
 
       <div id="ui-overlay">
+        <button id="spawn-conscript-btn" class="spawn-btn">
+          <span>👊 Conscript</span>
+          <span class="btn-cost" id="conscript-cost"></span>
+        </button>
         <button id="spawn-warrior-btn"  class="spawn-btn">
           <span>⚔ Warrior</span>
           <span class="btn-cost" id="warrior-cost"></span>

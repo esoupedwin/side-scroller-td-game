@@ -16,6 +16,7 @@ import {
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
+import { type LoadedSpriteSet, type AnimationName, getAnimFps, getSpriteScale } from './SpriteRegistry';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
 
@@ -47,7 +48,7 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 
 export interface CharacterConfig {
-  type:        'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer';
+  type:        'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer';
   hp:          number;
   speed:       number;
   attackRange: number;
@@ -137,6 +138,10 @@ export class Character {
   private legL:     PIXI.Container | null = null;
   private legR:     PIXI.Container | null = null;
   private legPhase: number = Math.random() * Math.PI * 2;  // stagger across characters
+  private spriteSet:          LoadedSpriteSet | null = null;
+  private animSprite:         PIXI.AnimatedSprite  | null = null;
+  private animSpriteBaseScale = 1;
+  private currentAnimName:    AnimationName | null = null;
   private coinPickupCooldown = 0;
   private coinThrowTimer     = -1;  // countdown before throw; -1 = not winding up
   private pendingHitJump     = false;
@@ -201,16 +206,17 @@ export class Character {
   private powerUpSpeedTimer = 0;
   private powerUpAtkMult    = 1.0;
 
-  constructor(side: Side, startX: number, config: CharacterConfig, id: number, name: string, physics: Physics) {
-    this.side    = side;
-    this.id      = id;
-    this.name    = name;
-    this.config  = { ...config };
-    this.hp      = config.hp;
-    this.x       = startX;
-    this.y       = GROUND_Y;
-    this.physics = physics;
-    this.body    = physics.createCharBody(startX, GROUND_Y, config.width, config.height);
+  constructor(side: Side, startX: number, config: CharacterConfig, id: number, name: string, physics: Physics, spriteSet?: LoadedSpriteSet) {
+    this.side      = side;
+    this.id        = id;
+    this.name      = name;
+    this.config    = { ...config };
+    this.hp        = config.hp;
+    this.x         = startX;
+    this.y         = GROUND_Y;
+    this.physics   = physics;
+    this.spriteSet = spriteSet ?? null;
+    this.body      = physics.createCharBody(startX, GROUND_Y, config.width, config.height);
 
     this.container = new PIXI.Container();
     this.buildSprite();
@@ -295,12 +301,14 @@ export class Character {
   // ── Sprite builders ──────────────────────────────────────────────────────────
 
   private buildSprite() {
-    if      (this.config.type === 'archer')    this.buildArcherSprite();
-    else if (this.config.type === 'rifleman')  this.buildRiflemanSprite();
-    else if (this.config.type === 'sniper')    this.buildSniperSprite();
-    else if (this.config.type === 'medic')     this.buildMedicSprite();
-    else if (this.config.type === 'heavy')     this.buildHeavySprite();
-    else if (this.config.type === 'tanker')    this.buildTankerSprite();
+    if (this.spriteSet) { this.buildAnimSprite(); return; }
+    if      (this.config.type === 'conscript')  this.buildConscriptSprite();
+    else if (this.config.type === 'archer')     this.buildArcherSprite();
+    else if (this.config.type === 'rifleman')   this.buildRiflemanSprite();
+    else if (this.config.type === 'sniper')     this.buildSniperSprite();
+    else if (this.config.type === 'medic')      this.buildMedicSprite();
+    else if (this.config.type === 'heavy')      this.buildHeavySprite();
+    else if (this.config.type === 'tanker')     this.buildTankerSprite();
     else if (this.config.type === 'grenadier')  this.buildGrenadierSprite();
     else if (this.config.type === 'rocketeer')  this.buildRocketeerSprite();
     else                                         this.buildWarriorSprite();
@@ -323,6 +331,102 @@ export class Character {
     };
     this.legL = make(lx);
     this.legR = make(rx);
+  }
+
+  private buildAnimSprite() {
+    const set = this.spriteSet!;
+    const frames = set.walk ?? set.idle ?? set.attack;
+    if (!frames) return;
+
+    const anim = new PIXI.AnimatedSprite(frames);
+    const startAnim: AnimationName = set.walk ? 'walk' : set.idle ? 'idle' : 'attack';
+    anim.anchor.set(0.5, 1.0);
+    anim.y = this.config.height;  // container origin = head; feet = head + height
+    const scale = (this.config.height * getSpriteScale(this.config.type, startAnim)) / frames[0].height;
+    this.animSpriteBaseScale = scale;
+    anim.scale.set(scale);
+    anim.animationSpeed = getAnimFps(this.config.type, startAnim) / 60;
+    anim.loop = true;
+    anim.play();
+    this.animSprite      = anim;
+    this.currentAnimName = startAnim;
+    this.container.addChild(anim);
+  }
+
+  private selectAnimation(): AnimationName {
+    if (this.carryingCoin || this.state === 'returning') return 'carry';
+    if (this.state === 'fighting') return 'attack';
+    if (this.state === 'marching' || this.state === 'collecting') return 'walk';
+    return 'idle';
+  }
+
+  private switchAnimation(name: AnimationName) {
+    const anim = this.animSprite;
+    const set  = this.spriteSet;
+    if (!anim || !set) return;
+
+    // Fallback order so a missing animation uses the closest available substitute
+    const fallback: Record<AnimationName, AnimationName[]> = {
+      idle:       ['idle', 'walk'],
+      walk:       ['walk', 'idle'],
+      attack:     ['attack', 'idle', 'walk'],
+      attackWalk: ['attackWalk', 'attack', 'walk'],
+      carry:      ['carry', 'walk', 'idle'],
+    };
+    let frames: PIXI.Texture[] | undefined;
+    let picked: AnimationName = name;
+    for (const n of fallback[name]) {
+      if (set[n]) { frames = set[n]; picked = n; break; }
+    }
+    if (!frames) return;
+
+    anim.textures       = frames;
+    anim.animationSpeed      = getAnimFps(this.config.type, picked) / 60;
+    this.animSpriteBaseScale = getSpriteScale(this.config.type, picked) *
+      this.config.height / frames[0].height;
+    anim.play();
+    this.currentAnimName = name;
+  }
+
+  private tickAnimSprite() {
+    const anim = this.animSprite;
+    if (!anim) return;
+
+    // Flip sprite to match actual travel direction (sprites are drawn facing right)
+    anim.scale.x = this.animSpriteBaseScale * this.lastMoveDir;
+
+    const target = this.selectAnimation();
+    if (target !== this.currentAnimName) this.switchAnimation(target);
+  }
+
+  private buildConscriptSprite() {
+    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const w = this.config.width, h = this.config.height;
+    const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.3, w * 0.3, w * 0.32, h * 0.45, 0.65);
+
+    const g = new PIXI.Graphics();
+    // Simple torso (no armour)
+    g.beginFill(color, 0.72);
+    g.drawRoundedRect(-w * 0.42, h * 0.22, w * 0.84, h * 0.38, 4);
+    g.endFill();
+    // Head
+    g.beginFill(color, 0.88);
+    g.drawCircle(0, h * 0.1, w * 0.35);
+    g.endFill();
+    // Punching arm extending forward
+    const armStartX = dir * w * 0.42;
+    const fistX     = dir * (w * 0.42 + w * 0.5);
+    const armY      = h * 0.29;
+    g.beginFill(color, 0.7);
+    g.drawRect(Math.min(armStartX, fistX), armY, Math.abs(fistX - armStartX), 5);
+    g.endFill();
+    // Fist
+    g.beginFill(color);
+    g.drawRoundedRect(fistX - 5, armY - 4, 10, 9, 3);
+    g.endFill();
+
+    this.container.addChild(g);
   }
 
   private buildWarriorSprite() {
@@ -1122,7 +1226,7 @@ export class Character {
   }
 
   private static isMeleeType(type: CharacterConfig['type']) {
-    return type === 'warrior' || type === 'heavy';
+    return type === 'conscript' || type === 'warrior' || type === 'heavy';
   }
 
   update(ctx: UpdateContext) {
@@ -1182,6 +1286,7 @@ export class Character {
     }
     if (this.x !== preX) this.lastMoveDir = (this.x > preX ? 1 : -1);
     this.tickLegs(ctx.dt);
+    this.tickAnimSprite();
     this.tickPromoAnim(ctx.dt);
 
     // Hard boundary: characters are blocked at each tower's front face (solid collision).
@@ -1993,7 +2098,7 @@ export class Character {
     if (this.attackTimer > 0) return;
     const miss   = Math.random() < this.config.critical;
     const damage = miss ? 0 : this.effectiveAtk;
-    if (this.config.type === 'warrior' || this.config.type === 'heavy') {
+    if (this.config.type === 'conscript' || this.config.type === 'warrior' || this.config.type === 'heavy') {
       target.takeDamage(damage, miss ? undefined : this);
     } else if (onFire) {
       if (this.config.type === 'grenadier') {
@@ -2084,7 +2189,7 @@ export class Character {
    */
   private canSnapHit(target: Character): boolean {
     const t = this.config.type;
-    if (t === 'warrior' || t === 'heavy' || t === 'grenadier' || t === 'rocketeer') return true;
+    if (t === 'conscript' || t === 'warrior' || t === 'heavy' || t === 'grenadier' || t === 'rocketeer') return true;
     const snapped = this.snapFireAngle(this.x, this.bowY, target.x, target.bowY);
     const splash  = this.projectileKind === 'bullet' ? BULLET_SPLASH : ARROW_SPLASH;
     return Math.abs(snapped.tx - target.x) <= splash;

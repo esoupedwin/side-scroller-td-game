@@ -3,6 +3,7 @@ import { RANK_NAMES } from './Character';
 import { PROMO_THRESHOLDS } from './constants';
 
 export const TYPE_ICON: Record<string, string> = {
+  conscript: '👊',
   warrior:   '⚔',
   archer:    '🏹',
   rifleman:  '🔫',
@@ -15,6 +16,7 @@ export const TYPE_ICON: Record<string, string> = {
 };
 
 const TYPE_COLOR: Record<string, string> = {
+  conscript: '#b07040',
   warrior:   '#00b4d8',
   archer:    '#43aa8b',
   rifleman:  '#7a8c42',

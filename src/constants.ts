@@ -142,6 +142,7 @@ export const COIN_THROW_VY          = GameConfig.economy.coinThrowVy;
 export const COIN_THROW_MIN_DIST    = GameConfig.towers.attackRange + 50;
 
 export const CHAR_COST = {
+  conscript: ch.conscript.cost,
   warrior:   ch.warrior.cost,
   archer:    ch.archer.cost,
   rifleman:  ch.rifleman.cost,
@@ -155,6 +156,18 @@ export const CHAR_COST = {
 
 export const CHAR_WIDTH  = ch.width;
 export const CHAR_HEIGHT = ch.height;
+
+export const CONSCRIPT = {
+  type:        ch.conscript.type,
+  hp:          ch.conscript.hp,
+  speed:       ch.conscript.speed,
+  attackRange: ch.conscript.attackRange,
+  attackPower: ch.conscript.attackPower,
+  fireRate:    ch.conscript.fireRate,
+  critical:    ch.conscript.critical,
+  width:       ch.width,
+  height:      ch.height,
+};
 
 export const WARRIOR = {
   type:        ch.warrior.type,

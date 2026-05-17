@@ -3,7 +3,7 @@
 Tower-defense game: PixiJS v7 + Vite + TypeScript (strict).
 
 ## Tech stack
-- **Renderer**: `pixi.js` v7 — imperative `Graphics` API, no sprites/textures
+- **Renderer**: `pixi.js` v7 — imperative `Graphics` API for most characters; `PIXI.AnimatedSprite` for character types that have sprite sheets defined in `SpriteRegistry.ts`
 - **Build**: Vite; `npm run dev` to start, `npm run build` to bundle. Multi-page: `index.html` (game) + `map-builder.html` (editor)
 - **Types**: `tsconfig.json` with `strict`, `noUnusedLocals`, `noUnusedParameters` — zero warnings is the bar
 
@@ -41,7 +41,64 @@ Source files import only from `constants.ts`, never directly from `gameConfig.ts
 | `src/gameConfig.ts` | Single source of truth for all numbers |
 | `src/constants.ts` | Flat re-exports of gameConfig values |
 | `src/names.ts` | `pickName()` — random character display names |
+| `src/SpriteRegistry.ts` | Sprite sheet definitions, async preloader, per-type frame cache |
+| `public/sprites/<type>/` | Sprite sheet PNGs; presence is optional — missing files fall back to Graphics |
 | `map-builder.html` | Map builder entry point (served at `/map-builder.html`) |
+
+## Sprite animation system
+
+Characters use `PIXI.AnimatedSprite` when a sprite sheet is available for their type; otherwise they render with the existing `PIXI.Graphics` approach. The two paths are transparent to all callers — the same `Character` class handles both.
+
+### Adding sprites for a character type
+
+1. Place sprite sheet PNGs in `public/sprites/<type>/` (e.g. `public/sprites/warrior/walk.png`). These are served at `/sprites/<type>/<anim>.png` by Vite.
+2. Add an entry to `SPRITE_DEFS` in `src/SpriteRegistry.ts`:
+
+```typescript
+warrior: {
+  idle:       { path: '/sprites/warrior/idle.png',   cols: 4, rows: 1, fps:  8, spriteScale: 1.5 },
+  walk:       { path: '/sprites/warrior/walk.png',   cols: 6, rows: 2, fps: 10, spriteScale: 1.5 },
+  attack:     { path: '/sprites/warrior/attack.png', cols: 5, rows: 1, fps: 12, spriteScale: 1.5 },
+  attackWalk: { path: '/sprites/warrior/attack_walk.png', cols: 6, rows: 1, fps: 12, spriteScale: 1.5 },
+  carry:      { path: '/sprites/warrior/carry.png',  cols: 6, rows: 2, fps: 10, spriteScale: 1.5 },
+},
+```
+
+Only the animations you define are loaded — missing entries fall back to the nearest substitute (e.g. `carry` falls back to `walk` then `idle`). A type with no entry at all continues to use Graphics.
+
+### Key types and fields (`SpriteRegistry.ts`)
+
+| Symbol | Description |
+|---|---|
+| `AnimationName` | `'idle' \| 'walk' \| 'attack' \| 'attackWalk' \| 'carry'` |
+| `SpriteAnimDef` | `{ path, cols, rows, fps, spriteScale }` — one animation's sheet metadata |
+| `LoadedSpriteSet` | `Partial<Record<AnimationName, PIXI.Texture[]>>` — extracted frames per animation |
+| `preloadAllSprites()` | Called once at startup (`main.ts`) before `Game` is created; populates the module-level cache |
+| `getSpriteSet(type)` | Sync lookup called per `new Character()`; returns cached frames or `null` |
+
+### `spriteScale`
+
+Sprite sheets typically have empty padding around the art. `spriteScale` compensates: the sprite's rendered height is `config.height × spriteScale`, so the actual character art fills roughly the same vertical space as the Graphics equivalent. Start at `1.5` and tune visually.
+
+### Animation state machine (inside `Character`)
+
+`tickAnimSprite()` runs each tick and:
+- Sets `scale.x = animSpriteBaseScale × lastMoveDir` to flip the sprite for left-moving characters (sheets are drawn facing right).
+- Calls `selectAnimation()` to pick the target `AnimationName` from the character's current `state` and `carryingCoin` flag.
+- Calls `switchAnimation(name)` only when the animation actually changes — PIXI re-starts playback from frame 0 on a texture swap.
+
+| Character state | Animation chosen |
+|---|---|
+| `returning` or `carryingCoin` | `carry` |
+| `fighting` | `attack` |
+| `marching` or `collecting` | `walk` |
+| anything else | `idle` |
+
+### Startup flow
+
+`main.ts` does `await preloadAllSprites()` (top-level await in a `<script type="module">`) before constructing `Game`. Sprites that fail to load (404) are caught silently — the cache stores `null` and the character falls back to Graphics at construction time.
+
+> To add a new animation state: add the name to `AnimationName`, extend the fallback table in `switchAnimation`, and add a case in `selectAnimation`.
 
 ## Map system
 
@@ -378,3 +435,7 @@ Unit selection prioritises cheap warriors when outnumbered or broke; riflemen wh
 - **Grenade knockback abstraction**: `Character` has no direct knowledge of grenade constants. `Game.ts` computes `knockbackDecayFactor = Math.exp(-GRENADE_KNOCKBACK_DECAY * dt)` and passes it into `applyKnockback(vx, vy, dt, decayFactor)`. Adding a new knockback source follows the same pattern.
 - **`requestPath` floor level**: always pass the character's actual `this.floorY` (not a hardcoded `GROUND_Y`) as the destination floor when the behavior should keep the character at its current elevation (harass, defend, rally). Only pass a specific surface Y when navigating to a different surface is intentional (e.g. chasing a coin on a platform).
 - **`surfaceAt` x parameter**: since `NavGraph.build()` splits each surface into subsegments at block intersections, multiple subsegments can share the same `floorY`. Always pass `x` to `surfaceAt` so the correct subsegment is selected. Omitting `x` returns an arbitrary same-Y surface, which causes A* to route from the wrong starting node and may produce a path that walks backward into a block.
+- **Sprite `spriteScale` tuning**: the rendered sprite height is `config.height × spriteScale`. If the sheet has heavy padding the character will appear smaller than its physics body — increase `spriteScale` until the art matches. Conversely, a value too large pushes the sprite well above the character's feet.
+- **Sprite facing direction**: sheets must be drawn facing **right**. `tickAnimSprite` flips `scale.x` using `lastMoveDir`; the absolute scale is stored in `animSpriteBaseScale` and must not be written directly on `animSprite.scale.x` or the flip sign is lost on the next tick.
+- **`switchAnimation` re-starts playback**: assigning new textures to an `AnimatedSprite` via `.textures = frames` resets the frame index to 0. Only call `switchAnimation` when the target animation name actually changes (guarded by `currentAnimName`), otherwise the sprite stutters back to frame 0 every tick.
+- **New melee unit types**: add the type to both the `warrior || heavy` branch in `attackEnemy` and the early-return guard in `canSnapHit`. Omitting either causes the unit to silently skip attacks or mis-evaluate shot feasibility.

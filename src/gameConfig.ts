@@ -1,6 +1,6 @@
-const VIEWPORT_W      = 1248;
-const W               = Math.round(VIEWPORT_W * 2.25); // 2808 — scrollable world width
-const H               = 480;
+const VIEWPORT_W      = 1900;
+const W               = Math.round(VIEWPORT_W * 2.25); // scrollable world width
+const H               = 600;
 const CHAR_W          = 20;
 const CHAR_H          = 32;
 const GROUND_Y        = H - 80;
@@ -44,6 +44,16 @@ export const GameConfig = {
     medicPassiveHealRate: 2, // HP/s the medic self-heals regardless of position
     hitJumpChance:    0.75,  // probability of jumping when struck by a projectile
 
+    conscript: {
+      type:        'conscript' as const,
+      hp:          110,
+      speed:       150,  // faster than warrior
+      attackRange: 36,
+      attackPower: 10,   // damage per punch
+      fireRate:    0.65, // rapid punches
+      cost:        15,
+      critical:    0.18, // untrained brawler
+    },
     warrior: {
       type:        'warrior'  as const,
       hp:          160,

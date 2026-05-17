@@ -1,6 +1,9 @@
 import { Game, type CpuStrategyInfo } from './Game';
 import { CHAR_COST } from './constants';
 import { TYPE_ICON } from './CharacterHUD';
+import { preloadAllSprites } from './SpriteRegistry';
+
+await preloadAllSprites();
 
 const container       = document.getElementById('game-container')!;
 const hudEl           = document.getElementById('char-hud')!;
@@ -11,7 +14,7 @@ const enemyTowerHpEl  = document.getElementById('enemy-tower-hp')!;
 
 // All spawnable unit types, in display order
 const UNIT_TYPES = [
-  'warrior', 'archer', 'rifleman', 'sniper', 'medic',
+  'conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'medic',
   'heavy', 'tanker', 'grenadier', 'rocketeer',
 ] as const;
 type UnitType = typeof UNIT_TYPES[number];
