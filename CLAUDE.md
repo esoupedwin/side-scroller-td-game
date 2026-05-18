@@ -56,15 +56,15 @@ Characters use `PIXI.AnimatedSprite` when a sprite sheet is available for their 
 
 ```typescript
 warrior: {
-  idle:       { path: '/sprites/warrior/idle.png',   cols: 4, rows: 1, fps:  8, spriteScale: 1.5 },
-  walk:       { path: '/sprites/warrior/walk.png',   cols: 6, rows: 2, fps: 10, spriteScale: 1.5 },
-  attack:     { path: '/sprites/warrior/attack.png', cols: 5, rows: 1, fps: 12, spriteScale: 1.5 },
-  attackWalk: { path: '/sprites/warrior/attack_walk.png', cols: 6, rows: 1, fps: 12, spriteScale: 1.5 },
-  carry:      { path: '/sprites/warrior/carry.png',  cols: 6, rows: 2, fps: 10, spriteScale: 1.5 },
+  idle:       { path: '/sprites/warrior/idle.png',        rows: 1, fps:  8, spriteScale: 1.5 },
+  walk:       { path: '/sprites/warrior/walk.png',        rows: 2, fps: 10, spriteScale: 1.5 },
+  attack:     { path: '/sprites/warrior/attack.png',      rows: 1, fps: 12, spriteScale: 1.5 },
+  attackWalk: { path: '/sprites/warrior/attack_walk.png', rows: 1, fps: 12, spriteScale: 1.5 },
+  carry:      { path: '/sprites/warrior/carry.png',       rows: 4, fps: 10, spriteScale: 1.5 },
 },
 ```
 
-Only the animations you define are loaded — missing entries fall back to the nearest substitute (e.g. `carry` falls back to `walk` then `idle`). A type with no entry at all continues to use Graphics.
+Sheets are always laid out left-to-right, top-to-bottom with exactly `FRAMES_PER_ROW` (6) frames per row. Frame width is `sheet.width / 6`; frame height is `sheet.height / rows`. The actual number of frames is **auto-detected** by scanning cells for transparent content — adding or removing frames within an existing row layout requires no config change, as long as `rows` is still correct. The last row may be partially filled. Only the animations you define are loaded — missing entries fall back to the nearest substitute (e.g. `carry` falls back to `walk` then `idle`). A type with no entry at all continues to use Graphics.
 
 ### Key types and fields (`SpriteRegistry.ts`)
 
