@@ -9,7 +9,18 @@ const pu    = GameConfig.powerUp;
 const gr    = GameConfig.grenade;
 const rkt   = GameConfig.rocket;
 
-export const VIEWPORT_WIDTH   = canvas.width;        // visible canvas width (1248 px)
+// Visible canvas width — scales with the browser window up to a hard cap.
+// Capped so the scrolling mechanic still has headroom on the default map (2808 wide)
+// and so map balance doesn't depend on viewer's monitor size.
+const VIEWPORT_WIDTH_MAX = 2400;
+export const VIEWPORT_WIDTH = typeof window !== 'undefined'
+  ? Math.min(window.innerWidth - 16, VIEWPORT_WIDTH_MAX)
+  : canvas.width;
+
+// In-world rendering zoom. Applied to the `world` PIXI container so all game
+// objects, backgrounds, and characters scale uniformly. Ground stays anchored
+// at its current screen position (see Game.build()).
+export const GAME_ZOOM = 1.5;
 export const GAME_WIDTH       = GameConfig.worldWidth; // scrollable world width (2246 px)
 export const GAME_HEIGHT      = canvas.height;
 export const GAME_DURATION_SEC = canvas.durationSec;

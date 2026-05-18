@@ -33,7 +33,7 @@ import { NavGraph } from './Pathfinding';
 import { Diagnostics } from './Diagnostics';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
-  VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC,
+  VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER, GRENADIER, ROCKETEER,
@@ -355,6 +355,10 @@ export class Game {
     this.collisionDebugLayer.visible = false;
     this.world.addChild(this.collisionDebugLayer);
 
+    // Zoom: scale the whole world container; anchor world.y so GROUND_Y stays at
+    // its current screen position, keeping the horizon visually stable.
+    this.world.scale.set(GAME_ZOOM);
+    this.world.y = GROUND_Y * (1 - GAME_ZOOM);
     this.app.stage.addChild(this.world);
 
     // Sheep — spawns at a random x within the playable field
@@ -677,8 +681,8 @@ export class Game {
     const CAMERA_SPEED = 500; // px/s
     if (this.keysDown.has('ArrowLeft'))  this.cameraX -= CAMERA_SPEED * dt;
     if (this.keysDown.has('ArrowRight')) this.cameraX += CAMERA_SPEED * dt;
-    this.cameraX     = Math.max(0, Math.min(this.mapDef.worldWidth - VIEWPORT_WIDTH, this.cameraX));
-    this.world.x     = -this.cameraX;
+    this.cameraX     = Math.max(0, Math.min(this.mapDef.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM, this.cameraX));
+    this.world.x     = -this.cameraX * GAME_ZOOM;
 
     if (this.isOver) return;
 
@@ -1065,10 +1069,10 @@ export class Game {
     for (const c of chars) {
       const charColor = c.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
 
-      // Collision box
+      // Collision box (actual physics body extent, which can be taller than the visible sprite)
       g.lineStyle(1.5, 0x44ff88, 0.75);
       g.beginFill(0x44ff88, 0.06);
-      g.drawRect(c.x - c.config.width / 2, c.y - c.config.height, c.config.width, c.config.height);
+      g.drawRect(c.x - c.config.width / 2, c.y - c.collisionHeight, c.config.width, c.collisionHeight);
       g.endFill();
 
       // Path visualization
