@@ -16,9 +16,14 @@ import {
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
-import { type LoadedSpriteSet, type AnimationName, getAnimFps, getSpriteScale } from './SpriteRegistry';
+import { type LoadedSpriteSet, type AnimationName, getAnimFps, getSpriteScale, getFeetAnchorY } from './SpriteRegistry';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
+
+// Physics collision box is taller than the visual character so projectiles and
+// stacking interactions register reliably even when sprite art is small. Visual
+// sizing (sprite scale, HP bar, label) continues to use config.height.
+const BODY_HEIGHT_MULT = 1.9;
 
 // Liang-Barsky segment-AABB intersection test.
 // Returns true if the segment (x0,y0)→(x1,y1) intersects the rectangle.
@@ -114,6 +119,8 @@ export class Character {
   private boundL     = 0;
   private boundR     = 0;
   get isOnPlatform(): boolean { return this.floorY < GROUND_Y; }
+  /** Actual height of the physics collision body (taller than config.height by BODY_HEIGHT_MULT). */
+  get collisionHeight(): number { return this.config.height * BODY_HEIGHT_MULT; }
   private get isKnockedBack(): boolean { return Math.abs(this.knockbackVx) > 20; }
 
   /** Damage events emitted this tick; Game.ts reads and clears each frame. */
@@ -216,14 +223,14 @@ export class Character {
     this.y         = GROUND_Y;
     this.physics   = physics;
     this.spriteSet = spriteSet ?? null;
-    this.body      = physics.createCharBody(startX, GROUND_Y, config.width, config.height);
+    this.body      = physics.createCharBody(startX, GROUND_Y, config.width, config.height * BODY_HEIGHT_MULT);
 
     this.container = new PIXI.Container();
     this.buildSprite();
 
     this.barBg = new PIXI.Graphics();
     this.barBg.beginFill(0x333333);
-    this.barBg.drawRect(-CHAR_HP_BAR_W / 2, -this.config.height * 0.55, CHAR_HP_BAR_W, CHAR_HP_BAR_H);
+    this.barBg.drawRect(-CHAR_HP_BAR_W / 2, this.hpBarOffsetY(), CHAR_HP_BAR_W, CHAR_HP_BAR_H);
     this.barBg.endFill();
     this.container.addChild(this.barBg);
 
@@ -244,7 +251,7 @@ export class Character {
     });
     idLabel.anchor.set(0.5, 1);
     idLabel.x = 0;
-    idLabel.y = -this.config.height * 0.55 - 2;
+    idLabel.y = this.hpBarOffsetY() - 2;
     this.container.addChild(idLabel);
 
     this.syncPosition();
@@ -333,18 +340,22 @@ export class Character {
     this.legR = make(rx);
   }
 
+  /** Render scale that makes a frame `frameH` tall display at `config.height × spriteScale` on screen. */
+  private animScaleFor(animName: AnimationName, frameH: number): number {
+    return getSpriteScale(this.config.type, animName) * this.config.height / frameH;
+  }
+
   private buildAnimSprite() {
     const set = this.spriteSet!;
     const frames = set.walk ?? set.idle ?? set.attack;
     if (!frames) return;
 
-    const anim = new PIXI.AnimatedSprite(frames);
     const startAnim: AnimationName = set.walk ? 'walk' : set.idle ? 'idle' : 'attack';
-    anim.anchor.set(0.5, 1.0);
+    const anim = new PIXI.AnimatedSprite(frames);
+    anim.anchor.set(0.5, getFeetAnchorY(this.config.type, startAnim));
     anim.y = this.config.height;  // container origin = head; feet = head + height
-    const scale = (this.config.height * getSpriteScale(this.config.type, startAnim)) / frames[0].height;
-    this.animSpriteBaseScale = scale;
-    anim.scale.set(scale);
+    this.animSpriteBaseScale = this.animScaleFor(startAnim, frames[0].height);
+    anim.scale.set(this.animSpriteBaseScale);
     anim.animationSpeed = getAnimFps(this.config.type, startAnim) / 60;
     anim.loop = true;
     anim.play();
@@ -380,10 +391,10 @@ export class Character {
     }
     if (!frames) return;
 
-    anim.textures       = frames;
+    anim.textures            = frames;
+    anim.anchor.set(0.5, getFeetAnchorY(this.config.type, picked));
     anim.animationSpeed      = getAnimFps(this.config.type, picked) / 60;
-    this.animSpriteBaseScale = getSpriteScale(this.config.type, picked) *
-      this.config.height / frames[0].height;
+    this.animSpriteBaseScale = this.animScaleFor(picked, frames[0].height);
     anim.play();
     this.currentAnimName = name;
   }
@@ -953,11 +964,24 @@ export class Character {
 
   get maxHp() { return this.config.hp * (1 + this.rank * PROMO_HP_BOOST); }
 
+  /**
+   * Y offset (in container coords) where the HP bar / name label should sit.
+   * Anchored 30 px above the top of the collision box, regardless of
+   * rendering style (sprite or Graphics).
+   */
+  private hpBarOffsetY(): number {
+    // Container origin is at the head (this.y - config.height); feet at +config.height.
+    // The collision body extends upward from the feet by config.height * BODY_HEIGHT_MULT,
+    // so the body top in container coords is -config.height * (BODY_HEIGHT_MULT - 1).
+    const bodyTop = -this.config.height * (BODY_HEIGHT_MULT - 1);
+    return bodyTop - 30;
+  }
+
   private drawBar() {
     const ratio = Math.max(0, this.hp / this.maxHp);
     this.bar.clear();
     this.bar.beginFill(this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR);
-    this.bar.drawRect(-CHAR_HP_BAR_W / 2, -this.config.height * 0.55, CHAR_HP_BAR_W * ratio, CHAR_HP_BAR_H);
+    this.bar.drawRect(-CHAR_HP_BAR_W / 2, this.hpBarOffsetY(), CHAR_HP_BAR_W * ratio, CHAR_HP_BAR_H);
     this.bar.endFill();
   }
 
@@ -1368,7 +1392,7 @@ export class Character {
     const onPlatform = !this.isAirborne && this.floorY < GROUND_Y;
     Matter.Body.setPosition(this.body, {
       x: this.x,
-      y: onPlatform ? this.floorY - this.config.height / 2 : this.body.position.y,
+      y: onPlatform ? this.floorY - (this.config.height * BODY_HEIGHT_MULT) / 2 : this.body.position.y,
     });
     Matter.Body.setVelocity(this.body, { x: 0, y: onPlatform ? 0 : this.body.velocity.y });
   }
@@ -1422,7 +1446,7 @@ export class Character {
   }
 
   syncFromBody(platforms: PlatformData[], blocks: BlockData[]) {
-    const halfH     = this.config.height / 2;
+    const halfH     = (this.config.height * BODY_HEIGHT_MULT) / 2;
     // positionPrev is an internal Matter.js field not exposed in the public types;
     // it gives the body's position from before the last physics step, which is
     // required for the tunneling-safe platform/block landing check below.
