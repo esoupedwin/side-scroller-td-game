@@ -235,12 +235,14 @@ Each rank above Private: +20% max HP (restored on promotion), +10% speed, +15% a
 `earnAP()` is private; called by `takeDamage` (killer) and the deposit branch in `updateCollecting`.
 
 ### Fire angle restriction
-`private snapFireAngle(angle)` snaps projectile angles to the three permitted directions:
-- Horizontal (0°)
-- 45° diagonal (up or down)
-- Straight up (90°)
+`private snapFireAngle()` forces ranged shots to **horizontal only** — bullets and arrows fly along the shooter's `bowY` without arcing. Applied in both `attackEnemy()` and `attackTower()` before calling `onFire`.
 
-Applied in both `attackEnemy()` and `attackTower()` before calling `onFire`.
+Pairs with `canSnapHit(target)` which (for snap-firing types only) rejects targets whose collision box doesn't span the shooter's `bowY` line — i.e. targets on a different elevation are unreachable until the shooter matches their plane. AI handles plane-matching naturally:
+- **Harass** pursues at the enemy's `floorY` (`requestPath(closest.x, closest.floorY, ...)`) and has a dedicated "climb up to enemy on platform" branch.
+- **Collect** paths to the coin's floor.
+- **Attack/Rush/Defend** stay focused on their primary goal (tower advance, defence patrol); elevated enemies they can't shoot are simply ignored.
+
+Grenadier, rocketeer, warrior, heavy, and conscript bypass both the snap and the `canSnapHit` filter (melee or ballistic — they aim freely).
 
 ## Coin system
 

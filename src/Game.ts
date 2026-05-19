@@ -26,6 +26,7 @@ import { Platform } from './Platform';
 import { Block } from './Block';
 import { pickName } from './names';
 import { getSpriteSet } from './SpriteRegistry';
+import { tribeForSide } from './Tribes';
 import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 import type { CollisionBoxData } from './CollisionBox';
@@ -463,7 +464,7 @@ export class Game {
     this.notifyCoins();
 
     const config = withSpawnBoosts(CHAR_CONFIGS[type]);
-    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(type) ?? undefined);
+    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type) ?? undefined);
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
@@ -592,7 +593,7 @@ export class Game {
         this.coinBalance -= cost;
         this.notifyCoins();
       }
-      const c = new Character(self, spawnX, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics, getSpriteSet(type) ?? undefined);
+      const c = new Character(self, spawnX, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type) ?? undefined);
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
       if (self === 'player') this.hud.add(c);

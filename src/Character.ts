@@ -12,11 +12,11 @@ import {
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
   POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
   GRENADE_MAX_VX,
-  BULLET_SPLASH, ARROW_SPLASH,
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
 import { type LoadedSpriteSet, type AnimationName, getAnimFps, getSpriteScale, getFeetAnchorY } from './SpriteRegistry';
+import { type Tribe, tribeForSide } from './Tribes';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
 
@@ -121,6 +121,8 @@ export class Character {
   get isOnPlatform(): boolean { return this.floorY < GROUND_Y; }
   /** Actual height of the physics collision body (taller than config.height by BODY_HEIGHT_MULT). */
   get collisionHeight(): number { return this.config.height * BODY_HEIGHT_MULT; }
+  /** Visual/identity tribe (derived from side; future: pickable per game). */
+  get tribe(): Tribe { return tribeForSide(this.side); }
   private get isKnockedBack(): boolean { return Math.abs(this.knockbackVx) > 20; }
 
   /** Damage events emitted this tick; Game.ts reads and clears each frame. */
@@ -142,6 +144,18 @@ export class Character {
   private randomJumpTimer    = Math.random() * 3;  // stagger across characters
   private evasiveJumpTimer   = 0;
   private lastMoveDir:         1 | -1 = 1;
+  // Direction of the most recent attack target — used to flip the sprite while
+  // attacking, so a character moving forward but attacking a target behind
+  // them faces the target (not their travel direction).
+  private lastAttackDir:       1 | -1 = 1;
+  // Seconds remaining where the sprite stays facing the most recent attack
+  // direction, even when state isn't 'fighting' (Rush/Collect fire while
+  // moving without flipping into fighting state).
+  private attackFacingTimer    = 0;
+  // Seconds since the character's x last changed. Used by selectAnimation to
+  // fall back to 'idle' when the state machine still says 'marching' but the
+  // character is effectively stationary (blocked, no target, etc.).
+  private stillTimer            = 0;
   private legL:     PIXI.Container | null = null;
   private legR:     PIXI.Container | null = null;
   private legPhase: number = Math.random() * Math.PI * 2;  // stagger across characters
@@ -342,7 +356,7 @@ export class Character {
 
   /** Render scale that makes a frame `frameH` tall display at `config.height × spriteScale` on screen. */
   private animScaleFor(animName: AnimationName, frameH: number): number {
-    return getSpriteScale(this.config.type, animName) * this.config.height / frameH;
+    return getSpriteScale(this.tribe, this.config.type, animName) * this.config.height / frameH;
   }
 
   private buildAnimSprite() {
@@ -352,11 +366,11 @@ export class Character {
 
     const startAnim: AnimationName = set.walk ? 'walk' : set.idle ? 'idle' : 'attack';
     const anim = new PIXI.AnimatedSprite(frames);
-    anim.anchor.set(0.5, getFeetAnchorY(this.config.type, startAnim));
+    anim.anchor.set(0.5, getFeetAnchorY(this.tribe, this.config.type, startAnim));
     anim.y = this.config.height;  // container origin = head; feet = head + height
     this.animSpriteBaseScale = this.animScaleFor(startAnim, frames[0].height);
     anim.scale.set(this.animSpriteBaseScale);
-    anim.animationSpeed = getAnimFps(this.config.type, startAnim) / 60;
+    anim.animationSpeed = getAnimFps(this.tribe, this.config.type, startAnim) / 60;
     anim.loop = true;
     anim.play();
     this.animSprite      = anim;
@@ -365,9 +379,13 @@ export class Character {
   }
 
   private selectAnimation(): AnimationName {
-    if (this.carryingCoin || this.state === 'returning') return 'carry';
+    // Idle override: even if state is 'marching'/'collecting', show idle when
+    // the character hasn't actually moved for a brief window (blocked, paused,
+    // waiting for a target). 0.15s prevents flicker between movement bursts.
+    const isStill = this.stillTimer > 0.15;
+    if (this.carryingCoin || this.state === 'returning') return isStill ? 'idle' : 'carry';
     if (this.state === 'fighting') return 'attack';
-    if (this.state === 'marching' || this.state === 'collecting') return 'walk';
+    if (this.state === 'marching' || this.state === 'collecting') return isStill ? 'idle' : 'walk';
     return 'idle';
   }
 
@@ -392,8 +410,8 @@ export class Character {
     if (!frames) return;
 
     anim.textures            = frames;
-    anim.anchor.set(0.5, getFeetAnchorY(this.config.type, picked));
-    anim.animationSpeed      = getAnimFps(this.config.type, picked) / 60;
+    anim.anchor.set(0.5, getFeetAnchorY(this.tribe, this.config.type, picked));
+    anim.animationSpeed      = getAnimFps(this.tribe, this.config.type, picked) / 60;
     this.animSpriteBaseScale = this.animScaleFor(picked, frames[0].height);
     anim.play();
     this.currentAnimName = name;
@@ -403,11 +421,40 @@ export class Character {
     const anim = this.animSprite;
     if (!anim) return;
 
-    // Flip sprite to match actual travel direction (sprites are drawn facing right)
-    anim.scale.x = this.animSpriteBaseScale * this.lastMoveDir;
+    // Face the attack target while fighting OR within the brief post-fire window
+    // (Rush/Collect fire opportunistically without entering fighting state).
+    // Otherwise face the actual travel direction. Sprites are drawn facing right.
+    const facingDir = (this.state === 'fighting' || this.attackFacingTimer > 0)
+      ? this.lastAttackDir
+      : this.lastMoveDir;
+    anim.scale.x    = this.animSpriteBaseScale * facingDir;
 
     const target = this.selectAnimation();
     if (target !== this.currentAnimName) this.switchAnimation(target);
+
+    this.updateLocomotionFps();
+  }
+
+  /**
+   * Scale the walk/carry/attackWalk animation speed by the character's current
+   * effective moveSpeed vs its config baseline, so promotions, carry slowdown,
+   * and speed power-ups keep the stride visually in sync with the actual pace.
+   * Idle and attack are stationary — left at their baseline fps.
+   */
+  private updateLocomotionFps() {
+    const anim = this.animSprite;
+    const name = this.currentAnimName;
+    if (!anim || !name) return;
+    if (name !== 'walk' && name !== 'carry' && name !== 'attackWalk') return;
+
+    const baselineFps = getAnimFps(this.tribe, this.config.type, name);
+    const ratio       = this.moveSpeed / this.config.speed;
+    const targetSpeed = (baselineFps * ratio) / 60;
+
+    // PIXI dirty-flags on every write; only push when it would actually change.
+    if (Math.abs(anim.animationSpeed - targetSpeed) > 1e-4) {
+      anim.animationSpeed = targetSpeed;
+    }
   }
 
   private buildConscriptSprite() {
@@ -1256,8 +1303,9 @@ export class Character {
   update(ctx: UpdateContext) {
     if (this.isDead) return;
 
-    this.attackTimer      = Math.max(0, this.attackTimer      - ctx.dt);
-    this.evasiveJumpTimer = Math.max(0, this.evasiveJumpTimer - ctx.dt);
+    this.attackTimer        = Math.max(0, this.attackTimer        - ctx.dt);
+    this.evasiveJumpTimer   = Math.max(0, this.evasiveJumpTimer   - ctx.dt);
+    this.attackFacingTimer  = Math.max(0, this.attackFacingTimer  - ctx.dt);
 
     if (this.powerUpSpeedTimer > 0) {
       this.powerUpSpeedTimer -= ctx.dt;
@@ -1308,7 +1356,12 @@ export class Character {
       }
       this.tickRandomJump(ctx.dt, ctx.homeTowerFrontX);
     }
-    if (this.x !== preX) this.lastMoveDir = (this.x > preX ? 1 : -1);
+    if (this.x !== preX) {
+      this.lastMoveDir = (this.x > preX ? 1 : -1);
+      this.stillTimer  = 0;
+    } else {
+      this.stillTimer += ctx.dt;
+    }
     this.tickLegs(ctx.dt);
     this.tickAnimSprite();
     this.tickPromoAnim(ctx.dt);
@@ -2081,13 +2134,12 @@ export class Character {
   }
 
   /**
-   * Snaps the firing direction to the nearest of three allowed angles:
-   *   • Horizontal      (0° / 180°, depending on direction)
-   *   • 45° upward      (-π/4 or -3π/4 in screen-space where Y↓)
-   *   • Straight up     (-π/2)
-   * Downward angles are intentionally excluded — characters cannot fire below their
-   * current floor. The projectile travels the original distance so splash damage
-   * still lands close to the intended target.
+   * Forces the firing direction to horizontal — ranged units shoot sideways only,
+   * no diagonal or vertical arcs. The projectile travels the original distance
+   * so splash damage still lands at the intended horizontal position. Targets
+   * at meaningfully different elevations are filtered out earlier by canSnapHit,
+   * so ranged units close the elevation gap (via Pathfinding climb-up logic in
+   * harass/collect behaviors) before they can fire.
    */
   private snapFireAngle(sx: number, sy: number, tx: number, ty: number): { tx: number; ty: number } {
     const dx   = tx - sx;
@@ -2095,31 +2147,16 @@ export class Character {
     const dist = Math.hypot(dx, dy);
     if (dist < 1) return { tx, ty };
 
-    const angle = Math.atan2(dy, dx);
-
-    // Preserve the horizontal firing direction; never shoot backwards
-    const dir   = dx !== 0 ? Math.sign(dx) : (this.side === 'player' ? 1 : -1);
-    const hAngle = dir > 0 ? 0           : Math.PI;          // sideways
-    const dAngle = dir > 0 ? -Math.PI/4  : -3*Math.PI/4;    // 45° up
-    const uAngle = -Math.PI / 2;                              // 90° up
-
-    const angDiff = (a: number, b: number) => {
-      let d = Math.abs(a - b) % (2 * Math.PI);
-      if (d > Math.PI) d = 2 * Math.PI - d;
-      return d;
-    };
-
-    let best = hAngle, minDiff = Infinity;
-    for (const a of [hAngle, dAngle, uAngle]) {
-      const d = angDiff(angle, a);
-      if (d < minDiff) { minDiff = d; best = a; }
-    }
-
-    return { tx: sx + dist * Math.cos(best), ty: sy + dist * Math.sin(best) };
+    // Preserve the horizontal firing direction; never shoot backwards.
+    const dir = dx !== 0 ? Math.sign(dx) : (this.side === 'player' ? 1 : -1);
+    return { tx: sx + dist * dir, ty: sy };
   }
 
   private attackEnemy(target: Character, onFire?: (r: FireRequest) => void) {
     if (this.attackTimer > 0) return;
+    const dirSign = Math.sign(target.x - this.x);
+    if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
+    this.attackFacingTimer = 0.3;
     const miss   = Math.random() < this.config.critical;
     const damage = miss ? 0 : this.effectiveAtk;
     if (this.config.type === 'conscript' || this.config.type === 'warrior' || this.config.type === 'heavy') {
@@ -2168,6 +2205,9 @@ export class Character {
     onDamageTower?: (dmg: number) => void,
   ) {
     if (this.attackTimer > 0) return;
+    const dirSign = Math.sign(towerFrontX - this.x);
+    if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
+    this.attackFacingTimer = 0.3;
     this.attackTimer = this.config.fireRate;
     if (Math.random() < this.config.critical) return;  // miss — silent, towers have no label system
     if (this.config.type === 'warrior' || this.config.type === 'heavy') {
@@ -2214,9 +2254,10 @@ export class Character {
   private canSnapHit(target: Character): boolean {
     const t = this.config.type;
     if (t === 'conscript' || t === 'warrior' || t === 'heavy' || t === 'grenadier' || t === 'rocketeer') return true;
-    const snapped = this.snapFireAngle(this.x, this.bowY, target.x, target.bowY);
-    const splash  = this.projectileKind === 'bullet' ? BULLET_SPLASH : ARROW_SPLASH;
-    return Math.abs(snapped.tx - target.x) <= splash;
+    // Horizontal-only fire — the projectile travels along the shooter's bowY
+    // without arcing. A target is hittable only when its collision box
+    // vertically spans the bow line (i.e. they're on roughly the same plane).
+    return this.bowY >= target.y - target.collisionHeight && this.bowY <= target.y;
   }
 
   /**

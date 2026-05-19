@@ -1,57 +1,75 @@
 import * as PIXI from 'pixi.js';
+import type { Tribe } from './Tribes';
 
 export type AnimationName = 'idle' | 'walk' | 'attack' | 'attackWalk' | 'carry';
 
 // Sprite sheets are laid out left-to-right, top-to-bottom, with exactly
-// FRAMES_PER_ROW frames per row. Frame width = sheet.width / FRAMES_PER_ROW.
-// Frame height = sheet.height / rows. The actual frame count within the grid
-// is detected from the image (trailing empty cells in the last row are skipped).
+// FRAMES_PER_ROW frames per row. Frame height is fixed by artist convention
+// (FRAME_HEIGHT_PX); row count is derived from the sheet's height. The actual
+// frame count within the grid is detected from the image (trailing empty cells
+// in the last row are skipped).
 const FRAMES_PER_ROW = 6;
+const FRAME_HEIGHT_PX = 600;
 
 export interface SpriteAnimDef {
-  path:        string;  // URL served from /public, e.g. '/sprites/conscript/walk.png'
-  rows:        number;  // number of rows in the sheet (frames-per-row is fixed at FRAMES_PER_ROW)
+  path:        string;  // URL served from /public, e.g. '/sprites/berserkers/warrior/walk.png'
   fps:         number;  // desired playback speed in frames per second
   spriteScale: number;  // height = config.height * spriteScale (compensates for frame padding)
   feetAnchorY?: number; // 0..1; where in the frame the character's feet sit (default 1 = bottom edge).
                         // Lower this when the art has empty padding below the character.
+  rows?:       number;  // optional override; auto-derived from sheet.height / FRAME_HEIGHT_PX otherwise.
 }
 
 export type SpriteSetDef    = Partial<Record<AnimationName, SpriteAnimDef>>;
 export type LoadedSpriteSet = Partial<Record<AnimationName, PIXI.Texture[]>>;
 
-// ── Add entries here when sprite files are placed in /public/sprites/<type>/ ──
-const SPRITE_DEFS: Partial<Record<string, SpriteSetDef>> = {
-  conscript: {
-    idle:   { path: '/sprites/conscript/idle.png',   rows: 6, fps: 20, spriteScale: 4.0 },
-    walk:   { path: '/sprites/conscript/walk.png',   rows: 6, fps: 28, spriteScale: 4.0 },
-    attack: { path: '/sprites/conscript/attack.png', rows: 6, fps: 30, spriteScale: 4.0 },
-    carry:  { path: '/sprites/conscript/carry.png',  rows: 6, fps: 24, spriteScale: 4.0 },
+// Build a per-type spec where every animation uses the same path prefix.
+// Keeps tribe entries below from being a wall of duplication.
+function makeTypeDefs(tribe: Tribe, type: string): SpriteSetDef {
+  const base = `/sprites/${tribe}/${type}`;
+  return {
+    idle:   { path: `${base}/idle.png`,   fps: 20, spriteScale: 4.0 },
+    walk:   { path: `${base}/walk.png`,   fps: 32, spriteScale: 4.0 },
+    attack: { path: `${base}/attack.png`, fps: 30, spriteScale: 4.0 },
+    carry:  { path: `${base}/carry.png`,  fps: 24, spriteScale: 4.0 },
+  };
+}
+
+// ── Per-tribe sprite registry ────────────────────────────────────────────────
+// Each tribe maps character type → animation sheet metadata. A missing entry
+// (whole tribe or specific type) falls back to Graphics rendering. Add new
+// tribes here as their sheets are produced.
+const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>> = {
+  berserkers: {
+    conscript: makeTypeDefs('berserkers', 'conscript'),
+    warrior:   makeTypeDefs('berserkers', 'warrior'),
+    rifleman:  makeTypeDefs('berserkers', 'rifleman'),
+    archer:    makeTypeDefs('berserkers', 'archer'),
+    rocketeer: makeTypeDefs('berserkers', 'rocketeer'),
   },
-  warrior: {
-    idle:   { path: '/sprites/warrior/idle.png',   rows: 6, fps: 20, spriteScale: 4.0 },
-    walk:   { path: '/sprites/warrior/walk.png',   rows: 6, fps: 28, spriteScale: 4.0 },
-    attack: { path: '/sprites/warrior/attack.png', rows: 6, fps: 30, spriteScale: 4.0 },
-    carry:  { path: '/sprites/warrior/carry.png',  rows: 6, fps: 24, spriteScale: 4.0 },
-  },
-  rifleman: {
-    idle:   { path: '/sprites/rifleman/idle.png',   rows: 6, fps: 20, spriteScale: 4.0 },
-    walk:   { path: '/sprites/rifleman/walk.png',   rows: 6, fps: 28, spriteScale: 4.0 },
-    attack: { path: '/sprites/rifleman/attack.png', rows: 6, fps: 30, spriteScale: 4.0 },
-    carry:  { path: '/sprites/rifleman/carry.png',  rows: 6, fps: 24, spriteScale: 4.0 },
+  legion: {
+    conscript: makeTypeDefs('legion', 'conscript'),
+    warrior:   makeTypeDefs('legion', 'warrior'),
+    rifleman:  makeTypeDefs('legion', 'rifleman'),
+    archer:    makeTypeDefs('legion', 'archer'),
+    rocketeer: makeTypeDefs('legion', 'rocketeer'),
   },
 };
 
-export function getAnimFps(type: string, anim: AnimationName): number {
-  return SPRITE_DEFS[type]?.[anim]?.fps ?? 10;
+function defFor(tribe: Tribe, type: string, anim: AnimationName): SpriteAnimDef | undefined {
+  return SPRITE_DEFS[tribe]?.[type]?.[anim];
 }
 
-export function getSpriteScale(type: string, anim: AnimationName): number {
-  return SPRITE_DEFS[type]?.[anim]?.spriteScale ?? 1.0;
+export function getAnimFps(tribe: Tribe, type: string, anim: AnimationName): number {
+  return defFor(tribe, type, anim)?.fps ?? 10;
 }
 
-export function getFeetAnchorY(type: string, anim: AnimationName): number {
-  return SPRITE_DEFS[type]?.[anim]?.feetAnchorY ?? 1.0;
+export function getSpriteScale(tribe: Tribe, type: string, anim: AnimationName): number {
+  return defFor(tribe, type, anim)?.spriteScale ?? 1.0;
+}
+
+export function getFeetAnchorY(tribe: Tribe, type: string, anim: AnimationName): number {
+  return defFor(tribe, type, anim)?.feetAnchorY ?? 1.0;
 }
 
 function extractFrames(texture: PIXI.Texture, frameCount: number, fw: number, fh: number): PIXI.Texture[] {
@@ -102,33 +120,44 @@ function detectFrameCount(
   return total;
 }
 
+// Cache key combines tribe + type so the same character type can have different
+// sheets per tribe.
 const cache = new Map<string, LoadedSpriteSet | null>();
+const cacheKey = (tribe: Tribe, type: string) => `${tribe}:${type}`;
 
 export async function preloadAllSprites(): Promise<void> {
-  await Promise.all(
-    Object.entries(SPRITE_DEFS).map(async ([type, def]) => {
-      if (!def) { cache.set(type, null); return; }
-      const result: LoadedSpriteSet = {};
-      let anyLoaded = false;
-      for (const [animName, animDef] of Object.entries(def) as [AnimationName, SpriteAnimDef][]) {
-        try {
-          const texture    = await PIXI.Assets.load<PIXI.Texture>(animDef.path);
-          const fw         = Math.floor(texture.width  / FRAMES_PER_ROW);
-          const fh         = Math.floor(texture.height / animDef.rows);
-          const frameCount = detectFrameCount(texture, animDef.rows, fw, fh);
-          console.log(`[sprites] ${type}/${animName}: sheet ${texture.width}×${texture.height}, detected ${frameCount} frames in ${FRAMES_PER_ROW}×${animDef.rows} grid, frame ${fw}×${fh}`);
-          result[animName] = extractFrames(texture, frameCount, fw, fh);
-          anyLoaded = true;
-        } catch {
-          // sprite file not present — silently fall back to Graphics for this animation
+  const tasks: Promise<void>[] = [];
+  for (const [tribeId, typeDefs] of Object.entries(SPRITE_DEFS) as [Tribe, Partial<Record<string, SpriteSetDef>>][]) {
+    if (!typeDefs) continue;
+    for (const [type, def] of Object.entries(typeDefs)) {
+      if (!def) { cache.set(cacheKey(tribeId, type), null); continue; }
+      tasks.push((async () => {
+        const result: LoadedSpriteSet = {};
+        let anyLoaded = false;
+        for (const [animName, animDef] of Object.entries(def) as [AnimationName, SpriteAnimDef][]) {
+          try {
+            const texture    = await PIXI.Assets.load<PIXI.Texture>(animDef.path);
+            // Row count is derived from the sheet height (artist convention: FRAME_HEIGHT_PX per row),
+            // unless the def explicitly overrides it.
+            const rows       = animDef.rows ?? Math.max(1, Math.round(texture.height / FRAME_HEIGHT_PX));
+            const fw         = Math.floor(texture.width  / FRAMES_PER_ROW);
+            const fh         = Math.floor(texture.height / rows);
+            const frameCount = detectFrameCount(texture, rows, fw, fh);
+            console.log(`[sprites] ${tribeId}/${type}/${animName}: sheet ${texture.width}×${texture.height}, detected ${frameCount} frames in ${FRAMES_PER_ROW}×${rows} grid, frame ${fw}×${fh}`);
+            result[animName] = extractFrames(texture, frameCount, fw, fh);
+            anyLoaded = true;
+          } catch {
+            // sprite file not present — silently fall back to Graphics for this animation
+          }
         }
-      }
-      cache.set(type, anyLoaded ? result : null);
-    }),
-  );
+        cache.set(cacheKey(tribeId, type), anyLoaded ? result : null);
+      })());
+    }
+  }
+  await Promise.all(tasks);
 }
 
-/** Returns the loaded sprite set for a character type, or null if none is available. */
-export function getSpriteSet(type: string): LoadedSpriteSet | null {
-  return cache.get(type) ?? null;
+/** Returns the loaded sprite set for a tribe + character type, or null if none is available. */
+export function getSpriteSet(tribe: Tribe, type: string): LoadedSpriteSet | null {
+  return cache.get(cacheKey(tribe, type)) ?? null;
 }
