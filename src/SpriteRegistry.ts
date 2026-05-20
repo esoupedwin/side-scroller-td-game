@@ -12,7 +12,7 @@ const FRAMES_PER_ROW = 6;
 const FRAME_HEIGHT_PX = 600;
 
 export interface SpriteAnimDef {
-  path:        string;  // URL served from /public, e.g. '/sprites/berserkers/warrior/walk.png'
+  path:        string;  // URL served from /public, e.g. '/sprites/tomaro/warrior/walk.png'
   fps:         number;  // desired playback speed in frames per second
   spriteScale: number;  // height = config.height * spriteScale (compensates for frame padding)
   feetAnchorY?: number; // 0..1; where in the frame the character's feet sit (default 1 = bottom edge).
@@ -40,19 +40,19 @@ function makeTypeDefs(tribe: Tribe, type: string): SpriteSetDef {
 // (whole tribe or specific type) falls back to Graphics rendering. Add new
 // tribes here as their sheets are produced.
 const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>> = {
-  berserkers: {
-    conscript: makeTypeDefs('berserkers', 'conscript'),
-    warrior:   makeTypeDefs('berserkers', 'warrior'),
-    rifleman:  makeTypeDefs('berserkers', 'rifleman'),
-    archer:    makeTypeDefs('berserkers', 'archer'),
-    rocketeer: makeTypeDefs('berserkers', 'rocketeer'),
+  tomaro: {
+    conscript: makeTypeDefs('tomaro', 'conscript'),
+    warrior:   makeTypeDefs('tomaro', 'warrior'),
+    rifleman:  makeTypeDefs('tomaro', 'rifleman'),
+    archer:    makeTypeDefs('tomaro', 'archer'),
+    rocketeer: makeTypeDefs('tomaro', 'rocketeer'),
   },
-  legion: {
-    conscript: makeTypeDefs('legion', 'conscript'),
-    warrior:   makeTypeDefs('legion', 'warrior'),
-    rifleman:  makeTypeDefs('legion', 'rifleman'),
-    archer:    makeTypeDefs('legion', 'archer'),
-    rocketeer: makeTypeDefs('legion', 'rocketeer'),
+  meowee: {
+    conscript: makeTypeDefs('meowee', 'conscript'),
+    warrior:   makeTypeDefs('meowee', 'warrior'),
+    rifleman:  makeTypeDefs('meowee', 'rifleman'),
+    archer:    makeTypeDefs('meowee', 'archer'),
+    rocketeer: makeTypeDefs('meowee', 'rocketeer'),
   },
 };
 
@@ -72,6 +72,12 @@ export function getFeetAnchorY(tribe: Tribe, type: string, anim: AnimationName):
   return defFor(tribe, type, anim)?.feetAnchorY ?? 1.0;
 }
 
+// Pixels to inset the source rectangle on each side. PIXI's linear texture
+// sampler reads half a pixel past the rectangle edge, so without an inset the
+// top/bottom of one frame picks up content from the adjacent row (visible as
+// "ghost" pixels above the character's head).
+const FRAME_INSET_PX = 1;
+
 function extractFrames(texture: PIXI.Texture, frameCount: number, fw: number, fh: number): PIXI.Texture[] {
   const frames: PIXI.Texture[] = [];
   for (let i = 0; i < frameCount; i++) {
@@ -79,7 +85,12 @@ function extractFrames(texture: PIXI.Texture, frameCount: number, fw: number, fh
     const c = i % FRAMES_PER_ROW;
     frames.push(new PIXI.Texture(
       texture.baseTexture,
-      new PIXI.Rectangle(c * fw, r * fh, fw, fh),
+      new PIXI.Rectangle(
+        c * fw + FRAME_INSET_PX,
+        r * fh + FRAME_INSET_PX,
+        fw - 2 * FRAME_INSET_PX,
+        fh - 2 * FRAME_INSET_PX,
+      ),
     ));
   }
   return frames;
@@ -87,9 +98,14 @@ function extractFrames(texture: PIXI.Texture, frameCount: number, fw: number, fh
 
 /**
  * Scan the grid left-to-right, top-to-bottom and return the index of the first
- * fully-transparent cell — that's the actual frame count. Lets the author add
- * or remove frames without updating SPRITE_DEFS, as long as `rows` is right.
+ * cell whose fill ratio is below MIN_CELL_FILL_RATIO — that's the actual frame
+ * count. A simple "any non-zero alpha" check is too sensitive (stray export
+ * artifacts in unused cells flag them as filled), so we require enough sampled
+ * pixels to have meaningful alpha.
  */
+const ALPHA_THRESHOLD     = 32;     // pixel must be > this to count as "drawn"
+const MIN_CELL_FILL_RATIO = 0.01;   // >= 1 % of sampled pixels above threshold
+
 function detectFrameCount(
   texture: PIXI.Texture,
   rows: number,
@@ -111,11 +127,12 @@ function detectFrameCount(
     const c = i % FRAMES_PER_ROW;
     const r = Math.floor(i / FRAMES_PER_ROW);
     const data = ctx.getImageData(c * fw, r * fh, fw, fh).data;
-    let hasContent = false;
+    let filled = 0;
+    const sampledPixels = data.length / 4;
     for (let j = 3; j < data.length; j += 4) {
-      if (data[j] > 0) { hasContent = true; break; }
+      if (data[j] > ALPHA_THRESHOLD) filled++;
     }
-    if (!hasContent) return i;
+    if (filled / sampledPixels < MIN_CELL_FILL_RATIO) return i;
   }
   return total;
 }
@@ -137,6 +154,13 @@ export async function preloadAllSprites(): Promise<void> {
         for (const [animName, animDef] of Object.entries(def) as [AnimationName, SpriteAnimDef][]) {
           try {
             const texture    = await PIXI.Assets.load<PIXI.Texture>(animDef.path);
+            // Disable mipmaps: PIXI generates downscaled levels and blends across
+            // frame boundaries, so neighboring frames bleed in when the sprite is
+            // rendered smaller than its source (which is the common case for our
+            // 512x600 frames). Without mipmaps, the inset rectangle below is
+            // sufficient to keep adjacent frames out of the sample.
+            texture.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+            texture.baseTexture.update();
             // Row count is derived from the sheet height (artist convention: FRAME_HEIGHT_PX per row),
             // unless the def explicitly overrides it.
             const rows       = animDef.rows ?? Math.max(1, Math.round(texture.height / FRAME_HEIGHT_PX));
