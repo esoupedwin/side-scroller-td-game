@@ -18,6 +18,8 @@ export interface PathStep {
   targetX:       number;  // destination X on this step's target surface
   floorY:        number;  // floor Y of the target surface
   jumpTriggerX?: number;  // for jump: walk here first, then jump
+  sourceFloorY?: number;  // for jump: floor the character should be on at trigger time;
+                          // followPath re-plans if the character has drifted off it.
 }
 
 // ── Physics limits (derived from game constants) ─────────────────────────────
@@ -334,8 +336,14 @@ export class NavGraph {
           jumpTriggerX = approachFromLeft ? landX - hDist : landX + hDist;
         }
 
+        // Clamp the trigger to the source surface's x-span so the character
+        // doesn't have to walk past the edge of `cur` to reach it. Falling off
+        // the source mid-approach previously made the jump fire from a lower
+        // floor than the pathfinder planned for — usually unreachable.
+        jumpTriggerX = Math.max(cur.x, Math.min(cur.x + cur.width, jumpTriggerX));
+
         steps.push({ action: 'walk', targetX: jumpTriggerX, floorY: cur.y });
-        steps.push({ action: 'jump', targetX: actualLandX, floorY: next.y, jumpTriggerX });
+        steps.push({ action: 'jump', targetX: actualLandX, floorY: next.y, jumpTriggerX, sourceFloorY: cur.y });
         curX = actualLandX;
       } else {
         // Walk to the fall-off edge, then fall. Pick the side closer to the final

@@ -156,6 +156,10 @@ export class Character {
   // fall back to 'idle' when the state machine still says 'marching' but the
   // character is effectively stationary (blocked, no target, etc.).
   private stillTimer            = 0;
+  // Seconds of continuous motion (resets when x stops changing). Pairs with
+  // stillTimer to give asymmetric hysteresis on the idle↔walk animation
+  // switch, so jittery 1-px-per-tick movement doesn't thrash the sprite.
+  private movingTimer           = 0;
   private legL:     PIXI.Container | null = null;
   private legR:     PIXI.Container | null = null;
   private legPhase: number = Math.random() * Math.PI * 2;  // stagger across characters
@@ -379,13 +383,16 @@ export class Character {
   }
 
   private selectAnimation(): AnimationName {
-    // Idle override: even if state is 'marching'/'collecting', show idle when
-    // the character hasn't actually moved for a brief window (blocked, paused,
-    // waiting for a target). 0.15s prevents flicker between movement bursts.
-    const isStill = this.stillTimer > 0.15;
-    if (this.carryingCoin || this.state === 'returning') return isStill ? 'idle' : 'carry';
+    // Asymmetric hysteresis on idle↔walk so single-tick movement noise doesn't
+    // thrash the animation:
+    //   - already in walk/carry → keep moving unless still for > 0.15 s
+    //   - already in idle/attack → only switch to walk after 0.05 s of motion
+    const wasMoving = this.currentAnimName === 'walk' || this.currentAnimName === 'carry';
+    const inMotion  = wasMoving ? this.stillTimer < 0.15 : this.movingTimer > 0.05;
+
+    if (this.carryingCoin || this.state === 'returning') return inMotion ? 'carry' : 'idle';
     if (this.state === 'fighting') return 'attack';
-    if (this.state === 'marching' || this.state === 'collecting') return isStill ? 'idle' : 'walk';
+    if (this.state === 'marching' || this.state === 'collecting') return inMotion ? 'walk' : 'idle';
     return 'idle';
   }
 
@@ -1357,10 +1364,12 @@ export class Character {
       this.tickRandomJump(ctx.dt, ctx.homeTowerFrontX);
     }
     if (this.x !== preX) {
-      this.lastMoveDir = (this.x > preX ? 1 : -1);
-      this.stillTimer  = 0;
+      this.lastMoveDir  = (this.x > preX ? 1 : -1);
+      this.stillTimer   = 0;
+      this.movingTimer += ctx.dt;
     } else {
-      this.stillTimer += ctx.dt;
+      this.movingTimer  = 0;
+      this.stillTimer  += ctx.dt;
     }
     this.tickLegs(ctx.dt);
     this.tickAnimSprite();
@@ -1638,6 +1647,16 @@ export class Character {
         this.pathIdx++;
         return this.pathIdx >= this.path.length;
       }
+      // Source-floor guard: if we've drifted off the floor the pathfinder
+      // assumed we'd launch from (e.g. walked off the platform edge while
+      // approaching the trigger), the planned jump can't possibly land — its
+      // arc was sized for a higher starting elevation. Scrap the path so the
+      // next requestPath re-routes from our actual position.
+      if (!this.isAirborne && step.sourceFloorY !== undefined &&
+          Math.abs(this.floorY - step.sourceFloorY) > 20) {
+        this.clearPath();
+        return false;
+      }
       if (this.isAirborne) return false;  // physics arc in progress
 
       const triggerX = step.jumpTriggerX ?? step.targetX;
@@ -1907,6 +1926,11 @@ export class Character {
           return;
         }
       }
+    } else if (this.state === 'fighting') {
+      // No valid in-range target this tick — release the fighting lock so the
+      // movement branches below can correctly drive 'marching' (and so the
+      // animation stops showing 'attack' while the character is walking).
+      this.state = 'marching';
     }
 
     // Find the closest enemy (no range limit) to guide movement
@@ -2021,7 +2045,10 @@ export class Character {
       this.requestPath(this.defendTargetX, this.floorY, navGraph, dt);
       this.followPath(dt);
     } else {
-      this.state = 'fighting'; // holding the patrol spot
+      // Holding the patrol spot — keep state as 'marching' so the idle/walk
+      // hysteresis kicks in. 'fighting' here would lock the attack animation
+      // even with no target, making the character look like they're shadowboxing.
+      this.state = 'marching';
     }
   }
 
