@@ -238,7 +238,7 @@ export class Game {
       view: canvas,
       width:  VIEWPORT_WIDTH,
       height: GAME_HEIGHT,
-      backgroundColor: 0x1a1a2e,
+      backgroundColor: 0x87ceeb,
       antialias: true,
     });
 

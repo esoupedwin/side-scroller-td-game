@@ -9,13 +9,14 @@ import type { CoinBoxDef } from './maps';
 export function buildBackground(stage: PIXI.Container, worldWidth: number) {
   const g = new PIXI.Graphics();
 
-  // Sky
-  g.beginFill(0x1a1a2e);
+  // Sky — daytime light blue
+  g.beginFill(0x87ceeb);
   g.drawRect(0, 0, worldWidth, GROUND_Y);
   g.endFill();
 
-  // Distant mountains — proportionally scaled to world width
-  g.beginFill(0x2d2d44);
+  // Distant mountains — proportionally scaled to world width.
+  // Lighter atmospheric blue-gray to feel like daytime haze.
+  g.beginFill(0x9aaab8);
   const fracs: [number, number][] = [
     [0,     200], [0.037, 140], [0.074, 180], [0.111, 130], [0.157, 160],
     [0.204, 120], [0.250, 155], [0.296, 135], [0.343, 165], [0.389, 140],
@@ -27,16 +28,24 @@ export function buildBackground(stage: PIXI.Container, worldWidth: number) {
   g.closePath();
   g.endFill();
 
-  // Stars
-  g.beginFill(0xffffff);
+  // Clouds — soft white puffs scattered across the upper half of the sky.
+  // Each cloud is a cluster of overlapping circles.
   const rng = mulberry32(42);
-  for (let i = 0; i < 60; i++) {
-    const sx = rng() * worldWidth;
-    const sy = rng() * (GROUND_Y - 40);
-    const sr = rng() * 1.5 + 0.3;
-    g.drawCircle(sx, sy, sr);
+  const cloudCount = Math.max(8, Math.round(worldWidth / 280));
+  for (let i = 0; i < cloudCount; i++) {
+    const cx       = rng() * worldWidth;
+    const cy       = 40 + rng() * (GROUND_Y * 0.55 - 40);
+    const baseR    = 18 + rng() * 14;
+    const puffs    = 4 + Math.floor(rng() * 3);
+    g.beginFill(0xffffff, 0.85);
+    for (let p = 0; p < puffs; p++) {
+      const ox = (rng() - 0.5) * baseR * 2.2;
+      const oy = (rng() - 0.5) * baseR * 0.6;
+      const r  = baseR * (0.7 + rng() * 0.5);
+      g.drawCircle(cx + ox, cy + oy, r);
+    }
+    g.endFill();
   }
-  g.endFill();
 
   stage.addChild(g);
 }
