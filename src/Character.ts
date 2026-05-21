@@ -15,7 +15,11 @@ import {
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
-import { type LoadedSpriteSet, type AnimationName, getAnimFps, getSpriteScale, getFeetAnchorY } from './SpriteRegistry';
+import {
+  type LoadedSpriteSet, type BodyAnimName, type LegsAnimName,
+  getBodyAnimFps, getBodySpriteScale, getBodyFeetAnchorY,
+  getLegsAnimFps, getLegsSpriteScale, getLegsFeetAnchorY,
+} from './SpriteRegistry';
 import { type Tribe, tribeForSide } from './Tribes';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
@@ -152,7 +156,7 @@ export class Character {
   // direction, even when state isn't 'fighting' (Rush/Collect fire while
   // moving without flipping into fighting state).
   private attackFacingTimer    = 0;
-  // Seconds since the character's x last changed. Used by selectAnimation to
+  // Seconds since the character's x last changed. Used by selectAnimations to
   // fall back to 'idle' when the state machine still says 'marching' but the
   // character is effectively stationary (blocked, no target, etc.).
   private stillTimer            = 0;
@@ -163,10 +167,13 @@ export class Character {
   private legL:     PIXI.Container | null = null;
   private legR:     PIXI.Container | null = null;
   private legPhase: number = Math.random() * Math.PI * 2;  // stagger across characters
-  private spriteSet:          LoadedSpriteSet | null = null;
-  private animSprite:         PIXI.AnimatedSprite  | null = null;
-  private animSpriteBaseScale = 1;
-  private currentAnimName:    AnimationName | null = null;
+  private spriteSet:        LoadedSpriteSet | null = null;
+  private bodySprite:       PIXI.AnimatedSprite | null = null;
+  private legsSprite:       PIXI.AnimatedSprite | null = null;
+  private bodyBaseScale     = 1;
+  private legsBaseScale     = 1;
+  private currentBodyAnim:  BodyAnimName | null = null;
+  private currentLegsAnim:  LegsAnimName | null = null;
   private coinPickupCooldown = 0;
   private coinThrowTimer     = -1;  // countdown before throw; -1 = not winding up
   private pendingHitJump     = false;
@@ -348,74 +355,135 @@ export class Character {
   }
 
   /** Render scale that makes a frame `frameH` tall display at `config.height × spriteScale` on screen. */
-  private animScaleFor(animName: AnimationName, frameH: number): number {
-    return getSpriteScale(this.tribe, this.config.type, animName) * this.config.height / frameH;
+  private animScaleFor(layer: 'body' | 'legs', animName: BodyAnimName | LegsAnimName, frameH: number): number {
+    const scale = layer === 'body'
+      ? getBodySpriteScale(this.tribe, this.config.type, animName as BodyAnimName)
+      : getLegsSpriteScale(this.tribe, this.config.type, animName as LegsAnimName);
+    return scale * this.config.height / frameH;
   }
 
   private buildAnimSprite() {
     const set = this.spriteSet!;
-    const frames = set.walk ?? set.idle ?? set.attack;
-    if (!frames) return;
+    // Pick a starting frame set for each layer — prefer walk, fall back as needed.
+    const startBodyName: BodyAnimName | null =
+      set.body.walk   ? 'walk'   :
+      set.body.idle   ? 'idle'   :
+      set.body.attack ? 'attack' :
+      set.body.carry  ? 'carry'  : null;
+    const startLegsName: LegsAnimName | null =
+      set.legs.walk ? 'walk' :
+      set.legs.idle ? 'idle' : null;
 
-    const startAnim: AnimationName = set.walk ? 'walk' : set.idle ? 'idle' : 'attack';
-    const anim = new PIXI.AnimatedSprite(frames);
-    anim.anchor.set(0.5, getFeetAnchorY(this.tribe, this.config.type, startAnim));
-    anim.y = this.config.height;  // container origin = head; feet = head + height
-    this.animSpriteBaseScale = this.animScaleFor(startAnim, frames[0].height);
-    anim.scale.set(this.animSpriteBaseScale);
-    anim.animationSpeed = getAnimFps(this.tribe, this.config.type, startAnim) / 60;
-    anim.loop = true;
-    anim.play();
-    this.animSprite      = anim;
-    this.currentAnimName = startAnim;
-    this.container.addChild(anim);
+    if (!startBodyName || !startLegsName) return;
+    const bodyFrames = set.body[startBodyName]!;
+    const legsFrames = set.legs[startLegsName]!;
+
+    // Legs first so they render BEHIND the body.
+    const legs = new PIXI.AnimatedSprite(legsFrames);
+    legs.anchor.set(0.5, getLegsFeetAnchorY(this.tribe, this.config.type, startLegsName));
+    legs.y = this.config.height;
+    this.legsBaseScale = this.animScaleFor('legs', startLegsName, legsFrames[0].height);
+    legs.scale.set(this.legsBaseScale);
+    legs.animationSpeed = getLegsAnimFps(this.tribe, this.config.type, startLegsName) / 60;
+    legs.loop = true;
+    legs.play();
+    this.legsSprite      = legs;
+    this.currentLegsAnim = startLegsName;
+    this.container.addChild(legs);
+
+    const body = new PIXI.AnimatedSprite(bodyFrames);
+    body.anchor.set(0.5, getBodyFeetAnchorY(this.tribe, this.config.type, startBodyName));
+    body.y = this.config.height;
+    this.bodyBaseScale = this.animScaleFor('body', startBodyName, bodyFrames[0].height);
+    body.scale.set(this.bodyBaseScale);
+    body.animationSpeed = getBodyAnimFps(this.tribe, this.config.type, startBodyName) / 60;
+    body.loop = true;
+    body.play();
+    this.bodySprite      = body;
+    this.currentBodyAnim = startBodyName;
+    this.container.addChild(body);
   }
 
-  private selectAnimation(): AnimationName {
+  /**
+   * Choose the target {body, legs} anim from the current state.
+   * Legs follow the walk/idle hysteresis. Body lights up `attack` whenever
+   * the character fired recently (even if not in fighting state, e.g. Rush
+   * units firing while marching).
+   */
+  private selectAnimations(): { body: BodyAnimName; legs: LegsAnimName } {
     // Asymmetric hysteresis on idle↔walk so single-tick movement noise doesn't
     // thrash the animation:
-    //   - already in walk/carry → keep moving unless still for > 0.15 s
-    //   - already in idle/attack → only switch to walk after 0.05 s of motion
-    const wasMoving = this.currentAnimName === 'walk' || this.currentAnimName === 'carry';
+    //   - already in walk   → keep moving unless still for > 0.15 s
+    //   - already in idle   → only switch to walk after 0.05 s of motion
+    const wasMoving = this.currentLegsAnim === 'walk';
     const inMotion  = wasMoving ? this.stillTimer < 0.15 : this.movingTimer > 0.05;
+    const legs: LegsAnimName = inMotion ? 'walk' : 'idle';
 
-    if (this.carryingCoin || this.state === 'returning') return inMotion ? 'carry' : 'idle';
-    if (this.state === 'fighting') return 'attack';
-    if (this.state === 'marching' || this.state === 'collecting') return inMotion ? 'walk' : 'idle';
-    return 'idle';
+    const recentlyFired = this.state === 'fighting' || this.attackFacingTimer > 0;
+    let body: BodyAnimName;
+    if (recentlyFired)                                              body = 'attack';
+    else if (this.carryingCoin || this.state === 'returning')       body = 'carry';
+    else if (this.state === 'marching' || this.state === 'collecting')
+      body = inMotion ? 'walk' : 'idle';
+    else                                                            body = 'idle';
+
+    return { body, legs };
   }
 
-  private switchAnimation(name: AnimationName) {
-    const anim = this.animSprite;
-    const set  = this.spriteSet;
-    if (!anim || !set) return;
+  private switchBodyAnimation(name: BodyAnimName) {
+    const sprite = this.bodySprite;
+    const set    = this.spriteSet?.body;
+    if (!sprite || !set) return;
 
-    // Fallback order so a missing animation uses the closest available substitute
-    const fallback: Record<AnimationName, AnimationName[]> = {
-      idle:       ['idle', 'walk'],
-      walk:       ['walk', 'idle'],
-      attack:     ['attack', 'idle', 'walk'],
-      attackWalk: ['attackWalk', 'attack', 'walk'],
-      carry:      ['carry', 'walk', 'idle'],
+    const fallback: Record<BodyAnimName, BodyAnimName[]> = {
+      idle:   ['idle',   'walk'],
+      walk:   ['walk',   'idle'],
+      attack: ['attack', 'idle',   'walk'],
+      carry:  ['carry',  'walk',   'idle'],
     };
     let frames: PIXI.Texture[] | undefined;
-    let picked: AnimationName = name;
+    let picked: BodyAnimName = name;
     for (const n of fallback[name]) {
       if (set[n]) { frames = set[n]; picked = n; break; }
     }
     if (!frames) return;
 
-    anim.textures            = frames;
-    anim.anchor.set(0.5, getFeetAnchorY(this.tribe, this.config.type, picked));
-    anim.animationSpeed      = getAnimFps(this.tribe, this.config.type, picked) / 60;
-    this.animSpriteBaseScale = this.animScaleFor(picked, frames[0].height);
-    anim.play();
-    this.currentAnimName = name;
+    sprite.textures       = frames;
+    sprite.anchor.set(0.5, getBodyFeetAnchorY(this.tribe, this.config.type, picked));
+    sprite.animationSpeed = getBodyAnimFps(this.tribe, this.config.type, picked) / 60;
+    this.bodyBaseScale    = this.animScaleFor('body', picked, frames[0].height);
+    sprite.play();
+    this.currentBodyAnim = name;
+  }
+
+  private switchLegsAnimation(name: LegsAnimName) {
+    const sprite = this.legsSprite;
+    const set    = this.spriteSet?.legs;
+    if (!sprite || !set) return;
+
+    const fallback: Record<LegsAnimName, LegsAnimName[]> = {
+      idle: ['idle', 'walk'],
+      walk: ['walk', 'idle'],
+    };
+    let frames: PIXI.Texture[] | undefined;
+    let picked: LegsAnimName = name;
+    for (const n of fallback[name]) {
+      if (set[n]) { frames = set[n]; picked = n; break; }
+    }
+    if (!frames) return;
+
+    sprite.textures       = frames;
+    sprite.anchor.set(0.5, getLegsFeetAnchorY(this.tribe, this.config.type, picked));
+    sprite.animationSpeed = getLegsAnimFps(this.tribe, this.config.type, picked) / 60;
+    this.legsBaseScale    = this.animScaleFor('legs', picked, frames[0].height);
+    sprite.play();
+    this.currentLegsAnim = name;
   }
 
   private tickAnimSprite() {
-    const anim = this.animSprite;
-    if (!anim) return;
+    const body = this.bodySprite;
+    const legs = this.legsSprite;
+    if (!body || !legs) return;
 
     // Face the attack target while fighting OR within the brief post-fire window
     // (Rush/Collect fire opportunistically without entering fighting state).
@@ -423,33 +491,37 @@ export class Character {
     const facingDir = (this.state === 'fighting' || this.attackFacingTimer > 0)
       ? this.lastAttackDir
       : this.lastMoveDir;
-    anim.scale.x    = this.animSpriteBaseScale * facingDir;
+    body.scale.x = this.bodyBaseScale * facingDir;
+    legs.scale.x = this.legsBaseScale * facingDir;
 
-    const target = this.selectAnimation();
-    if (target !== this.currentAnimName) this.switchAnimation(target);
+    const target = this.selectAnimations();
+    if (target.body !== this.currentBodyAnim) this.switchBodyAnimation(target.body);
+    if (target.legs !== this.currentLegsAnim) this.switchLegsAnimation(target.legs);
 
     this.updateLocomotionFps();
   }
 
   /**
-   * Scale the walk/carry/attackWalk animation speed by the character's current
-   * effective moveSpeed vs its config baseline, so promotions, carry slowdown,
-   * and speed power-ups keep the stride visually in sync with the actual pace.
+   * Scale the locomotion animation speed by the character's current effective
+   * moveSpeed vs its config baseline, so promotions, carry slowdown, and speed
+   * power-ups keep the stride visually in sync with the actual pace.
    * Idle and attack are stationary — left at their baseline fps.
    */
   private updateLocomotionFps() {
-    const anim = this.animSprite;
-    const name = this.currentAnimName;
-    if (!anim || !name) return;
-    if (name !== 'walk' && name !== 'carry' && name !== 'attackWalk') return;
+    const ratio = this.moveSpeed / this.config.speed;
 
-    const baselineFps = getAnimFps(this.tribe, this.config.type, name);
-    const ratio       = this.moveSpeed / this.config.speed;
-    const targetSpeed = (baselineFps * ratio) / 60;
+    const legs = this.legsSprite;
+    const legsName = this.currentLegsAnim;
+    if (legs && legsName === 'walk') {
+      const target = (getLegsAnimFps(this.tribe, this.config.type, legsName) * ratio) / 60;
+      if (Math.abs(legs.animationSpeed - target) > 1e-4) legs.animationSpeed = target;
+    }
 
-    // PIXI dirty-flags on every write; only push when it would actually change.
-    if (Math.abs(anim.animationSpeed - targetSpeed) > 1e-4) {
-      anim.animationSpeed = targetSpeed;
+    const body = this.bodySprite;
+    const bodyName = this.currentBodyAnim;
+    if (body && bodyName && (bodyName === 'walk' || bodyName === 'carry')) {
+      const target = (getBodyAnimFps(this.tribe, this.config.type, bodyName) * ratio) / 60;
+      if (Math.abs(body.animationSpeed - target) > 1e-4) body.animationSpeed = target;
     }
   }
 

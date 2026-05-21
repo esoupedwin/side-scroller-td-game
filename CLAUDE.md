@@ -47,58 +47,80 @@ Source files import only from `constants.ts`, never directly from `gameConfig.ts
 
 ## Sprite animation system
 
-Characters use `PIXI.AnimatedSprite` when a sprite sheet is available for their type; otherwise they render with the existing `PIXI.Graphics` approach. The two paths are transparent to all callers — the same `Character` class handles both.
+Characters that have layered sprite assets render as **two stacked `PIXI.AnimatedSprite` layers** that animate independently. Otherwise they fall back to the existing `PIXI.Graphics` rendering path. The two paths are transparent to all callers — the same `Character` class handles both.
+
+- **Body** (front layer): torso/arms/head — animations `idle`, `walk`, `attack`, `carry`.
+- **Legs** (back layer): legs only — animations `idle`, `walk`.
+
+Per-layer animation lets any body pose pair with any leg state. A marching rifleman firing opportunistically gets legs=`walk` + body=`attack` for free, without a dedicated `attackWalk` sheet.
 
 ### Adding sprites for a character type
 
-1. Place sprite sheet PNGs in `public/sprites/<type>/` (e.g. `public/sprites/warrior/walk.png`). These are served at `/sprites/<type>/<anim>.png` by Vite.
-2. Add an entry to `SPRITE_DEFS` in `src/SpriteRegistry.ts`:
+1. Place sprite sheet PNGs under `public/sprites/<tribe>/<type>/`:
+   ```
+   public/sprites/<tribe>/<type>/
+     body/{ idle.png, walk.png, attack.png, carry.png }
+     legs/{ idle.png, walk.png }
+   ```
+   Served by Vite at `/sprites/<tribe>/<type>/body/<anim>.png` and `…/legs/<anim>.png`.
+
+2. Add an entry to `SPRITE_DEFS` in `src/SpriteRegistry.ts`. The convenience helper `makeTypeDefs(tribe, type)` emits both layers in one call with shared default fps/spriteScale:
 
 ```typescript
-warrior: {
-  idle:       { path: '/sprites/warrior/idle.png',        rows: 1, fps:  8, spriteScale: 1.5 },
-  walk:       { path: '/sprites/warrior/walk.png',        rows: 2, fps: 10, spriteScale: 1.5 },
-  attack:     { path: '/sprites/warrior/attack.png',      rows: 1, fps: 12, spriteScale: 1.5 },
-  attackWalk: { path: '/sprites/warrior/attack_walk.png', rows: 1, fps: 12, spriteScale: 1.5 },
-  carry:      { path: '/sprites/warrior/carry.png',       rows: 4, fps: 10, spriteScale: 1.5 },
+tomaro: {
+  warrior: makeTypeDefs('tomaro', 'warrior'),
+  // …
 },
 ```
 
-Sheets are always laid out left-to-right, top-to-bottom with exactly `FRAMES_PER_ROW` (6) frames per row. Frame width is `sheet.width / 6`; frame height is `sheet.height / rows`. The actual number of frames is **auto-detected** by scanning cells for transparent content — adding or removing frames within an existing row layout requires no config change, as long as `rows` is still correct. The last row may be partially filled. Only the animations you define are loaded — missing entries fall back to the nearest substitute (e.g. `carry` falls back to `walk` then `idle`). A type with no entry at all continues to use Graphics.
+Sheets are laid out left-to-right, top-to-bottom with exactly `FRAMES_PER_ROW` (6) frames per row. Frame height is fixed by artist convention (`FRAME_HEIGHT_PX = 600`); row count is **auto-derived** from `sheet.height / FRAME_HEIGHT_PX` (override via the `rows` field per def if needed). The actual frame count is auto-detected by scanning cells for fill ratio above `ALPHA_THRESHOLD` — adding or removing frames within an existing row layout requires no config change. Only animations whose PNGs exist are loaded; missing entries fall back to the nearest substitute within the same layer (e.g. body `carry` → `walk` → `idle`).
+
+**Both layers must be present for a type to use the sprite path.** If only one of body/legs has any PNG on disk, the loader logs `[sprites] tribe/type: only <layer> loaded — falling back to Graphics` and caches `null`. If neither layer is present, the cache is silently `null` and the type uses Graphics.
+
+The two layers should share frame dimensions (same cell width and height) — they share an anchor and scale, and mismatched dimensions emit a `console.warn` at load time.
 
 ### Key types and fields (`SpriteRegistry.ts`)
 
 | Symbol | Description |
 |---|---|
-| `AnimationName` | `'idle' \| 'walk' \| 'attack' \| 'attackWalk' \| 'carry'` |
-| `SpriteAnimDef` | `{ path, cols, rows, fps, spriteScale }` — one animation's sheet metadata |
-| `LoadedSpriteSet` | `Partial<Record<AnimationName, PIXI.Texture[]>>` — extracted frames per animation |
+| `BodyAnimName` | `'idle' \| 'walk' \| 'attack' \| 'carry'` |
+| `LegsAnimName` | `'idle' \| 'walk'` |
+| `SpriteLayerAnimDef` | `{ path, fps, spriteScale, feetAnchorY?, rows? }` — one animation's sheet metadata |
+| `SpriteSetDef` | `{ body: BodyLayerDef, legs: LegsLayerDef }` — full per-type config |
+| `LoadedSpriteSet` | `{ body: Partial<Record<BodyAnimName, Texture[]>>, legs: … }` — extracted frames per layer |
+| `getBody{AnimFps,SpriteScale,FeetAnchorY}(tribe, type, anim)` | Per-layer getters used by Character |
+| `getLegs{AnimFps,SpriteScale,FeetAnchorY}(tribe, type, anim)` | Per-layer getters used by Character |
 | `preloadAllSprites()` | Called once at startup (`main.ts`) before `Game` is created; populates the module-level cache |
-| `getSpriteSet(type)` | Sync lookup called per `new Character()`; returns cached frames or `null` |
+| `getSpriteSet(tribe, type)` | Sync lookup called per `new Character()`; returns the layered set or `null` |
 
 ### `spriteScale`
 
-Sprite sheets typically have empty padding around the art. `spriteScale` compensates: the sprite's rendered height is `config.height × spriteScale`, so the actual character art fills roughly the same vertical space as the Graphics equivalent. Start at `1.5` and tune visually.
+Sprite sheets typically have empty padding around the art. `spriteScale` compensates: rendered sprite height = `config.height × spriteScale`. Both layers should use the same value so they stay in lock-step. `makeTypeDefs` defaults to `4.0`.
 
 ### Animation state machine (inside `Character`)
 
-`tickAnimSprite()` runs each tick and:
-- Sets `scale.x = animSpriteBaseScale × lastMoveDir` to flip the sprite for left-moving characters (sheets are drawn facing right).
-- Calls `selectAnimation()` to pick the target `AnimationName` from the character's current `state` and `carryingCoin` flag.
-- Calls `switchAnimation(name)` only when the animation actually changes — PIXI re-starts playback from frame 0 on a texture swap.
+Each character has two sprites: `bodySprite` and `legsSprite`. Legs are added to the container **before** the body so the body renders in front. `tickAnimSprite()` runs each tick and:
+- Computes a shared `facingDir` and sets `scale.x = baseScale × facingDir` on both layers — sheets are drawn facing right.
+- Calls `selectAnimations()` to pick a `{ body, legs }` pair from current state.
+- Calls `switchBodyAnimation(name)` / `switchLegsAnimation(name)` only when the relevant anim actually changes — PIXI re-starts playback from frame 0 on a texture swap, so guarded by `currentBodyAnim` / `currentLegsAnim`.
 
-| Character state | Animation chosen |
+`selectAnimations()` logic:
+
+| Layer | Rule |
 |---|---|
-| `returning` or `carryingCoin` | `carry` |
-| `fighting` | `attack` |
-| `marching` or `collecting` | `walk` |
-| anything else | `idle` |
+| Legs | `walk` when in motion (asymmetric hysteresis on `stillTimer` / `movingTimer`), else `idle` |
+| Body — recently fired (`state === 'fighting' \|\| attackFacingTimer > 0`) | `attack` |
+| Body — carrying coin or returning home | `carry` |
+| Body — marching or collecting | `walk` if in motion, else `idle` |
+| Body — anything else | `idle` |
+
+`updateLocomotionFps()` scales the playback rate of the legs `walk` anim and the body `walk` / `carry` anims by `moveSpeed / config.speed` so promotions, carry slowdown, and speed power-ups keep the stride visually in sync. `attack` and `idle` stay at their baseline fps.
 
 ### Startup flow
 
-`main.ts` does `await preloadAllSprites()` (top-level await in a `<script type="module">`) before constructing `Game`. Sprites that fail to load (404) are caught silently — the cache stores `null` and the character falls back to Graphics at construction time.
+`main.ts` does `await preloadAllSprites()` (top-level await in a `<script type="module">`) before constructing `Game`. Sprites that fail to load (404) are caught silently per layer; the cache decision is made after both layers have been attempted.
 
-> To add a new animation state: add the name to `AnimationName`, extend the fallback table in `switchAnimation`, and add a case in `selectAnimation`.
+> To add a new body or legs animation: extend `BodyAnimName` / `LegsAnimName`, add the entry to `makeTypeDefs`, extend the fallback table in `switchBodyAnimation` / `switchLegsAnimation`, and add a case in `selectAnimations`.
 
 ## Map system
 
@@ -438,6 +460,7 @@ Unit selection prioritises cheap warriors when outnumbered or broke; riflemen wh
 - **`requestPath` floor level**: always pass the character's actual `this.floorY` (not a hardcoded `GROUND_Y`) as the destination floor when the behavior should keep the character at its current elevation (harass, defend, rally). Only pass a specific surface Y when navigating to a different surface is intentional (e.g. chasing a coin on a platform).
 - **`surfaceAt` x parameter**: since `NavGraph.build()` splits each surface into subsegments at block intersections, multiple subsegments can share the same `floorY`. Always pass `x` to `surfaceAt` so the correct subsegment is selected. Omitting `x` returns an arbitrary same-Y surface, which causes A* to route from the wrong starting node and may produce a path that walks backward into a block.
 - **Sprite `spriteScale` tuning**: the rendered sprite height is `config.height × spriteScale`. If the sheet has heavy padding the character will appear smaller than its physics body — increase `spriteScale` until the art matches. Conversely, a value too large pushes the sprite well above the character's feet.
-- **Sprite facing direction**: sheets must be drawn facing **right**. `tickAnimSprite` flips `scale.x` using `lastMoveDir`; the absolute scale is stored in `animSpriteBaseScale` and must not be written directly on `animSprite.scale.x` or the flip sign is lost on the next tick.
-- **`switchAnimation` re-starts playback**: assigning new textures to an `AnimatedSprite` via `.textures = frames` resets the frame index to 0. Only call `switchAnimation` when the target animation name actually changes (guarded by `currentAnimName`), otherwise the sprite stutters back to frame 0 every tick.
+- **Sprite facing direction**: sheets must be drawn facing **right**. `tickAnimSprite` flips `scale.x` on both `bodySprite` and `legsSprite` using a shared `facingDir`; the absolute scales are stored in `bodyBaseScale` / `legsBaseScale` and must not be written directly to `sprite.scale.x` or the flip sign is lost on the next tick.
+- **`switchBodyAnimation` / `switchLegsAnimation` re-start playback**: assigning new textures to an `AnimatedSprite` via `.textures = frames` resets the frame index to 0. Only call the switchers when the target animation name actually changes (guarded by `currentBodyAnim` / `currentLegsAnim`), otherwise the sprite stutters back to frame 0 every tick.
+- **Both layers required**: a type is sprite-rendered only if both `body/` and `legs/` have at least one PNG present. If only one layer's PNGs are on disk, the loader warns and caches `null` — the type falls back to Graphics rendering. Drop in both layers together when adding a new type's sprite assets.
 - **New melee unit types**: add the type to both the `warrior || heavy` branch in `attackEnemy` and the early-return guard in `canSnapHit`. Omitting either causes the unit to silently skip attacks or mis-evaluate shot feasibility.
