@@ -154,8 +154,20 @@ export class Character {
   private lastAttackDir:       1 | -1 = 1;
   // Seconds remaining where the sprite stays facing the most recent attack
   // direction, even when state isn't 'fighting' (Rush/Collect fire while
-  // moving without flipping into fighting state).
+  // moving without flipping into fighting state). Doubles as the body-attack
+  // hold: while > 0, selectAnimations forces body to 'attack' so the swing
+  // anim plays to completion before switching to walk/idle/carry.
   private attackFacingTimer    = 0;
+  // Pending melee swing — for conscript/warrior/heavy, damage is deferred
+  // until partway through the body attack animation so the swing visually
+  // connects before the hit lands. Re-validated at land time (skip if a
+  // character target died, moved out of reach, etc.).
+  private pendingMeleeSwing: {
+    target:   Character | null;        // null = tower hit
+    damage:   number;
+    delay:    number;
+    onTower?: (dmg: number) => void;
+  } | null = null;
   // Seconds since the character's x last changed. Used by selectAnimations to
   // fall back to 'idle' when the state machine still says 'marching' but the
   // character is effectively stationary (blocked, no target, etc.).
@@ -1330,6 +1342,7 @@ export class Character {
     this.attackTimer        = Math.max(0, this.attackTimer        - ctx.dt);
     this.evasiveJumpTimer   = Math.max(0, this.evasiveJumpTimer   - ctx.dt);
     this.attackFacingTimer  = Math.max(0, this.attackFacingTimer  - ctx.dt);
+    this.tickPendingMeleeSwing(ctx.dt);
 
     if (this.powerUpSpeedTimer > 0) {
       this.powerUpSpeedTimer -= ctx.dt;
@@ -2152,15 +2165,65 @@ export class Character {
     return { tx: sx + dist * dir, ty: sy };
   }
 
+  /**
+   * Duration of the body anim in seconds, or 0 if the type has no sprite for it
+   * (Graphics fallback). Used to hold the 'attack' body anim through one full
+   * cycle and to time the melee wind-up.
+   */
+  private bodyAnimDuration(anim: BodyAnimName): number {
+    const frames = this.spriteSet?.body[anim];
+    if (!frames) return 0;
+    const fps = getBodyAnimFps(this.tribe, this.config.type, anim);
+    return frames.length / fps;
+  }
+
+  /**
+   * Sets up the attack-facing + body-attack-hold timer and returns the wind-up
+   * delay for melee swings (seconds until the hit lands). Ranged attacks fire
+   * immediately and don't use the wind-up, but still get the longer facing
+   * hold so the attack body anim plays through.
+   */
+  private beginAttack(): number {
+    const animDur = this.bodyAnimDuration('attack');
+    // Hold body on 'attack' for at least one full cycle (or 0.3s default if no sprite).
+    this.attackFacingTimer = Math.max(this.attackFacingTimer, animDur > 0 ? animDur : 0.3);
+    // Melee hit lands ~40% into the swing anim — feels like the moment of contact.
+    return animDur > 0 ? animDur * 0.4 : 0.15;
+  }
+
+  /**
+   * Advance the pending melee swing's wind-up timer. When it expires the swing
+   * lands: apply damage to the target (or tower) if the target is still valid.
+   * Targets that died or moved out of melee range simply waste the swing — no
+   * homing — which matches how melee feels visually.
+   */
+  private tickPendingMeleeSwing(dt: number) {
+    const swing = this.pendingMeleeSwing;
+    if (!swing) return;
+    swing.delay -= dt;
+    if (swing.delay > 0) return;
+    this.pendingMeleeSwing = null;
+    if (this.isDead) return;
+    if (swing.target) {
+      if (swing.target.isDead) return;
+      const reach = this.config.attackRange + this.config.width * 0.5 + swing.target.config.width * 0.5 + 8;
+      if (Math.abs(swing.target.x - this.x) > reach) return;
+      swing.target.takeDamage(swing.damage, swing.damage > 0 ? this : undefined);
+    } else if (swing.onTower) {
+      swing.onTower(swing.damage);
+    }
+  }
+
   private attackEnemy(target: Character, onFire?: (r: FireRequest) => void) {
     if (this.attackTimer > 0) return;
+    if (this.pendingMeleeSwing) return;  // wait for the previous swing to land
     const dirSign = Math.sign(target.x - this.x);
     if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
-    this.attackFacingTimer = 0.3;
+    const windUp = this.beginAttack();
     const miss   = Math.random() < this.config.critical;
     const damage = miss ? 0 : this.effectiveAtk;
     if (this.config.type === 'conscript' || this.config.type === 'warrior' || this.config.type === 'heavy') {
-      target.takeDamage(damage, miss ? undefined : this);
+      this.pendingMeleeSwing = { target, damage, delay: windUp };
     } else if (onFire) {
       if (this.config.type === 'grenadier') {
         // Lead targeting: predict where the target will be when the grenade arrives.
@@ -2205,13 +2268,14 @@ export class Character {
     onDamageTower?: (dmg: number) => void,
   ) {
     if (this.attackTimer > 0) return;
+    if (this.pendingMeleeSwing) return;  // wait for the previous swing to land
     const dirSign = Math.sign(towerFrontX - this.x);
     if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
-    this.attackFacingTimer = 0.3;
+    const windUp = this.beginAttack();
     this.attackTimer = this.config.fireRate;
     if (Math.random() < this.config.critical) return;  // miss — silent, towers have no label system
     if (this.config.type === 'warrior' || this.config.type === 'heavy') {
-      onDamageTower?.(this.effectiveAtk);
+      this.pendingMeleeSwing = { target: null, damage: this.effectiveAtk, delay: windUp, onTower: onDamageTower };
     } else if (onFire) {
       if (this.config.type === 'grenadier') {
         onFire({
