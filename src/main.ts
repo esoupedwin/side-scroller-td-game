@@ -12,10 +12,12 @@ const cpuCoinAmountEl = document.getElementById('cpu-coin-amount')!;
 const cpuCharsListEl  = document.getElementById('cpu-chars-list')!;
 const enemyTowerHpEl  = document.getElementById('enemy-tower-hp')!;
 
-// All spawnable unit types, in display order
+// All spawnable unit types, in display order.
+// Tanker is intentionally omitted — type still exists for CPU AI use, but
+// the player can no longer manually spawn it.
 const UNIT_TYPES = [
-  'conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'medic',
-  'heavy', 'tanker', 'grenadier', 'rocketeer',
+  'conscript', 'warrior', 'archer', 'rifleman', 'sniper',
+  'heavy', 'grenadier', 'rocketeer',
 ] as const;
 type UnitType = typeof UNIT_TYPES[number];
 

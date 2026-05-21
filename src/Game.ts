@@ -37,7 +37,7 @@ import {
   VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, SNIPER, MEDIC, HEAVY, TANKER, GRENADIER, ROCKETEER,
+  CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, SNIPER, HEAVY, TANKER, GRENADIER, ROCKETEER,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
   GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY,
   ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX, ROCKET_SPLASH_MIN_FRAC,
@@ -77,7 +77,6 @@ const CHAR_CONFIGS = {
   archer:    ARCHER,
   rifleman:  RIFLEMAN,
   sniper:    SNIPER,
-  medic:     MEDIC,
   heavy:     HEAVY,
   tanker:    TANKER,
   grenadier: GRENADIER,
@@ -455,7 +454,7 @@ export class Game {
   // ── Spawn ────────────────────────────────────────────────────────────────────
 
   /** Returns false if the player cannot afford this unit. */
-  spawnPlayer(type: 'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer'): boolean {
+  spawnPlayer(type: 'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer'): boolean {
     if (this.isOver) return false;
     const cost = CHAR_COST[type];
     if (this.coinBalance < cost) return false;
@@ -495,8 +494,7 @@ export class Game {
       type === 'heavy'    ? 1.8 :
       type === 'sniper'   ? 1.4 :
       type === 'rifleman' ? 1.3 :
-      type === 'archer'   ? 1.2 :
-      type === 'medic'    ? 0.5 : 1.0;
+      type === 'archer'   ? 1.2 : 1.0;
     const threat = (chars: Character[], discountCollecting: boolean) =>
       chars.reduce((s, c) => {
         const behaviorMult = discountCollecting && c.behavior === 'collecting' ? 0.15 : 1.0;
@@ -540,42 +538,48 @@ export class Game {
     const balance   = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
     const spawnX    = self === 'enemy' ? this.enemyTower.frontX : this.playerTower.frontX;
 
-    // How many own units are below half HP
-    const hurting  = selfChars.filter(c => c.hp / c.config.hp < 0.5).length;
-    const hasMedic = selfChars.some(c => c.config.type === 'medic');
-
-    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker';
+    // Tanker is intentionally excluded from every order array — it's hidden
+    // from both the player UI and the CPU until further notice.
+    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'heavy' | 'rocketeer' | 'grenadier';
     let order: UnitType[];
 
+    // Opponent cluster detection: if 3+ opponents sit within CLUSTER_RADIUS
+    // of any single opponent, splash damage is high-value — switch the push
+    // stance into a splash-heavy spawn order.
+    const CLUSTER_RADIUS    = 80;
+    const CLUSTER_THRESHOLD = 3;
+    const opponents = liveChars.filter(c => c.side !== self);
+    let maxCluster = 0;
+    for (const c of opponents) {
+      let count = 0;
+      for (const other of opponents) {
+        if (Math.abs(c.x - other.x) <= CLUSTER_RADIUS) count++;
+      }
+      if (count > maxCluster) maxCluster = count;
+    }
+    const opponentsClustered = maxCluster >= CLUSTER_THRESHOLD;
+
     if (stance === 'push') {
-      // Aggressive push: get a medic if units are hurting, then flood high-damage units
-      const needMedic = hurting >= 1 && !hasMedic && selfChars.length >= 2;
-      if (needMedic) {
-        order = ['medic', 'rifleman', 'heavy', 'tanker', 'warrior', 'archer'];
-      } else if (balance >= CHAR_COST.tanker) {
-        order = ['tanker', 'rifleman', 'heavy', 'warrior', 'archer'];
+      if (opponentsClustered && balance >= CHAR_COST.rocketeer) {
+        // Splash-heavy: opponents are bunched up, prefer rockets/grenades
+        order = ['rocketeer', 'grenadier', 'rifleman', 'heavy', 'warrior', 'archer'];
+      } else if (opponentsClustered && balance >= CHAR_COST.grenadier) {
+        order = ['grenadier', 'rifleman', 'heavy', 'warrior', 'archer'];
       } else {
+        // Aggressive push: flood high-damage units
         order = ['rifleman', 'heavy', 'warrior', 'archer'];
       }
     } else if (stance === 'defend') {
-      // Get a medic early — 1 hurting unit is enough to justify it when squad exists
-      const needMedic = hurting >= 1 && !hasMedic && selfChars.length >= 2;
-      if (needMedic) {
-        order = ['medic', 'warrior', 'archer', 'sniper'];
-      } else if (pressure >= 3) {
+      if (pressure >= 3) {
         // Severely outnumbered — flood cheap units to plug the gap immediately
         order = ['warrior', 'heavy', 'archer', 'sniper'];
       } else {
         // Steady defence: archers for harassment, warriors as frontline wall
-        order = ['archer', 'warrior', 'sniper', 'medic'];
+        order = ['archer', 'warrior', 'sniper'];
       }
     } else {
-      // Economy: invest in better units; get a medic if the squad is hurting
-      if (hurting >= 2 && !hasMedic) {
-        order = ['medic', 'archer', 'warrior'];
-      } else if (balance >= CHAR_COST.tanker && selfChars.length >= 4) {
-        order = ['tanker', 'sniper', 'rifleman', 'archer', 'heavy', 'warrior'];
-      } else if (balance >= CHAR_COST.sniper && selfChars.length >= 3) {
+      // Economy: invest in better units
+      if (balance >= CHAR_COST.sniper && selfChars.length >= 3) {
         order = ['sniper', 'rifleman', 'archer', 'heavy', 'warrior'];
       } else if (balance >= CHAR_COST.rifleman) {
         order = ['rifleman', 'archer', 'heavy', 'warrior'];
@@ -1268,11 +1272,10 @@ export class Game {
     if (liveCoins.length > 0) {
       const active = selfChars.filter(c => c.behavior === 'collecting').length;
       if (active < wantedCollectors) {
-        // Prefer light attackers that are marching (not engaged), closest to a coin
-        // Exclude medics (no combat), tankers and heavies (too valuable for collection runs)
+        // Prefer light attackers that are marching (not engaged), closest to a coin.
+        // Tankers and heavies are too valuable for collection runs.
         const pool = selfChars.filter(
           c => c.behavior === 'attacking'
-            && c.config.type !== 'medic'
             && c.config.type !== 'tanker'
             && c.config.type !== 'heavy'
             && c.state === 'marching',
@@ -1319,7 +1322,7 @@ export class Game {
             c.behavior = 'defend';
             noteDecision(`🛡 Defend wall #${c.id} (${c.config.type})`);
           }
-        } else if (c.config.type !== 'medic') {
+        } else {
           if (c.behavior !== 'harass') {
             c.behavior = 'harass';
             noteDecision(`↯ Harass #${c.id} (${c.config.type})`);

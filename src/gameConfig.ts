@@ -34,14 +34,11 @@ export const GameConfig = {
     coinRecoveryCooldownSec:  2,    // seconds after dropping a coin before pickup is allowed
     hpBarWidth:         28,     // px
     hpBarHeight:        5,      // px
-    healRange: 55,   // px — medic heal radius
-    healRate:  8,    // HP/s healed to the most-injured ally in range
     harassSafetyBuffer: 40,  // px outside enemy tower range where harass units hold
     rangedKiteThreshold: 80, // px — ranged units back away when a melee enemy closes within this distance
     coinThrowScanRange:  80,  // px — scan radius for a new coin after throwing one toward tower
     coinThrowHoldSec:   0.5, // seconds the character holds the coin before releasing the throw
     safeZoneHealRate:    5,  // HP/s passively healed while within own tower's attack range
-    medicPassiveHealRate: 2, // HP/s the medic self-heals regardless of position
     hitJumpChance:    0.75,  // probability of jumping when struck by a projectile
 
     conscript: {
@@ -93,16 +90,6 @@ export const GameConfig = {
       fireRate:    2.8,
       cost:        100,
       critical:    0.05, // 5 % miss chance — trained marksman
-    },
-    medic: {
-      type:        'medic'    as const,
-      hp:          50,
-      speed:       45,
-      attackRange: 0,
-      attackPower: 0,
-      fireRate:    0,
-      cost:        60,
-      critical:    0,    // no attacks
     },
     heavy: {
       type:        'heavy'    as const,

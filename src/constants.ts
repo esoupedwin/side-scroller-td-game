@@ -139,10 +139,7 @@ export const PROMO_ATK_BOOST   = promo.atkBoostPerRank;
 export const PROMO_THRESHOLDS: number[] = [...promo.thresholds];
 
 // ── Characters ───────────────────────────────────────────────────────────────
-export const CHAR_HEAL_RANGE        = ch.healRange;
-export const CHAR_HEAL_RATE         = ch.healRate;
 export const SAFE_ZONE_HEAL_RATE      = ch.safeZoneHealRate;
-export const MEDIC_PASSIVE_HEAL_RATE  = ch.medicPassiveHealRate;
 export const HIT_JUMP_CHANCE        = ch.hitJumpChance;
 export const HARASS_SAFETY_BUFFER   = ch.harassSafetyBuffer;
 export const RANGED_KITE_THRESHOLD  = ch.rangedKiteThreshold;
@@ -158,7 +155,6 @@ export const CHAR_COST = {
   archer:    ch.archer.cost,
   rifleman:  ch.rifleman.cost,
   sniper:    ch.sniper.cost,
-  medic:     ch.medic.cost,
   heavy:     ch.heavy.cost,
   tanker:    ch.tanker.cost,
   grenadier: ch.grenadier.cost,
@@ -224,18 +220,6 @@ export const SNIPER = {
   attackPower: ch.sniper.attackPower,
   fireRate:    ch.sniper.fireRate,
   critical:    ch.sniper.critical,
-  width:       ch.width,
-  height:      ch.height,
-};
-
-export const MEDIC = {
-  type:        ch.medic.type,
-  hp:          ch.medic.hp,
-  speed:       ch.medic.speed,
-  attackRange: ch.medic.attackRange,
-  attackPower: ch.medic.attackPower,
-  fireRate:    ch.medic.fireRate,
-  critical:    ch.medic.critical,
   width:       ch.width,
   height:      ch.height,
 };

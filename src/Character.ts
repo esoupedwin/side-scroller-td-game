@@ -5,7 +5,7 @@ import {
   JUMP_VELOCITY,
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
-  CHAR_HEAL_RANGE, CHAR_HEAL_RATE, SAFE_ZONE_HEAL_RATE, MEDIC_PASSIVE_HEAL_RATE, HIT_JUMP_CHANCE,
+  SAFE_ZONE_HEAL_RATE, HIT_JUMP_CHANCE,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, RANGED_KITE_THRESHOLD,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
@@ -53,7 +53,7 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 
 export interface CharacterConfig {
-  type:        'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'medic' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer';
+  type:        'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer';
   hp:          number;
   speed:       number;
   attackRange: number;
@@ -170,13 +170,7 @@ export class Character {
   private coinPickupCooldown = 0;
   private coinThrowTimer     = -1;  // countdown before throw; -1 = not winding up
   private pendingHitJump     = false;
-  private defendTargetX      = -1;  // -1 = not yet assigned
-  private defendRoamTimer    = 0;
   private healParticleTimer  = 0;
-  private medicHealTimer     = 0;   // > 0 while being healed by a medic this tick
-  private healAura:           PIXI.Graphics | null = null;
-  private healAuraT           = 0;
-  private healAuraActive      = false;
   private readonly healParticles: Array<{
     gfx:  PIXI.Graphics;
     relY: number;
@@ -316,10 +310,6 @@ export class Character {
       this.targetCoin = null;
       if (this.carryingCoin) this.dropCarriedCoin();
     }
-    if (val === 'defend') {
-      this.defendTargetX   = -1;
-      this.defendRoamTimer = 0;
-    }
     this._behavior = val;
   }
 
@@ -331,7 +321,6 @@ export class Character {
     else if (this.config.type === 'archer')     this.buildArcherSprite();
     else if (this.config.type === 'rifleman')   this.buildRiflemanSprite();
     else if (this.config.type === 'sniper')     this.buildSniperSprite();
-    else if (this.config.type === 'medic')      this.buildMedicSprite();
     else if (this.config.type === 'heavy')      this.buildHeavySprite();
     else if (this.config.type === 'tanker')     this.buildTankerSprite();
     else if (this.config.type === 'grenadier')  this.buildGrenadierSprite();
@@ -974,46 +963,6 @@ export class Character {
     this.container.addChild(g);
   }
 
-  private buildMedicSprite() {
-    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
-    const w = this.config.width, h = this.config.height;
-    this.buildAnimLegs(-w * 0.325, w * 0.325, w * 0.35, h * 0.45, 0.6);
-
-    const g = new PIXI.Graphics();
-    // White coat
-    g.beginFill(0xffffff, 0.95);
-    g.drawRoundedRect(-w / 2, h * 0.2, w, h * 0.4, 4);
-    g.endFill();
-
-    // Red cross on coat
-    const cx = 0, cy = h * 0.32;
-    g.beginFill(0xe63946);
-    g.drawRect(cx - 2, cy - 7, 4, 14);
-    g.drawRect(cx - 7, cy - 2, 14, 4);
-    g.endFill();
-
-    // Head
-    g.beginFill(color, 0.9);
-    g.drawCircle(0, h * 0.1, w * 0.38);
-    g.endFill();
-
-    // Medic cap
-    g.beginFill(0xffffff, 0.9);
-    g.drawRect(-w * 0.28, h * 0.02 - 7, w * 0.56, 5);
-    g.endFill();
-    g.beginFill(0xe63946);
-    g.drawRect(-1.5, h * 0.02 - 9, 3, 8);
-    g.drawRect(-5,   h * 0.02 - 6, 10, 3);
-    g.endFill();
-
-    // Pulsing heal aura — inserted at index 0 so it sits behind the sprite
-    const aura = new PIXI.Graphics();
-    this.container.addChildAt(aura, 0);
-    this.healAura = aura;
-
-    this.container.addChild(g);
-  }
-
   // ── HP bar ───────────────────────────────────────────────────────────────────
 
   get maxHp() { return this.config.hp * (1 + this.rank * PROMO_HP_BOOST); }
@@ -1270,10 +1219,6 @@ export class Character {
     this.drawBar();
   }
 
-  notifyHealedByMedic() {
-    this.medicHealTimer = 0.35;
-  }
-
   /** Called by Game.ts after spawning the dropped coin so the character chases it. */
   recoverCoin(coin: Coin) {
     this.targetCoin = coin;
@@ -1322,11 +1267,6 @@ export class Character {
       }
     }
 
-    if (this.config.type === 'medic') {
-      this.tickHeal(ctx.dt, ctx.allChars);
-      this.tickHealAura(ctx.dt);
-    }
-
     // Evasive jump on hit
     if (this.pendingHitJump) {
       this.pendingHitJump = false;
@@ -1336,7 +1276,6 @@ export class Character {
     // Passive regen while inside own tower's attack range
     const inSafeZone = this.hp < this.maxHp && Math.abs(this.x - ctx.homeTowerFrontX) <= TOWER_ATTACK_RANGE;
     if (inSafeZone) this.heal(SAFE_ZONE_HEAL_RATE * ctx.dt);
-    if (this.config.type === 'medic' && !inSafeZone && this.hp < this.maxHp) this.heal(MEDIC_PASSIVE_HEAL_RATE * ctx.dt);
     this.tickHealParticles(ctx.dt, inSafeZone);
 
     if (this.coinPickupCooldown > 0) {
@@ -1695,17 +1634,6 @@ export class Character {
     const { dt, allChars, enemyTowerFrontX, enemyTowerY, onFire, navGraph, blocks } = ctx;
     if (this.isAirborne) return;   // don't change horizontal intent mid-air
 
-    if (this.config.type === 'medic') {
-      // Medic marches with the line but stops before reaching the enemy tower
-      if (Math.abs(this.x - enemyTowerFrontX) > 100) {
-        this.state = 'marching';
-        this.x += (this.side === 'player' ? 1 : -1) * this.moveSpeed * dt;
-      } else {
-        this.state = 'fighting';
-      }
-      return;
-    }
-
     const dir         = this.side === 'player' ? 1 : -1;
     const nearest     = this.nearestEnemy(allChars, this.config.attackRange, blocks);
     const distToTower = Math.abs(this.x - enemyTowerFrontX);
@@ -2001,95 +1929,68 @@ export class Character {
 
     const dir = this.side === 'player' ? 1 : -1;
 
-    const pickSpot = () =>
-      homeTowerFrontX + dir * (10 + Math.random() * (TOWER_ATTACK_RANGE - 20));
+    // Defending area: from the home tower's front face out to the tower's
+    // attack range. Any enemy inside this zone is something we should engage.
+    const zoneNearX = Math.min(homeTowerFrontX, homeTowerFrontX + dir * TOWER_ATTACK_RANGE);
+    const zoneFarX  = Math.max(homeTowerFrontX, homeTowerFrontX + dir * TOWER_ATTACK_RANGE);
 
-    // Assign initial spot the first tick we enter defend mode
-    if (this.defendTargetX < 0) {
-      this.defendTargetX   = pickSpot();
-      this.defendRoamTimer = 6;
+    // Find the nearest intruder (any enemy whose x sits inside the defending area).
+    let intruder: Character | null = null;
+    let minDist = Infinity;
+    for (const c of allChars) {
+      if (c.isDead || c.side === this.side) continue;
+      if (c.x < zoneNearX || c.x > zoneFarX) continue;
+      const d = Math.abs(c.x - this.x);
+      if (d < minDist) { minDist = d; intruder = c; }
     }
 
-    // Count down roam timer; relocate every 6 s if no enemy is visible
-    this.defendRoamTimer -= dt;
-    if (this.defendRoamTimer <= 0) {
-      this.defendRoamTimer = 6;
-      const hasEnemy = this.nearestEnemy(allChars, this.config.attackRange, blocks) !== null;
-      if (!hasEnemy) {
-        this.defendTargetX = pickSpot();
-        this.clearPath();
-      }
-    }
+    if (intruder) {
+      // Within personal attack range — fire (uses nearestEnemy so LOS / canSnapHit
+      // gating still applies; falls through to pursuit if the geometry blocks the shot).
+      const target = this.nearestEnemy(allChars, this.config.attackRange, blocks);
+      if (target) {
+        this.state = 'fighting';
+        this.attackEnemy(target, onFire);
 
-    // Attack any enemy in range
-    const target = this.nearestEnemy(allChars, this.config.attackRange, blocks);
-    if (target) {
-      this.state = 'fighting';
-      this.attackEnemy(target, onFire);
-
-      // Ranged: kite back from closing melee, stay within own safe zone
-      if (this.isRanged) {
-        const isMelee = Character.isMeleeType(target.config.type);
-        if (isMelee && Math.abs(this.x - target.x) < RANGED_KITE_THRESHOLD) {
-          const retreatX = this.x - dir * this.moveSpeed * dt;
-          this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
+        // Ranged: kite back from closing melee, stay within own safe zone
+        if (this.isRanged) {
+          const isMelee = Character.isMeleeType(target.config.type);
+          if (isMelee && Math.abs(this.x - target.x) < RANGED_KITE_THRESHOLD) {
+            const retreatX = this.x - dir * this.moveSpeed * dt;
+            this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
+          }
         }
+        return;
       }
+
+      // Intruder is in our zone but not yet in our attack range (or out of LOS).
+      // Pursue at the intruder's elevation; clamp so we don't leave the defending
+      // area chasing them out of our zone.
+      const pursueX = Math.max(zoneNearX, Math.min(zoneFarX, intruder.x));
+      this.state = 'marching';
+      this.requestPath(pursueX, intruder.floorY, navGraph, dt);
+      this.followPath(dt);
       return;
     }
 
-    // No enemies in range — use pathfinding to walk to the current patrol spot
-    const delta = this.defendTargetX - this.x;
-    if (Math.abs(delta) > 5) {
+    // No intruders in zone — hold at a rally point just in front of own tower
+    // (~30 % into the defending area). Idle/walk hysteresis handles the visuals
+    // once we arrive.
+    const restX = homeTowerFrontX + dir * TOWER_ATTACK_RANGE * 0.3;
+    const delta = restX - this.x;
+    if (Math.abs(delta) > 20) {
       this.state = 'marching';
-      this.requestPath(this.defendTargetX, this.floorY, navGraph, dt);
+      this.requestPath(restX, this.floorY, navGraph, dt);
       this.followPath(dt);
     } else {
-      // Holding the patrol spot — keep state as 'marching' so the idle/walk
-      // hysteresis kicks in. 'fighting' here would lock the attack animation
-      // even with no target, making the character look like they're shadowboxing.
       this.state = 'marching';
     }
   }
 
   // ── Attack helpers ───────────────────────────────────────────────────────────
 
-  private tickHeal(dt: number, allChars: Character[]) {
-    let target: Character | null = null;
-    let lowestRatio = 1;
-    for (const c of allChars) {
-      if (c === this || c.isDead || c.side !== this.side) continue;
-      if (Math.abs(this.x - c.x) > CHAR_HEAL_RANGE) continue;
-      const ratio = c.hp / c.maxHp;
-      if (ratio < lowestRatio) { lowestRatio = ratio; target = c; }
-    }
-    if (target) {
-      target.heal(CHAR_HEAL_RATE * dt);
-      target.notifyHealedByMedic();
-      this.healAuraActive = true;
-    } else {
-      this.healAuraActive = false;
-    }
-  }
-
-  private tickHealAura(dt: number) {
-    if (!this.healAura) return;
-    this.healAuraT += dt;
-    const pulse = Math.sin(this.healAuraT * Math.PI * 2 * 2.5);
-    const alpha = this.healAuraActive ? 0.22 + 0.12 * pulse : 0;
-    const r     = 18 + 4 * pulse;
-    this.healAura.clear();
-    if (alpha > 0) {
-      this.healAura.lineStyle(2.5, 0x44ff88, alpha);
-      this.healAura.drawCircle(0, -this.config.height * 0.3, r);
-      this.healAura.lineStyle(1, 0x44ff88, alpha * 0.45);
-      this.healAura.drawCircle(0, -this.config.height * 0.3, r + 7);
-    }
-  }
-
   private tickHealParticles(dt: number, healing: boolean) {
-    this.medicHealTimer = Math.max(0, this.medicHealTimer - dt);
-    if (healing || this.medicHealTimer > 0) {
+    if (healing) {
       this.healParticleTimer -= dt;
       if (this.healParticleTimer <= 0) {
         this.healParticleTimer = 0.28;
