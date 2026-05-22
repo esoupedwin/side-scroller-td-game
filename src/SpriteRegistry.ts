@@ -7,7 +7,7 @@ import type { Tribe } from './Tribes';
 //   • Legs  (back)  — legs only:        idle, walk
 // This lets any body pose pair with any leg state (e.g. legs=walk + body=attack
 // for a marching unit that fires opportunistically) without extra art.
-export type BodyAnimName = 'idle' | 'walk' | 'attack' | 'carry';
+export type BodyAnimName = 'idle' | 'walk' | 'attack' | 'carry' | 'throw';
 export type LegsAnimName = 'idle' | 'walk';
 
 // Sprite sheets are laid out left-to-right, top-to-bottom, with exactly
@@ -54,6 +54,7 @@ function makeTypeDefs(tribe: Tribe, type: string): SpriteSetDef {
       walk:   { path: `${base}/body/walk.png`,   fps: 32, spriteScale: 4.0 },
       attack: { path: `${base}/body/attack.png`, fps: 30, spriteScale: 4.0 },
       carry:  { path: `${base}/body/carry.png`,  fps: 24, spriteScale: 4.0 },
+      throw:  { path: `${base}/body/throw.png`,  fps: 24, spriteScale: 4.0 },
     },
     legs: {
       idle:   { path: `${base}/legs/idle.png`,   fps: 20, spriteScale: 4.0 },
@@ -73,6 +74,7 @@ const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>>
     rifleman:  makeTypeDefs('tomaro', 'rifleman'),
     archer:    makeTypeDefs('tomaro', 'archer'),
     rocketeer: makeTypeDefs('tomaro', 'rocketeer'),
+    grenadier: makeTypeDefs('tomaro', 'grenadier'),
   },
   meowee: {
     conscript: makeTypeDefs('meowee', 'conscript'),
@@ -80,6 +82,7 @@ const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>>
     rifleman:  makeTypeDefs('meowee', 'rifleman'),
     archer:    makeTypeDefs('meowee', 'archer'),
     rocketeer: makeTypeDefs('meowee', 'rocketeer'),
+    grenadier: makeTypeDefs('meowee', 'grenadier'),
   },
 };
 
@@ -113,7 +116,7 @@ export function getLegsFeetAnchorY(tribe: Tribe, type: string, anim: LegsAnimNam
 // sampler reads half a pixel past the rectangle edge, so without an inset the
 // top/bottom of one frame picks up content from the adjacent row (visible as
 // "ghost" pixels above the character's head).
-const FRAME_INSET_PX = 1;
+const FRAME_INSET_PX = 2;
 
 function extractFrames(texture: PIXI.Texture, frameCount: number, fw: number, fh: number): PIXI.Texture[] {
   const frames: PIXI.Texture[] = [];
@@ -193,7 +196,8 @@ async function loadLayerAnim(
 ): Promise<PIXI.Texture[] | null> {
   try {
     const texture    = await PIXI.Assets.load<PIXI.Texture>(animDef.path);
-    texture.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+    texture.baseTexture.mipmap    = PIXI.MIPMAP_MODES.OFF;
+    texture.baseTexture.scaleMode = PIXI.SCALE_MODES.NEAREST;
     texture.baseTexture.update();
     const rows       = animDef.rows ?? Math.max(1, Math.round(texture.height / FRAME_HEIGHT_PX));
     const fw         = Math.floor(texture.width  / FRAMES_PER_ROW);

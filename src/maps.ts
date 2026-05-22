@@ -20,9 +20,15 @@ export interface MapDefinition {
   worldWidth:   number;
   playerTowerX: number;  // centre x of the player tower
   enemyTowerX:  number;  // centre x of the enemy tower
-  platforms:    PlatformData[];
-  blocks:       BlockData[];
-  coinBox:      CoinBoxDef;
+  platforms:       PlatformData[];
+  blocks:          BlockData[];
+  coinBox:         CoinBoxDef;
+  playerTowerSkin?:  string;  // data URL (data:image/...;base64,…)
+  playerTowerSkinW?: number;  // rendered width  (default: TOWER_WIDTH)
+  playerTowerSkinH?: number;  // rendered height (default: TOWER_HEIGHT)
+  enemyTowerSkin?:   string;
+  enemyTowerSkinW?:  number;
+  enemyTowerSkinH?:  number;
 }
 
 export const DEFAULT_MAP: MapDefinition = {

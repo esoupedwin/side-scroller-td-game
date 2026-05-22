@@ -34,7 +34,7 @@ export class Grenade {
   constructor(
     side:         Side,
     sx: number,   sy: number,
-    tx: number,
+    tx: number,   ty: number,
     damage:       number,
     fuseSec:      number,
     splashRadius: number,
@@ -51,12 +51,18 @@ export class Grenade {
     this.gravity      = gravity;
     this.shooter      = shooter;
 
-    // 60° launch angle: always use at least 45% of maxVx so the arc is visible;
-    // scale up for distant targets so the grenade still arcs convincingly.
+    // Compute vx, then derive vy so the grenade lands at (tx, ty).
+    // Use at least 45% of maxVx for a visible arc; scale up for distant targets.
     const dx    = tx - sx;
+    const dy    = ty - sy;
     const vxAbs = Math.max(maxVx * 0.45, Math.min(Math.abs(dx) * 0.55, maxVx));
     this.vx = Math.sign(dx || 1) * vxAbs;
-    this.vy = -vxAbs * Math.sqrt(3);   // tan(60°) = √3 → exactly 60° above horizontal
+    // vy that exactly reaches ty at transit time t = |dx|/vxAbs:
+    const t          = Math.abs(dx) / vxAbs;
+    const vyToTarget = t > 0 ? (dy - 0.5 * gravity * t * t) / t : -vxAbs * Math.sqrt(3);
+    // For same-height or lower targets keep the standard 60° arc (vyStandard is more
+    // negative = more upward); for elevated targets use vyToTarget instead.
+    this.vy = Math.min(vyToTarget, -vxAbs * Math.sqrt(3));
 
     this.container  = new PIXI.Container();
     this.explodeGfx = new PIXI.Graphics();

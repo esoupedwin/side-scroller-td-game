@@ -26,7 +26,7 @@ export class Tower {
   private body: PIXI.Graphics;
   private label: PIXI.Text;
 
-  constructor(side: Side, x: number) {
+  constructor(side: Side, x: number, skinUrl?: string, skinW?: number, skinH?: number) {
     this.side  = side;
     this.x     = x;
     this.container = new PIXI.Container();
@@ -50,6 +50,22 @@ export class Tower {
     this.body.x = cx;
     this.body.y = GROUND_Y - TOWER_HEIGHT;
     this.container.addChild(this.body);
+
+    if (skinUrl) {
+      const sw = skinW ?? TOWER_WIDTH;
+      const sh = skinH ?? TOWER_HEIGHT;
+      PIXI.Assets.load<PIXI.Texture>(skinUrl)
+        .then(tex => {
+          this.body.visible = false;
+          const sprite = new PIXI.Sprite(tex);
+          sprite.x      = x - sw / 2;
+          sprite.y      = GROUND_Y - sh;
+          sprite.width  = sw;
+          sprite.height = sh;
+          this.container.addChildAt(sprite, 0);
+        })
+        .catch(() => { /* keep Graphics body */ });
+    }
 
     // HP bar background
     const barBg = new PIXI.Graphics();

@@ -152,6 +152,7 @@ export class Character {
   // attacking, so a character moving forward but attacking a target behind
   // them faces the target (not their travel direction).
   private lastAttackDir:       1 | -1 = 1;
+  private throwFacingDir:      1 | -1 = 1;
   // Seconds remaining where the sprite stays facing the most recent attack
   // direction, even when state isn't 'fighting' (Rush/Collect fire while
   // moving without flipping into fighting state). Doubles as the body-attack
@@ -244,7 +245,7 @@ export class Character {
   private powerUpSpeedTimer = 0;
   private powerUpAtkMult    = 1.0;
 
-  constructor(side: Side, startX: number, config: CharacterConfig, id: number, name: string, physics: Physics, spriteSet?: LoadedSpriteSet) {
+  constructor(side: Side, startX: number, config: CharacterConfig, id: number, name: string, physics: Physics, spriteSet?: LoadedSpriteSet | null) {
     this.side      = side;
     this.id        = id;
     this.name      = name;
@@ -434,6 +435,7 @@ export class Character {
     const recentlyFired = this.state === 'fighting' || this.attackFacingTimer > 0;
     let body: BodyAnimName;
     if (recentlyFired)                                              body = 'attack';
+    else if (this.coinThrowTimer > 0)                               body = 'throw';
     else if (this.carryingCoin || this.state === 'returning')       body = 'carry';
     else if (this.state === 'marching' || this.state === 'collecting')
       body = inMotion ? 'walk' : 'idle';
@@ -452,6 +454,7 @@ export class Character {
       walk:   ['walk',   'idle'],
       attack: ['attack', 'idle',   'walk'],
       carry:  ['carry',  'walk',   'idle'],
+      throw:  ['throw',  'carry',  'walk',  'idle'],
     };
     let frames: PIXI.Texture[] | undefined;
     let picked: BodyAnimName = name;
@@ -502,7 +505,9 @@ export class Character {
     // Otherwise face the actual travel direction. Sprites are drawn facing right.
     const facingDir = (this.state === 'fighting' || this.attackFacingTimer > 0)
       ? this.lastAttackDir
-      : this.lastMoveDir;
+      : this.coinThrowTimer > 0
+        ? this.throwFacingDir
+        : this.lastMoveDir;
     body.scale.x = this.bodyBaseScale * facingDir;
     legs.scale.x = this.legsBaseScale * facingDir;
 
@@ -1832,7 +1837,10 @@ export class Character {
         return;
       } else if (distToTower > COIN_THROW_MIN_DIST) {
         // Hold coin for COIN_THROW_HOLD_SEC before releasing the 45° throw
-        if (this.coinThrowTimer < 0) this.coinThrowTimer = COIN_THROW_HOLD_SEC;
+        if (this.coinThrowTimer < 0) {
+          this.coinThrowTimer  = COIN_THROW_HOLD_SEC;
+          this.throwFacingDir  = (homeTowerFrontX < this.x ? -1 : 1);
+        }
         this.coinThrowTimer -= dt;
         this.state = 'returning';   // stand still while winding up
         if (this.coinThrowTimer > 0) return;

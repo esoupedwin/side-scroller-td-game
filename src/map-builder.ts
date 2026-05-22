@@ -36,6 +36,7 @@ class MapBuilder {
   private drag: DragKind | null              = null;
   private mouseX = 0;
   private mouseY = 0;
+  private skinImages = new Map<string, HTMLImageElement>();
 
   constructor() {
     this.map    = structuredClone(loadMapWithOverride(DEFAULT_MAP));
@@ -94,39 +95,26 @@ class MapBuilder {
     ctx.fillStyle = '#3d6b4a';
     ctx.fillRect(0, this.wy(GROUND_Y), DISPLAY_W, this.wy(6));
 
-    // Player tower
-    ctx.fillStyle = '#00b4d8';
-    ctx.fillRect(
-      this.wx(m.playerTowerX - TOWER_W / 2),
-      this.wy(GROUND_Y - TOWER_H),
-      this.wx(TOWER_W),
-      this.wy(TOWER_H),
-    );
-    ctx.strokeStyle = '#007fa3';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(
-      this.wx(m.playerTowerX - TOWER_W / 2),
-      this.wy(GROUND_Y - TOWER_H),
-      this.wx(TOWER_W),
-      this.wy(TOWER_H),
-    );
-
-    // Enemy tower
-    ctx.fillStyle = '#e63946';
-    ctx.fillRect(
-      this.wx(m.enemyTowerX - TOWER_W / 2),
-      this.wy(GROUND_Y - TOWER_H),
-      this.wx(TOWER_W),
-      this.wy(TOWER_H),
-    );
-    ctx.strokeStyle = '#a02830';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(
-      this.wx(m.enemyTowerX - TOWER_W / 2),
-      this.wy(GROUND_Y - TOWER_H),
-      this.wx(TOWER_W),
-      this.wy(TOWER_H),
-    );
+    const drawTower = (cx: number, color: string, stroke: string, skinUrl?: string, sw: number = TOWER_W, sh: number = TOWER_H) => {
+      const tx = this.wx(cx - sw / 2);
+      const ty = this.wy(GROUND_Y - sh);
+      const tw = this.wx(sw);
+      const th = this.wy(sh);
+      if (skinUrl) {
+        const img = this.getSkinImage(skinUrl);
+        if (img.complete && img.naturalWidth > 0) {
+          ctx.drawImage(img, tx, ty, tw, th);
+          return;
+        }
+      }
+      ctx.fillStyle   = color;
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth   = 1;
+      ctx.fillRect(tx, ty, tw, th);
+      ctx.strokeRect(tx, ty, tw, th);
+    };
+    drawTower(m.playerTowerX, '#00b4d8', '#007fa3', m.playerTowerSkin, m.playerTowerSkinW, m.playerTowerSkinH);
+    drawTower(m.enemyTowerX,  '#e63946', '#a02830', m.enemyTowerSkin,  m.enemyTowerSkinW,  m.enemyTowerSkinH);
 
     // Blocks (drawn below platforms so platforms render on top)
     for (let i = 0; i < m.blocks.length; i++) {
@@ -190,6 +178,34 @@ class MapBuilder {
     ctx.font      = '10px monospace';
     ctx.textAlign = 'left';
     ctx.fillText(`x:${Math.round(this.cw(this.mouseX))} y:${Math.round(this.ch(this.mouseY))}`, 8, 15);
+  }
+
+  // ── Skin helpers ──────────────────────────────────────────────────────────
+
+  private getSkinImage(url: string): HTMLImageElement {
+    if (!this.skinImages.has(url)) {
+      const img = new Image();
+      img.src = url;
+      this.skinImages.set(url, img);
+    }
+    return this.skinImages.get(url)!;
+  }
+
+  private syncSkinPreviews() {
+    const m = this.map;
+    (['player', 'enemy'] as const).forEach(side => {
+      const url     = side === 'player' ? m.playerTowerSkin : m.enemyTowerSkin;
+      const preview = document.getElementById(`preview-${side}-skin`) as HTMLImageElement;
+      const clear   = document.getElementById(`btn-clear-${side}-skin`) as HTMLButtonElement;
+      if (url) {
+        preview.src           = url;
+        preview.style.display = 'inline';
+        clear.style.display   = 'inline';
+      } else {
+        preview.style.display = 'none';
+        clear.style.display   = 'none';
+      }
+    });
   }
 
   // ── Canvas interaction ────────────────────────────────────────────────────
@@ -430,6 +446,39 @@ class MapBuilder {
       this.map.enemyTowerX = parseInt((document.getElementById('input-enemy-x') as HTMLInputElement).value, 10);
     });
 
+    // Tower skin pickers
+    (['player', 'enemy'] as const).forEach(side => {
+      document.getElementById(`input-${side}-skin`)!.addEventListener('change', e => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const url = reader.result as string;
+          if (side === 'player') this.map.playerTowerSkin = url;
+          else                   this.map.enemyTowerSkin  = url;
+          this.syncSkinPreviews();
+        };
+        reader.readAsDataURL(file);
+      });
+
+      document.getElementById(`btn-clear-${side}-skin`)!.addEventListener('click', () => {
+        if (side === 'player') delete this.map.playerTowerSkin;
+        else                   delete this.map.enemyTowerSkin;
+        (document.getElementById(`input-${side}-skin`) as HTMLInputElement).value = '';
+        this.syncSkinPreviews();
+      });
+
+      (['w', 'h'] as const).forEach(dim => {
+        document.getElementById(`input-${side}-skin-${dim}`)!.addEventListener('change', () => {
+          const val = parseInt((document.getElementById(`input-${side}-skin-${dim}`) as HTMLInputElement).value, 10);
+          const def = dim === 'w' ? TOWER_W : TOWER_H;
+          const key = `${side}TowerSkin${dim.toUpperCase()}` as 'playerTowerSkinW' | 'playerTowerSkinH' | 'enemyTowerSkinW' | 'enemyTowerSkinH';
+          if (isNaN(val) || val === def) delete this.map[key];
+          else                           this.map[key] = val;
+        });
+      });
+    });
+
     // Delete key
     window.addEventListener('keydown', e => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && this.selected !== null) {
@@ -487,9 +536,13 @@ class MapBuilder {
   private syncInputsFromMap() {
     const m = this.map;
 
-    (document.getElementById('input-name')     as HTMLInputElement).value = m.name;
-    (document.getElementById('input-player-x') as HTMLInputElement).value = String(m.playerTowerX);
-    (document.getElementById('input-enemy-x')  as HTMLInputElement).value = String(m.enemyTowerX);
+    (document.getElementById('input-name')          as HTMLInputElement).value = m.name;
+    (document.getElementById('input-player-x')      as HTMLInputElement).value = String(m.playerTowerX);
+    (document.getElementById('input-enemy-x')       as HTMLInputElement).value = String(m.enemyTowerX);
+    (document.getElementById('input-player-skin-w') as HTMLInputElement).value = String(m.playerTowerSkinW ?? TOWER_W);
+    (document.getElementById('input-player-skin-h') as HTMLInputElement).value = String(m.playerTowerSkinH ?? TOWER_H);
+    (document.getElementById('input-enemy-skin-w')  as HTMLInputElement).value = String(m.enemyTowerSkinW  ?? TOWER_W);
+    (document.getElementById('input-enemy-skin-h')  as HTMLInputElement).value = String(m.enemyTowerSkinH  ?? TOWER_H);
 
     const cb = m.coinBox;
     (document.getElementById('input-cb-x')      as HTMLInputElement).value = String(cb.x);
@@ -529,6 +582,7 @@ class MapBuilder {
 
     document.getElementById('plat-count')!.textContent  = `${m.platforms.length} platform(s)`;
     document.getElementById('block-count')!.textContent = `${m.blocks.length} block(s)`;
+    this.syncSkinPreviews();
   }
 }
 

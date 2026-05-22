@@ -305,8 +305,8 @@ export class Game {
     this.world.addChild(this.unitLayer);
     this.world.addChild(this.labelLayer);
 
-    this.playerTower = new Tower('player', m.playerTowerX);
-    this.enemyTower  = new Tower('enemy',  m.enemyTowerX);
+    this.playerTower = new Tower('player', m.playerTowerX, m.playerTowerSkin, m.playerTowerSkinW, m.playerTowerSkinH);
+    this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerSkin,  m.enemyTowerSkinW,  m.enemyTowerSkinH);
     this.world.addChild(this.playerTower.container);
     this.world.addChild(this.enemyTower.container);
 
@@ -454,7 +454,7 @@ export class Game {
   // ── Spawn ────────────────────────────────────────────────────────────────────
 
   /** Returns false if the player cannot afford this unit. */
-  spawnPlayer(type: 'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer'): boolean {
+  spawnPlayer(type: CharacterConfig['type']): boolean {
     if (this.isOver) return false;
     const cost = CHAR_COST[type];
     if (this.coinBalance < cost) return false;
@@ -463,7 +463,7 @@ export class Game {
     this.notifyCoins();
 
     const config = withSpawnBoosts(CHAR_CONFIGS[type]);
-    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type) ?? undefined);
+    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type));
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
@@ -597,7 +597,7 @@ export class Game {
         this.coinBalance -= cost;
         this.notifyCoins();
       }
-      const c = new Character(self, spawnX, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type) ?? undefined);
+      const c = new Character(self, spawnX, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type));
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
       if (self === 'player') this.hud.add(c);
@@ -1359,7 +1359,7 @@ export class Game {
   private fireProjectile(req: FireRequest) {
     if (req.projectileKind === 'grenade') {
       const g = new Grenade(
-        req.side, req.sx, req.sy, req.tx,
+        req.side, req.sx, req.sy, req.tx, req.ty,
         req.damage, GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX,
         req.shooter ?? null,
       );

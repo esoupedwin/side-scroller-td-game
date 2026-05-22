@@ -1,6 +1,6 @@
 const VIEWPORT_W      = 1900;
 const W               = Math.round(VIEWPORT_W * 2.25); // scrollable world width
-const H               = 600;
+const H               = 800;
 const CHAR_W          = 20;
 const CHAR_H          = 32;
 const GROUND_Y        = H - 80;
