@@ -96,7 +96,7 @@ export class Projectile {
     this.gfx.clear();
 
     if (this.kind === 'bullet') {
-      this.drawBullet(angle);
+      this.drawBullet();
     } else {
       this.drawArrow(angle);
     }
@@ -123,7 +123,7 @@ export class Projectile {
     this.gfx.rotation = angle;
   }
 
-  private drawBullet(_angle: number) {
+  private drawBullet() {
     // Outer shell (yellow)
     this.gfx.beginFill(0xf5c400);
     this.gfx.drawCircle(0, 0, 4.5);

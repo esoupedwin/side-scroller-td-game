@@ -675,20 +675,20 @@ class MapBuilder {
       const p = m.platforms[i];
       if (Math.abs(cx - this.wx(p.x)) <= HANDLE_ZONE &&
           wy >= p.y && wy <= p.y + p.height) {
-        this.selected = i; this.selectedKind = 'platform'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+        this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
         this.drag = { kind: 'platform-left', idx: i, origX: p.x, origW: p.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
       if (Math.abs(cx - this.wx(p.x + p.width)) <= HANDLE_ZONE &&
           wy >= p.y && wy <= p.y + p.height) {
-        this.selected = i; this.selectedKind = 'platform'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+        this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
         this.drag = { kind: 'platform-right', idx: i, origW: p.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
       if (wx >= p.x && wx <= p.x + p.width && wy >= p.y && wy <= p.y + p.height) {
-        this.selected = i; this.selectedKind = 'platform'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+        this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
         this.drag = { kind: 'platform-move', idx: i, ox: wx - p.x, oy: wy - p.y };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
@@ -700,20 +700,20 @@ class MapBuilder {
       const b = m.blocks[i];
       if (Math.abs(cx - this.wx(b.x)) <= HANDLE_ZONE &&
           wy >= b.y && wy <= b.y + b.height) {
-        this.selected = i; this.selectedKind = 'block'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+        this.clearSelection(); this.selected = i; this.selectedKind = 'block';
         this.drag = { kind: 'block-left', idx: i, origX: b.x, origW: b.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
       if (Math.abs(cx - this.wx(b.x + b.width)) <= HANDLE_ZONE &&
           wy >= b.y && wy <= b.y + b.height) {
-        this.selected = i; this.selectedKind = 'block'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+        this.clearSelection(); this.selected = i; this.selectedKind = 'block';
         this.drag = { kind: 'block-right', idx: i, origW: b.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
       if (wx >= b.x && wx <= b.x + b.width && wy >= b.y && wy <= b.y + b.height) {
-        this.selected = i; this.selectedKind = 'block'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+        this.clearSelection(); this.selected = i; this.selectedKind = 'block';
         this.drag = { kind: 'block-move', idx: i, ox: wx - b.x, oy: wy - b.y };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
@@ -724,7 +724,7 @@ class MapBuilder {
     const cb = m.coinBox;
     if (wx >= cb.x - cb.width / 2 && wx <= cb.x + cb.width / 2 &&
         wy >= cb.y && wy <= cb.y + cb.height) {
-      this.selectedCoinBox = true; this.selected = null; this.selectedTower = null; this.selectedGround = false; this.selectedBackground = false;
+      this.clearSelection(); this.selectedCoinBox = true;
       this.drag = { kind: 'coinbox', ox: wx - cb.x, oy: wy - cb.y };
       this.syncInputsFromMap();
       document.getElementById('section-coinbox')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -734,7 +734,7 @@ class MapBuilder {
     // Player tower
     if (wx >= m.playerTowerX - TOWER_W / 2 && wx <= m.playerTowerX + TOWER_W / 2 &&
         wy >= GROUND_Y - TOWER_H && wy <= GROUND_Y) {
-      this.selectedTower = 'player'; this.selected = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+      this.clearSelection(); this.selectedTower = 'player';
       this.drag = { kind: 'tower-player' };
       this.syncInputsFromMap();
       document.getElementById('section-player-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -744,7 +744,7 @@ class MapBuilder {
     // Enemy tower
     if (wx >= m.enemyTowerX - TOWER_W / 2 && wx <= m.enemyTowerX + TOWER_W / 2 &&
         wy >= GROUND_Y - TOWER_H && wy <= GROUND_Y) {
-      this.selectedTower = 'enemy'; this.selected = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+      this.clearSelection(); this.selectedTower = 'enemy';
       this.drag = { kind: 'tower-enemy' };
       this.syncInputsFromMap();
       document.getElementById('section-enemy-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -753,22 +753,28 @@ class MapBuilder {
 
     // Ground strip — not draggable, just selectable
     if (wx >= 0 && wx <= m.worldWidth && wy >= GROUND_Y) {
-      this.selectedGround = true; this.selected = null; this.selectedTower = null; this.selectedCoinBox = false;
+      this.clearSelection(); this.selectedGround = true;
       this.syncInputsFromMap();
       document.getElementById('section-ground')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       return;
     }
 
     // Click on empty space → deselect all
-    this.selected = null;
-    this.selectedTower = null;
-    this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+    this.clearSelection();
     this.syncInputsFromMap();
   }
 
   private scrollSelectionIntoView() {
     const panelId = this.selectedKind === 'platform' ? 'plat-panel' : 'block-panel';
     document.getElementById(panelId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  private clearSelection() {
+    this.selected          = null;
+    this.selectedTower     = null;
+    this.selectedCoinBox   = false;
+    this.selectedGround    = false;
+    this.selectedBackground = false;
   }
 
   private onMouseUp(_e?: MouseEvent) {
@@ -800,10 +806,9 @@ class MapBuilder {
         const m  = this.map;
         const id = `p${Date.now()}`;
         m.platforms.push({ id, x: Math.round(m.worldWidth / 2 - w / 2), y: GROUND_Y - 260, width: w, height: 120 });
-        this.selected      = m.platforms.length - 1;
-        this.selectedKind  = 'platform';
-        this.selectedTower = null;
-        this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+        this.clearSelection();
+        this.selected     = m.platforms.length - 1;
+        this.selectedKind = 'platform';
         overlay.classList.remove('open');
         this.syncInputsFromMap();
       });
@@ -820,7 +825,8 @@ class MapBuilder {
       const m = this.map;
       const cx = m.worldWidth / 2;
       m.blocks.push({ x: cx - 100, y: GROUND_Y - 80, width: 200, height: 40 });
-      this.selected = m.blocks.length - 1;
+      this.clearSelection();
+      this.selected     = m.blocks.length - 1;
       this.selectedKind = 'block';
       this.syncInputsFromMap();
     });
@@ -834,9 +840,8 @@ class MapBuilder {
 
     // Manage Background button
     document.getElementById('btn-manage-background')!.addEventListener('click', () => {
+      this.clearSelection();
       this.selectedBackground = true;
-      this.selected = null; this.selectedTower = null;
-      this.selectedCoinBox = false; this.selectedGround = false;
       this.syncInputsFromMap();
       document.getElementById('section-background')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
@@ -883,9 +888,7 @@ class MapBuilder {
       try {
         const parsed = JSON.parse(txt) as MapDefinition;
         this.map           = parsed;
-        this.selected      = null;
-        this.selectedTower = null;
-        this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
+        this.clearSelection();
         this.syncInputsFromMap();
       } catch {
         alert('Invalid JSON — could not import map.');
@@ -1053,7 +1056,7 @@ class MapBuilder {
     sel.addEventListener('change', () => {
       const found = ALL_MAPS.find(m => m.id === sel.value);
       // Load the saved version of the preset if one exists, so edits aren't lost on switch.
-      if (found) { this.map = structuredClone(loadMapWithOverride(found)); this.selected = null; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false; this.syncInputsFromMap(); }
+      if (found) { this.map = structuredClone(loadMapWithOverride(found)); this.clearSelection(); this.syncInputsFromMap(); }
     });
   }
 
