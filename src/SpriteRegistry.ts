@@ -16,7 +16,7 @@ export type LegsAnimName = 'idle' | 'walk';
 // frame count within the grid is detected from the image (trailing empty cells
 // in the last row are skipped).
 const FRAMES_PER_ROW = 6;
-const FRAME_HEIGHT_PX = 600;
+const FRAME_HEIGHT_PX = 800;
 
 export interface SpriteLayerAnimDef {
   path:        string;  // URL served from /public, e.g. '/sprites/tomaro/warrior/body/walk.png'
@@ -144,7 +144,7 @@ function extractFrames(texture: PIXI.Texture, frameCount: number, fw: number, fh
  * pixels to have meaningful alpha.
  */
 const ALPHA_THRESHOLD     = 32;     // pixel must be > this to count as "drawn"
-const MIN_CELL_FILL_RATIO = 0.01;   // >= 1 % of sampled pixels above threshold
+const MIN_CELL_FILL_RATIO = 0.001;  // >= 0.1 % of sampled pixels above threshold
 
 function detectFrameCount(
   texture: PIXI.Texture,
@@ -224,11 +224,11 @@ export async function preloadAllSprites(): Promise<void> {
 
         for (const [animName, animDef] of Object.entries(def.body) as [BodyAnimName, SpriteLayerAnimDef][]) {
           const frames = await loadLayerAnim(tribeId, type, 'body', animName, animDef);
-          if (frames) { body[animName] = frames; bodyLoaded = true; }
+          if (frames && frames.length > 0) { body[animName] = frames; bodyLoaded = true; }
         }
         for (const [animName, animDef] of Object.entries(def.legs) as [LegsAnimName, SpriteLayerAnimDef][]) {
           const frames = await loadLayerAnim(tribeId, type, 'legs', animName, animDef);
-          if (frames) { legs[animName] = frames; legsLoaded = true; }
+          if (frames && frames.length > 0) { legs[animName] = frames; legsLoaded = true; }
         }
 
         if (bodyLoaded && legsLoaded) {
@@ -238,7 +238,7 @@ export async function preloadAllSprites(): Promise<void> {
           const probeLegs = legs.idle ?? legs.walk;
           if (probeBody && probeLegs) {
             const b = probeBody[0], l = probeLegs[0];
-            if (b.width !== l.width || b.height !== l.height) {
+            if (b && l && (b.width !== l.width || b.height !== l.height)) {
               console.warn(`[sprites] ${tribeId}/${type}: body frame ${b.width}×${b.height} differs from legs ${l.width}×${l.height} — anchor/scale assume matching dimensions`);
             }
           }
