@@ -32,6 +32,8 @@ export interface MapDefinition {
   groundSkin?:       string;  // data URL; tiled across the ground plane
   groundSkinTileW?:  number;  // tile width  in world px (default: image natural width)
   groundSkinTileH?:  number;  // tile height in world px (default: image natural height)
+  backgroundSkin?:   string;  // data URL; replaces the procedural parallax mountain layer
+  backgroundSkinY?:  number;  // screen-space Y offset of the parallax image (default 0 = top of sky)
 }
 
 export const DEFAULT_MAP: MapDefinition = {

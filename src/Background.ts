@@ -9,25 +9,6 @@ import type { CoinBoxDef } from './maps';
 export function buildBackground(stage: PIXI.Container, worldWidth: number) {
   const g = new PIXI.Graphics();
 
-  // Sky — daytime light blue
-  g.beginFill(0x87ceeb);
-  g.drawRect(0, 0, worldWidth, GROUND_Y);
-  g.endFill();
-
-  // Distant mountains — proportionally scaled to world width.
-  // Lighter atmospheric blue-gray to feel like daytime haze.
-  g.beginFill(0x9aaab8);
-  const fracs: [number, number][] = [
-    [0,     200], [0.037, 140], [0.074, 180], [0.111, 130], [0.157, 160],
-    [0.204, 120], [0.250, 155], [0.296, 135], [0.343, 165], [0.389, 140],
-    [0.426, 170], [1.0,   200],
-  ];
-  g.moveTo(0, GROUND_Y);
-  for (const [f, my] of fracs) g.lineTo(f * worldWidth, my);
-  g.lineTo(worldWidth, GROUND_Y);
-  g.closePath();
-  g.endFill();
-
   // Clouds — soft white puffs scattered across the upper half of the sky.
   // Each cloud is a cluster of overlapping circles.
   const rng = mulberry32(42);
@@ -79,12 +60,14 @@ export function buildTowerRangeMarkers(
   stage: PIXI.Container,
   playerTowerX: number,
   enemyTowerX: number,
-) {
+): PIXI.Container {
   const playerFrontX = playerTowerX + TOWER_WIDTH / 2;
   const enemyFrontX  = enemyTowerX  - TOWER_WIDTH / 2;
   const playerRangeX = playerFrontX + TOWER_ATTACK_RANGE;
   const enemyRangeX  = enemyFrontX  - TOWER_ATTACK_RANGE;
   const lineH = 30;
+
+  const container = new PIXI.Container();
 
   const g = new PIXI.Graphics();
 
@@ -113,7 +96,7 @@ export function buildTowerRangeMarkers(
   g.moveTo(enemyRangeX - 5, GROUND_Y - lineH);
   g.lineTo(enemyRangeX + 5, GROUND_Y - lineH);
 
-  stage.addChild(g);
+  container.addChild(g);
 
   const labelStyle = (color: number): Partial<PIXI.ITextStyle> => ({
     fontSize: 8, fill: color, fontWeight: 'bold',
@@ -123,13 +106,16 @@ export function buildTowerRangeMarkers(
   pLabel.anchor.set(0.5, 1);
   pLabel.x = playerRangeX;
   pLabel.y = GROUND_Y - lineH - 3;
-  stage.addChild(pLabel);
+  container.addChild(pLabel);
 
   const eLabel = new PIXI.Text('RANGE', labelStyle(ENEMY_COLOR));
   eLabel.anchor.set(0.5, 1);
   eLabel.x = enemyRangeX;
   eLabel.y = GROUND_Y - lineH - 3;
-  stage.addChild(eLabel);
+  container.addChild(eLabel);
+
+  stage.addChild(container);
+  return container;
 }
 
 export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
@@ -182,6 +168,62 @@ export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
   g.drawPolygon(starPts);
   g.endFill();
   g.lineStyle(0);
+}
+
+/**
+ * Parallax mountain backdrop drawn in screen-space (on app.stage, not the world container).
+ * drawWidth must be wide enough to cover the viewport at maximum camera offset:
+ *   VIEWPORT_WIDTH + maxCameraX * parallaxFactor
+ */
+export function buildParallaxMountains(drawWidth: number): PIXI.Graphics {
+  const g   = new PIXI.Graphics();
+  const rng = mulberry32(137);
+
+  // Layer 1 — farthest, haziest: tall peaks blending into the sky
+  mountainRange(g, rng, drawWidth, 0xa8bcc9, 0.45, 110, 320, 175);
+
+  // Layer 2 — mid-distance: slightly more defined, sits lower
+  mountainRange(g, rng, drawWidth, 0x7b98aa, 0.60, 300, 470, 125);
+
+  return g;
+}
+
+/**
+ * Draw one mountain-range silhouette as a filled polygon.
+ * peakMinY / peakMaxY are screen-space y values (small = high up).
+ * The polygon closes along baseY (screen GROUND_Y).
+ */
+function mountainRange(
+  g:              PIXI.Graphics,
+  rng:            () => number,
+  drawWidth:      number,
+  color:          number,
+  alpha:          number,
+  peakMinY:       number,
+  peakMaxY:       number,
+  nominalSpacing: number,
+) {
+  g.beginFill(color, alpha);
+  g.moveTo(0, GROUND_Y);
+
+  let x = 0;
+  while (x < drawWidth + nominalSpacing) {
+    // Rise to a peak
+    const px = x + nominalSpacing * (0.45 + rng() * 0.65);
+    const py = peakMinY + rng() * (peakMaxY - peakMinY);
+    g.lineTo(Math.min(px, drawWidth), py);
+
+    // Fall to a valley (shallow dip, staying well above ground)
+    const vx = px + nominalSpacing * (0.35 + rng() * 0.45);
+    const vy = peakMaxY - rng() * (peakMaxY - peakMinY) * 0.25;
+    g.lineTo(Math.min(vx, drawWidth), Math.min(vy, GROUND_Y - 30));
+
+    x = vx;
+  }
+
+  g.lineTo(drawWidth, GROUND_Y);
+  g.closePath();
+  g.endFill();
 }
 
 function mulberry32(seed: number) {

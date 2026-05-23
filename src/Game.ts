@@ -9,7 +9,7 @@ export interface CpuStrategyInfo {
   decision: string;   // most recent significant action
 }
 import { Physics } from './Physics';
-import { buildBackground, buildGround, buildTowerRangeMarkers, buildCoinBox } from './Background';
+import { buildBackground, buildGround, buildTowerRangeMarkers, buildCoinBox, buildParallaxMountains } from './Background';
 import { DEFAULT_MAP, loadMapWithOverride, type MapDefinition } from './maps';
 import { Tower } from './Tower';
 import type { TowerShot } from './Tower';
@@ -83,9 +83,14 @@ const CHAR_CONFIGS = {
   rocketeer: ROCKETEER,
 } as const;
 
+const PARALLAX_FACTOR = 0.15; // mountains scroll at 10 % of world camera speed
+
 export class Game {
   readonly app: PIXI.Application;
 
+  private parallaxGfx!: PIXI.Container;
+  private rangeMarkers!: PIXI.Container;
+  private devMode = false;
   private playerTower!: Tower;
   private enemyTower!:  Tower;
   private characters:   Character[]  = [];
@@ -286,7 +291,8 @@ export class Game {
     this.world = new PIXI.Container();
 
     buildBackground(this.world, m.worldWidth);
-    buildTowerRangeMarkers(this.world, m.playerTowerX, m.enemyTowerX);
+    this.rangeMarkers = buildTowerRangeMarkers(this.world, m.playerTowerX, m.enemyTowerX);
+    this.rangeMarkers.visible = this.devMode;
     buildCoinBox(this.world, m.coinBox);
 
     // Build one Platform visual per map platform — use a dedicated container so
@@ -383,6 +389,30 @@ export class Game {
     // its current screen position, keeping the horizon visually stable.
     this.world.scale.set(GAME_ZOOM);
     this.world.y = GROUND_Y * (1 - GAME_ZOOM);
+
+    // Parallax mountain backdrop — sits on app.stage before the world so it
+    // renders behind all world content.  Width covers the viewport plus the
+    // maximum horizontal shift the layer can reach at full camera travel.
+    const maxCameraX   = m.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM;
+    const parallaxWide = Math.ceil(VIEWPORT_WIDTH + maxCameraX * PARALLAX_FACTOR);
+    this.parallaxGfx   = new PIXI.Container();
+    if (m.backgroundSkin) {
+      PIXI.Assets.load<PIXI.Texture>(m.backgroundSkin)
+        .then(tex => {
+          const sprite = new PIXI.Sprite(tex);
+          sprite.y      = m.backgroundSkinY ?? 0;
+          sprite.width  = parallaxWide;
+          sprite.height = GROUND_Y;
+          this.parallaxGfx.addChild(sprite);
+        })
+        .catch(() => {
+          this.parallaxGfx.addChild(buildParallaxMountains(parallaxWide));
+        });
+    } else {
+      this.parallaxGfx.addChild(buildParallaxMountains(parallaxWide));
+    }
+    this.app.stage.addChild(this.parallaxGfx);
+
     this.app.stage.addChild(this.world);
 
     // Sheep — spawns at a random x within the playable field
@@ -554,6 +584,12 @@ export class Game {
       if (this.isPaused) c.pauseAnimations();
       else               c.resumeAnimations();
     }
+  }
+
+  toggleDevMode() {
+    this.devMode = !this.devMode;
+    this.rangeMarkers.visible = this.devMode;
+    return this.devMode;
   }
 
   /** Dev-only: when enabled, the player side is also driven by the CPU AI. */
@@ -767,8 +803,9 @@ export class Game {
     const CAMERA_SPEED = 500; // px/s
     if (this.keysDown.has('ArrowLeft'))  this.cameraX -= CAMERA_SPEED * dt;
     if (this.keysDown.has('ArrowRight')) this.cameraX += CAMERA_SPEED * dt;
-    this.cameraX     = Math.max(0, Math.min(this.mapDef.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM, this.cameraX));
-    this.world.x     = -this.cameraX * GAME_ZOOM;
+    this.cameraX        = Math.max(0, Math.min(this.mapDef.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM, this.cameraX));
+    this.world.x        = -this.cameraX * GAME_ZOOM;
+    this.parallaxGfx.x  = -this.cameraX * PARALLAX_FACTOR;
 
     if (this.isOver)   { this.updateCulling(); return; }
     if (this.isPaused) { this.updateCulling(); return; }

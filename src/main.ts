@@ -60,6 +60,7 @@ restartBtn.addEventListener('click', () => {
   gameOverEl.style.display = 'none';
   pauseOverlay.style.display = 'none';
   uiOverlay.style.visibility = 'visible';
+  hudEl.style.visibility     = 'visible';
   game.reset();  // reset() calls onCoinsChanged which re-evaluates button states
 });
 
@@ -68,6 +69,10 @@ window.addEventListener('keydown', (e) => {
     game.togglePause();
     pauseOverlay.style.display  = game.paused ? 'block'   : 'none';
     uiOverlay.style.visibility  = game.paused ? 'hidden'  : 'visible';
+    hudEl.style.visibility      = game.paused ? 'hidden'  : 'visible';
+  }
+  if (e.key === 'b' || e.key === 'B') {
+    game.toggleDevMode();
   }
 });
 

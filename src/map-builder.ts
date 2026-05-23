@@ -42,8 +42,9 @@ class MapBuilder {
   private panLastY       = 0;
   private hasInitialFit  = false;
   private selectedTower: 'player' | 'enemy' | null = null;
-  private selectedCoinBox = false;
-  private selectedGround  = false;
+  private selectedCoinBox    = false;
+  private selectedGround     = false;
+  private selectedBackground = false;
 
   constructor() {
     this.map    = structuredClone(loadMapWithOverride(DEFAULT_MAP));
@@ -138,18 +139,26 @@ class MapBuilder {
     ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(wx0, wy0, ww, wh);
 
-    // Mountains
-    ctx.fillStyle = '#2d2d44';
-    const fracs = [0, 0.037, 0.074, 0.111, 0.157, 0.204, 0.25, 0.296, 0.343, 0.389, 0.426, 1];
-    const mys   = [200, 140, 180, 130, 160, 120, 155, 135, 165, 140, 170, 200];
-    ctx.beginPath();
-    ctx.moveTo(this.wx(0), this.wy(GROUND_Y));
-    for (let i = 0; i < fracs.length; i++) {
-      ctx.lineTo(this.wx(fracs[i] * m.worldWidth), this.wy(mys[i]));
+    // Background parallax layer — PNG skin or procedural mountains
+    if (m.backgroundSkin) {
+      const img = this.getSkinImage(m.backgroundSkin);
+      if (img.complete && img.naturalWidth > 0) {
+        const yOff = this.sh(m.backgroundSkinY ?? 0);
+        ctx.drawImage(img, wx0, wy0 + yOff, ww, this.sh(GROUND_Y));
+      }
+    } else {
+      ctx.fillStyle = '#2d2d44';
+      const fracs = [0, 0.037, 0.074, 0.111, 0.157, 0.204, 0.25, 0.296, 0.343, 0.389, 0.426, 1];
+      const mys   = [200, 140, 180, 130, 160, 120, 155, 135, 165, 140, 170, 200];
+      ctx.beginPath();
+      ctx.moveTo(this.wx(0), this.wy(GROUND_Y));
+      for (let i = 0; i < fracs.length; i++) {
+        ctx.lineTo(this.wx(fracs[i] * m.worldWidth), this.wy(mys[i]));
+      }
+      ctx.lineTo(this.wx(m.worldWidth), this.wy(GROUND_Y));
+      ctx.closePath();
+      ctx.fill();
     }
-    ctx.lineTo(this.wx(m.worldWidth), this.wy(GROUND_Y));
-    ctx.closePath();
-    ctx.fill();
 
     // Ground (world x-span only)
     const groundH = this.sh(WORLD_H - GROUND_Y);
@@ -478,6 +487,24 @@ class MapBuilder {
     if (!skin) fileInput.value = '';
   }
 
+  private syncBackgroundSkinPreview() {
+    const url     = this.map.backgroundSkin;
+    const preview = document.getElementById('preview-bg-skin') as HTMLImageElement;
+    const clear   = document.getElementById('btn-clear-bg-skin') as HTMLButtonElement;
+    if (url) {
+      preview.src           = url;
+      preview.style.display = 'inline';
+      clear.style.display   = 'inline';
+    } else {
+      preview.style.display = 'none';
+      clear.style.display   = 'none';
+    }
+    const fileInput = document.getElementById('input-bg-skin') as HTMLInputElement;
+    if (!url) fileInput.value = '';
+    (document.getElementById('input-bg-skin-y') as HTMLInputElement).value =
+      String(this.map.backgroundSkinY ?? 0);
+  }
+
   private syncGroundSkinPreview() {
     const url     = this.map.groundSkin;
     const preview = document.getElementById('preview-ground-skin') as HTMLImageElement;
@@ -648,20 +675,20 @@ class MapBuilder {
       const p = m.platforms[i];
       if (Math.abs(cx - this.wx(p.x)) <= HANDLE_ZONE &&
           wy >= p.y && wy <= p.y + p.height) {
-        this.selected = i; this.selectedKind = 'platform'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false;
+        this.selected = i; this.selectedKind = 'platform'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
         this.drag = { kind: 'platform-left', idx: i, origX: p.x, origW: p.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
       if (Math.abs(cx - this.wx(p.x + p.width)) <= HANDLE_ZONE &&
           wy >= p.y && wy <= p.y + p.height) {
-        this.selected = i; this.selectedKind = 'platform'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false;
+        this.selected = i; this.selectedKind = 'platform'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
         this.drag = { kind: 'platform-right', idx: i, origW: p.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
       if (wx >= p.x && wx <= p.x + p.width && wy >= p.y && wy <= p.y + p.height) {
-        this.selected = i; this.selectedKind = 'platform'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false;
+        this.selected = i; this.selectedKind = 'platform'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
         this.drag = { kind: 'platform-move', idx: i, ox: wx - p.x, oy: wy - p.y };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
@@ -673,20 +700,20 @@ class MapBuilder {
       const b = m.blocks[i];
       if (Math.abs(cx - this.wx(b.x)) <= HANDLE_ZONE &&
           wy >= b.y && wy <= b.y + b.height) {
-        this.selected = i; this.selectedKind = 'block'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false;
+        this.selected = i; this.selectedKind = 'block'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
         this.drag = { kind: 'block-left', idx: i, origX: b.x, origW: b.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
       if (Math.abs(cx - this.wx(b.x + b.width)) <= HANDLE_ZONE &&
           wy >= b.y && wy <= b.y + b.height) {
-        this.selected = i; this.selectedKind = 'block'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false;
+        this.selected = i; this.selectedKind = 'block'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
         this.drag = { kind: 'block-right', idx: i, origW: b.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
       if (wx >= b.x && wx <= b.x + b.width && wy >= b.y && wy <= b.y + b.height) {
-        this.selected = i; this.selectedKind = 'block'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false;
+        this.selected = i; this.selectedKind = 'block'; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
         this.drag = { kind: 'block-move', idx: i, ox: wx - b.x, oy: wy - b.y };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
@@ -697,7 +724,7 @@ class MapBuilder {
     const cb = m.coinBox;
     if (wx >= cb.x - cb.width / 2 && wx <= cb.x + cb.width / 2 &&
         wy >= cb.y && wy <= cb.y + cb.height) {
-      this.selectedCoinBox = true; this.selected = null; this.selectedTower = null; this.selectedGround = false;
+      this.selectedCoinBox = true; this.selected = null; this.selectedTower = null; this.selectedGround = false; this.selectedBackground = false;
       this.drag = { kind: 'coinbox', ox: wx - cb.x, oy: wy - cb.y };
       this.syncInputsFromMap();
       document.getElementById('section-coinbox')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -707,7 +734,7 @@ class MapBuilder {
     // Player tower
     if (wx >= m.playerTowerX - TOWER_W / 2 && wx <= m.playerTowerX + TOWER_W / 2 &&
         wy >= GROUND_Y - TOWER_H && wy <= GROUND_Y) {
-      this.selectedTower = 'player'; this.selected = null; this.selectedCoinBox = false; this.selectedGround = false;
+      this.selectedTower = 'player'; this.selected = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
       this.drag = { kind: 'tower-player' };
       this.syncInputsFromMap();
       document.getElementById('section-player-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -717,7 +744,7 @@ class MapBuilder {
     // Enemy tower
     if (wx >= m.enemyTowerX - TOWER_W / 2 && wx <= m.enemyTowerX + TOWER_W / 2 &&
         wy >= GROUND_Y - TOWER_H && wy <= GROUND_Y) {
-      this.selectedTower = 'enemy'; this.selected = null; this.selectedCoinBox = false; this.selectedGround = false;
+      this.selectedTower = 'enemy'; this.selected = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
       this.drag = { kind: 'tower-enemy' };
       this.syncInputsFromMap();
       document.getElementById('section-enemy-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -735,7 +762,7 @@ class MapBuilder {
     // Click on empty space → deselect all
     this.selected = null;
     this.selectedTower = null;
-    this.selectedCoinBox = false; this.selectedGround = false;
+    this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
     this.syncInputsFromMap();
   }
 
@@ -776,7 +803,7 @@ class MapBuilder {
         this.selected      = m.platforms.length - 1;
         this.selectedKind  = 'platform';
         this.selectedTower = null;
-        this.selectedCoinBox = false; this.selectedGround = false;
+        this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
         overlay.classList.remove('open');
         this.syncInputsFromMap();
       });
@@ -805,6 +832,37 @@ class MapBuilder {
       this.syncInputsFromMap();
     });
 
+    // Manage Background button
+    document.getElementById('btn-manage-background')!.addEventListener('click', () => {
+      this.selectedBackground = true;
+      this.selected = null; this.selectedTower = null;
+      this.selectedCoinBox = false; this.selectedGround = false;
+      this.syncInputsFromMap();
+      document.getElementById('section-background')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+
+    // Background skin picker
+    document.getElementById('input-bg-skin')!.addEventListener('change', e => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        this.map.backgroundSkin = reader.result as string;
+        this.syncBackgroundSkinPreview();
+      };
+      reader.readAsDataURL(file);
+    });
+    document.getElementById('btn-clear-bg-skin')!.addEventListener('click', () => {
+      delete this.map.backgroundSkin;
+      (document.getElementById('input-bg-skin') as HTMLInputElement).value = '';
+      this.syncBackgroundSkinPreview();
+    });
+    document.getElementById('input-bg-skin-y')!.addEventListener('input', () => {
+      const val = parseInt((document.getElementById('input-bg-skin-y') as HTMLInputElement).value, 10);
+      if (isNaN(val) || val === 0) delete this.map.backgroundSkinY;
+      else                         this.map.backgroundSkinY = val;
+    });
+
     document.getElementById('btn-save-to-game')!.addEventListener('click', () => {
       saveMapToStorage(this.map);
       const btn = document.getElementById('btn-save-to-game') as HTMLButtonElement;
@@ -827,7 +885,7 @@ class MapBuilder {
         this.map           = parsed;
         this.selected      = null;
         this.selectedTower = null;
-        this.selectedCoinBox = false; this.selectedGround = false;
+        this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false;
         this.syncInputsFromMap();
       } catch {
         alert('Invalid JSON — could not import map.');
@@ -995,7 +1053,7 @@ class MapBuilder {
     sel.addEventListener('change', () => {
       const found = ALL_MAPS.find(m => m.id === sel.value);
       // Load the saved version of the preset if one exists, so edits aren't lost on switch.
-      if (found) { this.map = structuredClone(loadMapWithOverride(found)); this.selected = null; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.syncInputsFromMap(); }
+      if (found) { this.map = structuredClone(loadMapWithOverride(found)); this.selected = null; this.selectedTower = null; this.selectedCoinBox = false; this.selectedGround = false; this.selectedBackground = false; this.syncInputsFromMap(); }
     });
   }
 
@@ -1036,6 +1094,7 @@ class MapBuilder {
     const enemySel   = this.selectedTower === 'enemy';
     const coinSel    = this.selectedCoinBox;
     const groundSel  = this.selectedGround;
+    const bgSel      = this.selectedBackground;
     const platSel    = this.selected !== null && this.selectedKind === 'platform' && this.selected < m.platforms.length;
     const blockSel   = this.selected !== null && this.selectedKind === 'block'    && this.selected < m.blocks.length;
 
@@ -1044,6 +1103,7 @@ class MapBuilder {
     document.getElementById('section-enemy-tower')! .style.display = enemySel  ? 'flex' : 'none';
     document.getElementById('section-coinbox')!     .style.display = coinSel   ? 'flex' : 'none';
     document.getElementById('section-ground')!      .style.display = groundSel ? 'flex' : 'none';
+    document.getElementById('section-background')!  .style.display = bgSel     ? 'flex' : 'none';
     document.getElementById('section-platforms')!   .style.display = platSel   ? 'flex' : 'none';
     document.getElementById('section-blocks')!      .style.display = blockSel  ? 'flex' : 'none';
 
@@ -1093,6 +1153,9 @@ class MapBuilder {
       (document.getElementById('input-ground-tile-h') as HTMLInputElement).value = m.groundSkinTileH !== undefined ? String(m.groundSkinTileH) : '';
       this.syncGroundSkinPreview();
     }
+    if (bgSel) {
+      this.syncBackgroundSkinPreview();
+    }
 
     document.getElementById('plat-count')!.textContent  = `${m.platforms.length} platform(s)`;
     document.getElementById('block-count')!.textContent = `${m.blocks.length} block(s)`;
@@ -1118,6 +1181,9 @@ class MapBuilder {
     } else if (groundSel) {
       dot.style.background = '#4a7c59'; label.style.color = '#4ade80';
       label.style.fontStyle = 'normal'; label.textContent = 'Ground';
+    } else if (bgSel) {
+      dot.style.background = '#7b98aa'; label.style.color = '#a8bcc9';
+      label.style.fontStyle = 'normal'; label.textContent = 'Background';
     } else {
       dot.style.background = '#334'; label.style.color = 'var(--muted-fg, #64748b)';
       label.style.fontStyle = 'italic';

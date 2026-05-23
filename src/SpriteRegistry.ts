@@ -50,15 +50,15 @@ function makeTypeDefs(tribe: Tribe, type: string): SpriteSetDef {
   const base = `/sprites/${tribe}/${type}`;
   return {
     body: {
-      idle:   { path: `${base}/body/idle.png`,   fps: 20, spriteScale: 4.0 },
-      walk:   { path: `${base}/body/walk.png`,   fps: 32, spriteScale: 4.0 },
-      attack: { path: `${base}/body/attack.png`, fps: 30, spriteScale: 4.0 },
-      carry:  { path: `${base}/body/carry.png`,  fps: 24, spriteScale: 4.0 },
-      throw:  { path: `${base}/body/throw.png`,  fps: 24, spriteScale: 4.0 },
+      idle:   { path: `${base}/body/idle.png`,   fps: 20, spriteScale: 4.8 },
+      walk:   { path: `${base}/body/walk.png`,   fps: 32, spriteScale: 4.8 },
+      attack: { path: `${base}/body/attack.png`, fps: 30, spriteScale: 4.8 },
+      carry:  { path: `${base}/body/carry.png`,  fps: 24, spriteScale: 4.8 },
+      throw:  { path: `${base}/body/throw.png`,  fps: 24, spriteScale: 4.8 },
     },
     legs: {
-      idle:   { path: `${base}/legs/idle.png`,   fps: 20, spriteScale: 4.0 },
-      walk:   { path: `${base}/legs/walk.png`,   fps: 32, spriteScale: 4.0 },
+      idle:   { path: `${base}/legs/idle.png`,   fps: 20, spriteScale: 4.8 },
+      walk:   { path: `${base}/legs/walk.png`,   fps: 32, spriteScale: 4.8 },
     },
   };
 }
@@ -72,6 +72,7 @@ const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>>
     conscript: makeTypeDefs('tomaro', 'conscript'),
     warrior:   makeTypeDefs('tomaro', 'warrior'),
     rifleman:  makeTypeDefs('tomaro', 'rifleman'),
+    sniper:    makeTypeDefs('tomaro', 'sniper'),
     archer:    makeTypeDefs('tomaro', 'archer'),
     rocketeer: makeTypeDefs('tomaro', 'rocketeer'),
     grenadier: makeTypeDefs('tomaro', 'grenadier'),
@@ -80,6 +81,7 @@ const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>>
     conscript: makeTypeDefs('meowee', 'conscript'),
     warrior:   makeTypeDefs('meowee', 'warrior'),
     rifleman:  makeTypeDefs('meowee', 'rifleman'),
+    sniper:    makeTypeDefs('meowee', 'Sniper'),
     archer:    makeTypeDefs('meowee', 'archer'),
     rocketeer: makeTypeDefs('meowee', 'rocketeer'),
     grenadier: makeTypeDefs('meowee', 'grenadier'),

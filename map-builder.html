@@ -600,6 +600,21 @@
             </div>
           </div>
 
+          <!-- Background (shown when Manage Background is clicked) -->
+          <div id="section-background" class="section" style="display:none;">
+            <div class="section-title">Background</div>
+            <span class="skin-label">Parallax Layer PNG</span>
+            <input type="file" id="input-bg-skin" accept="image/*" />
+            <img id="preview-bg-skin" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
+            <button id="btn-clear-bg-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
+            <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:4px;">
+              <label>Y offset:</label>
+              <input type="number" id="input-bg-skin-y" value="0" style="width:80px;" title="Screen-space Y offset in pixels (positive = lower)" />
+              <span class="hint">px</span>
+            </div>
+            <span class="hint" style="width:100%; margin-top:2px;">Replaces the procedural mountain layer</span>
+          </div>
+
           <!-- Block (only when a block is selected) -->
           <div id="section-blocks" class="section" style="display:none;">
             <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
