@@ -155,13 +155,15 @@ export class Physics {
     return body;
   }
 
-  createCoinBody(x: number, y: number, vx: number, vy: number, dt: number): Matter.Body {
+  createCoinBody(x: number, y: number, vx: number, vy: number, _dt: number): Matter.Body {
     const body = Matter.Bodies.circle(x, y, 10, {
       friction: COIN_FRICTION, frictionAir: COIN_FRICTION_AIR,
       restitution: COIN_BOUNCE_DAMPING,
       collisionFilter: { category: CAT_COIN, mask: CAT_GROUND | CAT_PLATFORM | CAT_WALL | CAT_TOWER | CAT_BLOCK },
     });
-    Matter.Body.setVelocity(body, { x: vx * dt, y: vy * dt });
+    // Fixed 60 fps reference — same pattern as Character.jump() — so a lag-spike dt
+    // does not amplify the launch velocity (vx * actualDt could be 3× too fast at 20 fps).
+    Matter.Body.setVelocity(body, { x: vx / 60, y: vy / 60 });
     Matter.Composite.add(this.engine.world, body);
     return body;
   }

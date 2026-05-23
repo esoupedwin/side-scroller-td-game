@@ -32,9 +32,10 @@ export class PowerUp {
   private physics:    Physics;
   private bodyInWorld = true;
 
-  private settledY  = 0;
-  private timer     = 0;
-  private floatT    = 0;
+  private settledY       = 0;
+  private timer          = 0;
+  private floatT         = 0;
+  private lastDrawAlpha  = -1;
 
   constructor(x: number, type: PowerUpType, physics: Physics) {
     this.x       = x;
@@ -55,6 +56,8 @@ export class PowerUp {
   // ── Draw ──────────────────────────────────────────────────────────────────
 
   private draw(alpha: number) {
+    if (Math.abs(alpha - this.lastDrawAlpha) < 0.01) return;
+    this.lastDrawAlpha = alpha;
     const color = TYPE_COLOR[this.type];
 
     this.gfx.clear();
@@ -119,6 +122,9 @@ export class PowerUp {
           this.settledY   = this.floorY - POWERUP_BODY_RADIUS;
           Matter.Body.setStatic(this.body, true);
           this.y = this.settledY;
+          // Draw once at full opacity on settle; blink is handled via container.alpha
+          this.draw(1);
+          this.container.alpha = 1;
         }
       }
 
@@ -138,10 +144,10 @@ export class PowerUp {
 
     this.y = this.settledY + Math.sin(this.floatT * POWERUP_BOB_FREQ * Math.PI * 2) * POWERUP_BOB_AMP;
 
-    const alpha = this.timer > POWERUP_LIFETIME_S - 4
+    // Blink via container.alpha instead of redrawing graphics each frame
+    this.container.alpha = this.timer > POWERUP_LIFETIME_S - 4
       ? 0.3 + 0.7 * Math.abs(Math.sin(this.timer * 5))
       : 1;
-    this.draw(alpha);
 
     this.container.x = this.x;
     this.container.y = this.y;

@@ -29,6 +29,9 @@ export interface MapDefinition {
   enemyTowerSkin?:   string;
   enemyTowerSkinW?:  number;
   enemyTowerSkinH?:  number;
+  groundSkin?:       string;  // data URL; tiled across the ground plane
+  groundSkinTileW?:  number;  // tile width  in world px (default: image natural width)
+  groundSkinTileH?:  number;  // tile height in world px (default: image natural height)
 }
 
 export const DEFAULT_MAP: MapDefinition = {
@@ -38,8 +41,8 @@ export const DEFAULT_MAP: MapDefinition = {
   playerTowerX: 60,
   enemyTowerX:  2748,
   platforms: [
-    { x: 1219, y: 330, width: 390, height: 70 },
-    { x: 1293, y: 224, width: 240, height: 14 },
+    { id: 'p1', x: 1219, y: 330, width: 390, height: 70 },
+    { id: 'p2', x: 1293, y: 224, width: 240, height: 14 },
   ],
   blocks: [
     { x:  540, y: 360, width: 200, height: 40 },
@@ -61,9 +64,9 @@ export const HIGHLANDS_MAP: MapDefinition = {
   playerTowerX: 80,
   enemyTowerX:  W - 80,
   platforms: [
-    { x: W / 2 - 260, y: GY - 110, width: 200, height: 14 },
-    { x: W / 2 +  60, y: GY - 110, width: 200, height: 14 },
-    { x: W / 2 -  80, y: GY - 240, width: 160, height: 14 },
+    { id: 'p1', x: W / 2 - 260, y: GY - 110, width: 200, height: 14 },
+    { id: 'p2', x: W / 2 +  60, y: GY - 110, width: 200, height: 14 },
+    { id: 'p3', x: W / 2 -  80, y: GY - 240, width: 160, height: 14 },
   ],
   blocks: [],
   coinBox: {

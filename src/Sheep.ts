@@ -22,6 +22,7 @@ export class Sheep {
   private legPhase       = 0;
   private isJumping      = false;
   private jumpTimer      = 0;
+  private drawFrame      = 0;
 
   private readonly leftBound:  number;
   private readonly rightBound: number;
@@ -102,7 +103,7 @@ export class Sheep {
 
     if (this.state === 'walking') this.legPhase += dt * 9;
 
-    this.draw();
+    if (++this.drawFrame % 3 === 0) this.draw();
     this.container.x = this.x;
     this.container.y = this.y;
   }

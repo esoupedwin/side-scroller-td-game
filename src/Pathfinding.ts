@@ -62,8 +62,9 @@ interface SurfEdge {
 // ── NavGraph ─────────────────────────────────────────────────────────────────
 
 export class NavGraph {
-  private surfaces: NavSurface[]               = [];
-  private edges:    Map<number, SurfEdge[]>    = new Map();
+  private surfaces:    NavSurface[]            = [];
+  private edges:       Map<number, SurfEdge[]> = new Map();
+  private surfaceById: Map<number, NavSurface> = new Map();
 
   /**
    * (Re)build the graph from the current platform list.
@@ -75,8 +76,9 @@ export class NavGraph {
     enemyTowerX:  number,
     blocks:       { x: number; y: number; width: number; height?: number }[] = [],
   ): void {
-    this.surfaces = [];
-    this.edges    = new Map();
+    this.surfaces    = [];
+    this.edges       = new Map();
+    this.surfaceById = new Map();
 
     const groundLeft  = playerTowerX + TOWER_WIDTH / 2;
     const groundRight = enemyTowerX  - TOWER_WIDTH / 2;
@@ -115,7 +117,10 @@ export class NavGraph {
       this.surfaces.push({ id: nextId++, x: b.x, y: b.y, width: b.width, solid: true });
     }
 
-    for (const s of this.surfaces) this.edges.set(s.id, []);
+    for (const s of this.surfaces) {
+      this.edges.set(s.id, []);
+      this.surfaceById.set(s.id, s);
+    }
 
     // Build jump / fall edges between every pair of surfaces
     for (let i = 0; i < this.surfaces.length; i++) {
@@ -243,7 +248,7 @@ export class NavGraph {
 
   private astar(fromId: number, toId: number, toX: number, toFloorY: number): number[] | null {
     const heuristic = (id: number) => {
-      const s = this.surfaces.find(s => s.id === id)!;
+      const s = this.surfaceById.get(id)!;
       return Math.abs((s.x + s.width / 2) - toX) + Math.abs(s.y - toFloorY);
     };
 

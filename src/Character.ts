@@ -239,6 +239,8 @@ export class Character {
   private coinCarryKind:  CoinKind = 'gold';
   private targetCoin:   Coin | null = null;
   private coinCarryGfx: PIXI.Graphics | null = null;
+  private lastDrawnHpRatio  = -1;
+  private lastLocoMoveSpeed = -1;
 
   // Power-up effects
   private powerUpSpeedMult  = 1.0;
@@ -525,7 +527,10 @@ export class Character {
    * Idle and attack are stationary — left at their baseline fps.
    */
   private updateLocomotionFps() {
-    const ratio = this.moveSpeed / this.config.speed;
+    const ms = this.moveSpeed;
+    if (ms === this.lastLocoMoveSpeed) return;
+    this.lastLocoMoveSpeed = ms;
+    const ratio = ms / this.config.speed;
 
     const legs = this.legsSprite;
     const legsName = this.currentLegsAnim;
@@ -1071,6 +1076,8 @@ export class Character {
 
   private drawBar() {
     const ratio = Math.max(0, this.hp / this.maxHp);
+    if (Math.abs(ratio - this.lastDrawnHpRatio) < 0.005) return;
+    this.lastDrawnHpRatio = ratio;
     this.bar.clear();
     this.bar.beginFill(this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR);
     this.bar.drawRect(-CHAR_HP_BAR_W / 2, this.hpBarOffsetY(), CHAR_HP_BAR_W * ratio, CHAR_HP_BAR_H);
@@ -1170,9 +1177,15 @@ export class Character {
       this.legL.rotation = Math.sin(this.legPhase)           * MAX_SWING;
       this.legR.rotation = Math.sin(this.legPhase + Math.PI) * MAX_SWING;
     } else {
-      // Idle: decay toward neutral stance
-      this.legL.rotation *= 0.85;
-      this.legR.rotation *= 0.85;
+      // Idle: decay toward neutral — guard skips trig ops once legs are settled
+      if (this.legL.rotation !== 0) {
+        const nL = this.legL.rotation * 0.85;
+        this.legL.rotation = Math.abs(nL) > 0.001 ? nL : 0;
+      }
+      if (this.legR.rotation !== 0) {
+        const nR = this.legR.rotation * 0.85;
+        this.legR.rotation = Math.abs(nR) > 0.001 ? nR : 0;
+      }
     }
   }
 
@@ -1316,6 +1329,9 @@ export class Character {
   get isDead()         { return this.state === 'dead'; }
   get isCarryingCoin() { return this.carryingCoin; }
 
+  pauseAnimations()  { this.bodySprite?.stop(); this.legsSprite?.stop(); this.container.alpha = 1; }
+  resumeAnimations() { this.bodySprite?.play(); this.legsSprite?.play(); }
+
   get frontX() {
     return this.side === 'player'
       ? this.x + this.config.width / 2
@@ -1421,7 +1437,7 @@ export class Character {
 
   // ── Physics ──────────────────────────────────────────────────────────────────
 
-  private jump(dirX: number, dt: number) {
+  private jump(dirX: number, _dt: number) {
     if (this.isAirborne) return;
     if (this.config.type === 'tanker') return;   // tanks cannot jump
     this.jumpVx     = dirX * this.moveSpeed;
@@ -1435,11 +1451,11 @@ export class Character {
     this.jumpDtMax           = 0;
     Matter.Body.setVelocity(this.body, {
       x: this.body.velocity.x,
-      y: -JUMP_VELOCITY * dt,   // px/tick = px/s * s/tick
+      y: -JUMP_VELOCITY / 60,   // constant px/frame at 60 fps reference; immune to lag-spike dt amplification
     });
   }
 
-  applyKnockback(vx: number, vy: number, dt: number, decayFactor: number) {
+  applyKnockback(vx: number, vy: number, _dt: number, decayFactor: number) {
     this.knockbackVx          = vx;
     this.knockbackDecayFactor = decayFactor;
     this.isAirborne           = true;
@@ -1447,7 +1463,7 @@ export class Character {
     this.clearPath();
     Matter.Body.setVelocity(this.body, {
       x: this.body.velocity.x,
-      y: -Math.abs(vy) * dt,
+      y: -Math.abs(vy) / 60,   // same fixed-fps convention as jump()
     });
   }
 
@@ -1519,20 +1535,17 @@ export class Character {
   private clampBlockWalls(blocks: BlockData[]): void {
     const charTop = this.y - this.config.height;
     for (const b of blocks) {
+      // X-range check first: most characters are nowhere near any given block
+      if (this.x <= b.x || this.x >= b.x + b.width) continue;
       // Standing on top of this block (or any higher surface): skip lateral clamp.
-      // floorY is set on landing and isn't subject to the per-step gravity drift
-      // that pulls this.y a fraction of a px below floorY between syncToBody pins.
       if (this.floorY <= b.y) continue;
       if (charTop >= b.y + b.height) continue;
-      // Push to the nearest block edge
-      if (this.x > b.x && this.x < b.x + b.width) {
-        this.x = this.x < b.x + b.width / 2 ? b.x : b.x + b.width;
-        this.knockbackVx = 0;
-        this.clampedCount++;
-        // Clear the path so requestPath replans from the clamped position
-        // (the new subsegment) and routes a jump over the block.
-        this.clearPath();
-      }
+      this.x = this.x < b.x + b.width / 2 ? b.x : b.x + b.width;
+      this.knockbackVx = 0;
+      this.clampedCount++;
+      // Clear the path so requestPath replans from the clamped position
+      // (the new subsegment) and routes a jump over the block.
+      this.clearPath();
     }
   }
 

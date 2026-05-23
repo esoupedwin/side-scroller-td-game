@@ -51,7 +51,7 @@ export function buildBackground(stage: PIXI.Container, worldWidth: number) {
 }
 
 /** Ground plane — must be added to stage LAST so it renders above all game objects. */
-export function buildGround(stage: PIXI.Container, worldWidth: number) {
+export function buildGround(stage: PIXI.Container, worldWidth: number, groundSkin?: string, groundSkinTileW?: number, groundSkinTileH?: number) {
   const g = new PIXI.Graphics();
   g.beginFill(0x4a7c59);
   g.drawRect(0, GROUND_Y, worldWidth, GAME_HEIGHT - GROUND_Y);
@@ -60,6 +60,19 @@ export function buildGround(stage: PIXI.Container, worldWidth: number) {
   g.drawRect(0, GROUND_Y, worldWidth, 6);
   g.endFill();
   stage.addChild(g);
+
+  if (groundSkin) {
+    PIXI.Assets.load<PIXI.Texture>(groundSkin)
+      .then(tex => {
+        const ts = new PIXI.TilingSprite(tex, worldWidth, GAME_HEIGHT - GROUND_Y);
+        ts.x = 0;
+        ts.y = GROUND_Y;
+        if (groundSkinTileW !== undefined) ts.tileScale.x = groundSkinTileW / tex.width;
+        if (groundSkinTileH !== undefined) ts.tileScale.y = groundSkinTileH / tex.height;
+        stage.addChild(ts);
+      })
+      .catch(() => { /* keep Graphics fallback */ });
+  }
 }
 
 export function buildTowerRangeMarkers(

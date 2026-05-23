@@ -35,6 +35,11 @@ interface CardEntry {
   xpNum:      HTMLElement;
   behaviorEl: HTMLElement;
   rankEl:     HTMLElement;
+  // Cached last-written values — skip DOM writes when nothing has changed
+  lastHpRatio:  number;
+  lastRank:     number;
+  lastAP:       number;
+  lastBehavior: string;
 }
 
 export class CharacterHUD {
@@ -123,7 +128,8 @@ export class CharacterHUD {
     card.append(header, label, rankEl, hpTrack, hpNum, xpTrack, xpNum, behaviorBtn);
     this.container.appendChild(card);
 
-    this.cards.push({ char, root: card, hpBar, hpNum, xpBar, xpNum, behaviorEl: behaviorBtn, rankEl });
+    this.cards.push({ char, root: card, hpBar, hpNum, xpBar, xpNum, behaviorEl: behaviorBtn, rankEl,
+      lastHpRatio: -1, lastRank: -1, lastAP: -1, lastBehavior: '' });
   }
 
   private syncRankEl(el: HTMLElement, rank: 0 | 1 | 2 | 3) {
@@ -168,23 +174,44 @@ export class CharacterHUD {
   }
 
   update() {
-    this.cards = this.cards.filter(entry => {
+    let wi = 0;
+    for (let ri = 0; ri < this.cards.length; ri++) {
+      const entry = this.cards[ri];
       if (entry.char.isDead) {
         entry.root.classList.add('char-card-dying');
         entry.root.addEventListener('animationend', () => entry.root.remove(), { once: true });
-        return false;
+        continue;
       }
 
-      const ratio = Math.max(0, entry.char.hp / entry.char.maxHp);
-      entry.hpBar.style.width = `${ratio * 100}%`;
-      entry.hpNum.textContent = String(Math.ceil(entry.char.hp));
+      // HP bar — guard against redundant DOM writes (only changes on damage/heal)
+      const ratio        = Math.max(0, entry.char.hp / entry.char.maxHp);
+      const ratioKey     = Math.round(ratio * 1000);  // 0.1 % resolution
+      if (ratioKey !== entry.lastHpRatio) {
+        entry.lastHpRatio       = ratioKey;
+        entry.hpBar.style.width = `${ratio * 100}%`;
+        entry.hpNum.textContent = String(Math.ceil(entry.char.hp));
+      }
 
-      this.syncRankEl(entry.rankEl, entry.char.rank);
-      this.syncXpEl(entry.xpBar, entry.xpNum, entry.char.currentAP, entry.char.rank);
-      // Keep behavior label in sync (e.g. if it was reset programmatically)
-      this.syncBehaviorEl(entry.behaviorEl, entry.char.behavior);
-      return true;
-    });
+      // Rank / XP — changes only on promotion or AP gain
+      const rank = entry.char.rank;
+      const ap   = Math.floor(entry.char.currentAP);
+      if (rank !== entry.lastRank || ap !== entry.lastAP) {
+        entry.lastRank = rank;
+        entry.lastAP   = ap;
+        this.syncRankEl(entry.rankEl, rank);
+        this.syncXpEl(entry.xpBar, entry.xpNum, entry.char.currentAP, rank);
+      }
+
+      // Behavior — changes only when the player or AI reassigns it
+      const beh = entry.char.behavior;
+      if (beh !== entry.lastBehavior) {
+        entry.lastBehavior = beh;
+        this.syncBehaviorEl(entry.behaviorEl, beh);
+      }
+
+      this.cards[wi++] = entry;
+    }
+    this.cards.length = wi;
   }
 
   clear() {

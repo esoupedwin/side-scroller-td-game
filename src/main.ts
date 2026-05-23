@@ -3,10 +3,17 @@ import { CHAR_COST } from './constants';
 import { TYPE_ICON } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
 
+const loadingScreen = document.getElementById('loading-screen')!;
+
 await preloadAllSprites();
+
+// Fade out and remove the loading screen once sprites are ready
+loadingScreen.classList.add('fade-out');
+loadingScreen.addEventListener('transitionend', () => loadingScreen.remove(), { once: true });
 
 const container       = document.getElementById('game-container')!;
 const hudEl           = document.getElementById('char-hud')!;
+const uiOverlay       = document.getElementById('ui-overlay')!;
 const coinAmountEl    = document.getElementById('coin-amount')!;
 const cpuCoinAmountEl = document.getElementById('cpu-coin-amount')!;
 const cpuCharsListEl  = document.getElementById('cpu-chars-list')!;
@@ -36,6 +43,7 @@ const goTitle        = document.getElementById('game-over-title')!;
 const goSub          = document.getElementById('game-over-sub')!;
 const restartBtn     = document.getElementById('restart-btn')!;
 
+const pauseOverlay = document.getElementById('pause-overlay')!;
 const canvas = document.createElement('canvas');
 container.insertBefore(canvas, container.firstChild);
 
@@ -50,8 +58,54 @@ for (const t of UNIT_TYPES) {
 restartBtn.addEventListener('click', () => {
   gameOver = false;
   gameOverEl.style.display = 'none';
+  pauseOverlay.style.display = 'none';
+  uiOverlay.style.visibility = 'visible';
   game.reset();  // reset() calls onCoinsChanged which re-evaluates button states
 });
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'p' || e.key === 'P') {
+    game.togglePause();
+    pauseOverlay.style.display  = game.paused ? 'block'   : 'none';
+    uiOverlay.style.visibility  = game.paused ? 'hidden'  : 'visible';
+  }
+});
+
+// ── Performance stats ──────────────────────────────────────────────────────
+{
+  const fpsEl    = document.getElementById('perf-fps')!;
+  const msEl     = document.getElementById('perf-ms')!;
+  const memEl    = document.getElementById('perf-mem')!;
+  const memLabel = document.getElementById('perf-mem-label')!;
+
+  const hasMem = 'memory' in performance;
+  if (hasMem) { memEl.style.display = ''; memLabel.style.display = ''; }
+
+  const frameTimes: number[] = [];
+  let lastT        = performance.now();
+  let flushTimer   = 0;
+
+  game.app.ticker.add(() => {
+    const now = performance.now();
+    const ms  = now - lastT;
+    lastT     = now;
+    frameTimes.push(ms);
+    if (frameTimes.length > 60) frameTimes.shift();
+
+    flushTimer += ms;
+    if (flushTimer < 500) return;
+    flushTimer = 0;
+
+    const avgMs = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+    fpsEl.textContent = (1000 / avgMs).toFixed(0);
+    msEl.textContent  = avgMs.toFixed(1) + ' ms';
+    if (hasMem) {
+      // performance.memory is a non-standard Chrome API
+      const mem = (performance as unknown as { memory: { usedJSHeapSize: number } }).memory;
+      memEl.textContent = (mem.usedJSHeapSize / 1_048_576).toFixed(1) + ' MB';
+    }
+  });
+}
 
 // ── Diagnose mode ──────────────────────────────────────────────────────────
 const diagnoseBtn       = document.getElementById('diagnose-btn')        as HTMLButtonElement;

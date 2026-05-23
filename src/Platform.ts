@@ -1,23 +1,42 @@
 import * as PIXI from 'pixi.js';
 
 export interface PlatformData {
-  x:      number;  // left edge
-  y:      number;  // top surface y
-  width:  number;
-  height: number;
+  id?:     string;  // stable identifier assigned by map builder
+  x:       number;  // left edge
+  y:       number;  // top surface y
+  width:   number;
+  height:  number;
+  zIndex?: number;  // render order among platforms; higher = in front (default 0)
+  skin?:   string;  // data URL (data:image/...;base64,…)
 }
 
 export class Platform {
   readonly data:      PlatformData;
   readonly container: PIXI.Container;
+  private  gfx:      PIXI.Graphics;
 
   constructor(data: PlatformData) {
-    this.data      = data;
-    this.container = new PIXI.Container();
-    this.draw();
+    this.data             = data;
+    this.container        = new PIXI.Container();
+    this.container.zIndex = data.zIndex ?? 0;
+    this.gfx              = this.draw();
+
+    if (data.skin) {
+      PIXI.Assets.load<PIXI.Texture>(data.skin)
+        .then(tex => {
+          this.gfx.visible  = false;
+          const sprite      = new PIXI.Sprite(tex);
+          sprite.x          = data.x;
+          sprite.y          = data.y;
+          sprite.width      = data.width;
+          sprite.height     = data.height;
+          this.container.addChildAt(sprite, 0);
+        })
+        .catch(() => { /* keep Graphics fallback */ });
+    }
   }
 
-  private draw() {
+  private draw(): PIXI.Graphics {
     const { x, y, width, height } = this.data;
     const g = new PIXI.Graphics();
 
@@ -51,5 +70,6 @@ export class Platform {
     g.endFill();
 
     this.container.addChild(g);
+    return g;
   }
 }

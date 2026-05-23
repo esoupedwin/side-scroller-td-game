@@ -177,7 +177,7 @@ export class Projectile {
     const vx = (this.tx - this.sx) / this.travelTime;
     const vy = (this.ty - this.sy) / this.travelTime
              + this.arcHeight * 4 * (2 * t - 1) / this.travelTime;
-    this.redraw(Math.atan2(vy, vx));
+    if (this.kind !== 'bullet') this.gfx.rotation = Math.atan2(vy, vx);
 
     this.container.x = this.x;
     this.container.y = this.y;

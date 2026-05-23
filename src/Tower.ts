@@ -21,10 +21,11 @@ export class Tower {
 
   hp: number = TOWER_HP;
   private attackTimer = 0;
-  private bar: PIXI.Graphics;
-  private hpText: PIXI.Text;
-  private body: PIXI.Graphics;
-  private label: PIXI.Text;
+  private bar:               PIXI.Graphics;
+  private hpText:            PIXI.Text;
+  private body:              PIXI.Graphics;
+  private label:             PIXI.Text;
+  private lastDrawnTowerRatio = -1;
 
   constructor(side: Side, x: number, skinUrl?: string, skinW?: number, skinH?: number) {
     this.side  = side;
@@ -67,10 +68,11 @@ export class Tower {
         .catch(() => { /* keep Graphics body */ });
     }
 
-    // HP bar background
+    // HP bar background — raised 262 px above tower top so it clears character sprites
+    const BAR_OFFSET = 262;
     const barBg = new PIXI.Graphics();
     barBg.beginFill(0x333333);
-    barBg.drawRect(cx - 4, GROUND_Y - TOWER_HEIGHT - 32, TOWER_WIDTH + 8, 10);
+    barBg.drawRect(cx - 4, GROUND_Y - TOWER_HEIGHT - BAR_OFFSET, TOWER_WIDTH + 8, 10);
     barBg.endFill();
     this.container.addChild(barBg);
 
@@ -96,15 +98,17 @@ export class Tower {
       fontWeight: 'bold',
     });
     this.label.x = cx + TOWER_WIDTH / 2 - this.label.width / 2;
-    this.label.y = GROUND_Y - TOWER_HEIGHT - 44;
+    this.label.y = GROUND_Y - TOWER_HEIGHT - BAR_OFFSET - 14;
     this.container.addChild(this.label);
   }
 
   private drawBar() {
     const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const ratio  = Math.max(0, this.hp / TOWER_HP);
+    if (Math.abs(ratio - this.lastDrawnTowerRatio) < 0.005) return;
+    this.lastDrawnTowerRatio = ratio;
     const cx     = this.x - TOWER_WIDTH / 2;
-    const barY   = GROUND_Y - TOWER_HEIGHT - 32;
+    const barY   = GROUND_Y - TOWER_HEIGHT - 262;
     const barW   = TOWER_WIDTH + 8;
 
     this.bar.clear();

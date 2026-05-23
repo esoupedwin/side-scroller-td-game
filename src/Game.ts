@@ -187,6 +187,7 @@ export class Game {
   private silverDropTimer       = 0;
   private silverDropInterval    = 0;
   private isOver           = false;
+  private isPaused         = false;
 
   private readonly hud:               CharacterHUD;
   private readonly onGameOver:         (winner: 'player' | 'enemy', reason: 'tower' | 'timeout') => void;
@@ -211,6 +212,25 @@ export class Game {
     stance: 'economy', score: 0, unitAdv: 0, towerAdv: 0, coinAdv: 0, decision: '—',
   };
   private lastNotifiedEnemyTowerHp = -1;
+
+  // Reusable arrays rebuilt each tick — avoids per-tick filter() allocations
+  private readonly liveChars:  Character[] = [];
+  private readonly playerLive: Character[] = [];
+  private readonly enemyLive:  Character[] = [];
+  private readonly liveCoins:  Coin[]      = [];
+
+  // Reusable UpdateContext objects — one per side, mutated each tick to avoid
+  // allocating a new object + 3 closures per character per frame.
+  private playerCtx!: UpdateContext;
+  private enemyCtx!:  UpdateContext;
+  // Set immediately before c.update(ctx) so deposit/fire closures can reference the current char.
+  private updateChar!: Character;
+
+  // Throttle timers (ms)
+  private notifyCpuCharsMs    = 0;
+  private notifyCpuStrategyMs = 0;
+  private cpuStanceMs         = 0;
+  private cullingFrame        = 0;
 
   constructor(
     canvas:              HTMLCanvasElement,
@@ -238,7 +258,7 @@ export class Game {
       width:  VIEWPORT_WIDTH,
       height: GAME_HEIGHT,
       backgroundColor: 0x87ceeb,
-      antialias: true,
+      antialias: false,
     });
 
     this.build();
@@ -269,12 +289,16 @@ export class Game {
     buildTowerRangeMarkers(this.world, m.playerTowerX, m.enemyTowerX);
     buildCoinBox(this.world, m.coinBox);
 
-    // Build one Platform visual per map platform
+    // Build one Platform visual per map platform — use a dedicated container so
+    // sortableChildren only affects platform draw-order, not the whole world.
+    const platLayer = new PIXI.Container();
+    platLayer.sortableChildren = true;
+    this.world.addChild(platLayer);
     this.platforms = m.platforms.map(p => new Platform(p));
     this.platformData.length = 0;
     for (const plat of this.platforms) {
       this.platformData.push(plat.data);
-      this.world.addChild(plat.container);
+      platLayer.addChild(plat.container);
     }
 
     // Build one Block visual per map block
@@ -348,7 +372,7 @@ export class Game {
     ];
 
     // Ground plane — drawn above all game objects so units appear grounded.
-    buildGround(this.world, m.worldWidth);
+    buildGround(this.world, m.worldWidth, m.groundSkin, m.groundSkinTileW, m.groundSkinTileH);
 
     // Debug overlay — drawn on top of everything in world space.
     this.collisionDebugLayer = new PIXI.Graphics();
@@ -387,6 +411,57 @@ export class Game {
     this.powerUpIndicatorContainer.y   = 5;   // fixed at top of world
     this.powerUpIndicatorContainer.visible = false;
     this.world.addChild(this.powerUpIndicatorContainer);  // world space — scrolls with camera
+
+    // Pre-build one UpdateContext per side. Stable fields are set here; dt and
+    // tower frontX values are patched each tick — no per-character allocation needed.
+    const towerY = GROUND_Y - TOWER_HEIGHT * 0.5;
+    this.playerCtx = {
+      dt: 0,
+      allChars:         this.liveChars,
+      enemyTowerFrontX: this.enemyTower.frontX,
+      enemyTowerY:      towerY,
+      homeTowerFrontX:  this.playerTower.frontX,
+      worldWidth:       this.mapDef.worldWidth,
+      coins:            this.liveCoins,
+      platforms:        this.platformData,
+      blocks:           this.blockData,
+      navGraph:         this.navGraph,
+      onFire:           (req) => this.fireProjectile(req),
+      onDamageTower:    (dmg) => this.enemyTower.takeDamage(dmg),
+      onDepositCoin:    (value) => {
+        this.coinBalance += value;
+        this.notifyCoins();
+        const c = this.updateChar;
+        this.diagnostics.noteEvent(this.elapsedSeconds,
+          `Coin deposit: #${c.id} ${c.name} (${c.side}) +${value}`, {
+            playerTotal: Math.floor(this.coinBalance),
+            cpuTotal:    Math.floor(this.cpuCoinBalance),
+          });
+      },
+    };
+    this.enemyCtx = {
+      dt: 0,
+      allChars:         this.liveChars,
+      enemyTowerFrontX: this.playerTower.frontX,
+      enemyTowerY:      towerY,
+      homeTowerFrontX:  this.enemyTower.frontX,
+      worldWidth:       this.mapDef.worldWidth,
+      coins:            this.liveCoins,
+      platforms:        this.platformData,
+      blocks:           this.blockData,
+      navGraph:         this.navGraph,
+      onFire:           (req) => this.fireProjectile(req),
+      onDamageTower:    (dmg) => this.playerTower.takeDamage(dmg),
+      onDepositCoin:    (value) => {
+        this.cpuCoinBalance += value;
+        const c = this.updateChar;
+        this.diagnostics.noteEvent(this.elapsedSeconds,
+          `Coin deposit: #${c.id} ${c.name} (${c.side}) +${value}`, {
+            playerTotal: Math.floor(this.coinBalance),
+            cpuTotal:    Math.floor(this.cpuCoinBalance),
+          });
+      },
+    };
   }
 
   private readonly TYPE_COLORS: Record<PowerUpType, number> = {
@@ -470,6 +545,17 @@ export class Game {
     return true;
   }
 
+  get paused() { return this.isPaused; }
+
+  togglePause() {
+    if (this.isOver) return;
+    this.isPaused = !this.isPaused;
+    for (const c of this.characters) {
+      if (this.isPaused) c.pauseAnimations();
+      else               c.resumeAnimations();
+    }
+  }
+
   /** Dev-only: when enabled, the player side is also driven by the CPU AI. */
   setCpuVsCpu(enabled: boolean): void {
     if (this.cpuVsCpu === enabled) return;
@@ -481,9 +567,7 @@ export class Game {
 
   // ── CPU strategic assessment ─────────────────────────────────────────────────
 
-  private assessCpuStance(self: 'player' | 'enemy', liveChars: Character[]): 'push' | 'economy' | 'defend' {
-    const selfChars = liveChars.filter(c => c.side === self);
-    const oppChars  = liveChars.filter(c => c.side !== self);
+  private assessCpuStance(self: 'player' | 'enemy', selfChars: Character[], oppChars: Character[]): 'push' | 'economy' | 'defend' {
     const selfTower = self === 'enemy' ? this.enemyTower : this.playerTower;
     const oppTower  = self === 'enemy' ? this.playerTower : this.enemyTower;
     const selfCoins = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
@@ -528,13 +612,11 @@ export class Game {
     return stance;
   }
 
-  private spawnCpu(self: 'player' | 'enemy', liveChars: Character[]) {
+  private spawnCpu(self: 'player' | 'enemy', selfChars: Character[], oppChars: Character[]) {
     if (this.isOver) return;
 
-    const stance   = self === 'enemy' ? this.cpuStance : this.playerStance;
-    const selfChars = liveChars.filter(c => c.side === self);
-    const oppCount  = liveChars.filter(c => c.side !== self).length;
-    const pressure  = oppCount - selfChars.length;
+    const stance    = self === 'enemy' ? this.cpuStance : this.playerStance;
+    const pressure  = oppChars.length - selfChars.length;
     const balance   = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
     const spawnX    = self === 'enemy' ? this.enemyTower.frontX : this.playerTower.frontX;
 
@@ -548,11 +630,10 @@ export class Game {
     // stance into a splash-heavy spawn order.
     const CLUSTER_RADIUS    = 80;
     const CLUSTER_THRESHOLD = 3;
-    const opponents = liveChars.filter(c => c.side !== self);
     let maxCluster = 0;
-    for (const c of opponents) {
+    for (const c of oppChars) {
       let count = 0;
-      for (const other of opponents) {
+      for (const other of oppChars) {
         if (Math.abs(c.x - other.x) <= CLUSTER_RADIUS) count++;
       }
       if (count > maxCluster) maxCluster = count;
@@ -680,7 +761,7 @@ export class Game {
 
   private tick() {
     const ticker = this.app.ticker;
-    const dt     = ticker.deltaMS / 1000;
+    const dt     = Math.min(ticker.deltaMS / 1000, 1 / 30);  // cap at 33 ms — prevents physics explosion on lag spikes
 
     // Camera — runs even when the game is over so the player can review the field
     const CAMERA_SPEED = 500; // px/s
@@ -689,7 +770,8 @@ export class Game {
     this.cameraX     = Math.max(0, Math.min(this.mapDef.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM, this.cameraX));
     this.world.x     = -this.cameraX * GAME_ZOOM;
 
-    if (this.isOver) return;
+    if (this.isOver)   { this.updateCulling(); return; }
+    if (this.isPaused) { this.updateCulling(); return; }
 
     const playerRate = this.coinBalance    < LOW_BALANCE_THRESHOLD ? PASSIVE_INCOME_RATE * LOW_BALANCE_INCOME_MULT : PASSIVE_INCOME_RATE;
     const cpuRate    = this.cpuCoinBalance < LOW_BALANCE_THRESHOLD ? PASSIVE_INCOME_RATE * LOW_BALANCE_INCOME_MULT : PASSIVE_INCOME_RATE;
@@ -697,25 +779,41 @@ export class Game {
     this.cpuCoinBalance += cpuRate    * dt;
     this.notifyCoins();
     this.notifyCpuCoins();
-    this.notifyCpuChars();
+    this.notifyCpuCharsMs    += ticker.deltaMS;
+    this.notifyCpuStrategyMs += ticker.deltaMS;
+    if (this.notifyCpuCharsMs    >= 200) { this.notifyCpuCharsMs    = 0; this.notifyCpuChars(); }
+    if (this.notifyCpuStrategyMs >= 150) { this.notifyCpuStrategyMs = 0; this.notifyCpuStrategy(); }
     this.notifyEnemyTowerHp();
 
-    const liveChars = this.characters.filter(c => !c.isDead);
-    this.cpuStance = this.assessCpuStance('enemy', liveChars);
-    this.notifyCpuStrategy();
+    // Rebuild live arrays into pre-allocated buffers — avoids filter() allocations each tick
+    this.liveChars.length = 0; this.playerLive.length = 0; this.enemyLive.length = 0;
+    for (const c of this.characters) {
+      if (!c.isDead) {
+        this.liveChars.push(c);
+        (c.side === 'player' ? this.playerLive : this.enemyLive).push(c);
+      }
+    }
+    const liveChars = this.liveChars;
+
+    // Throttle stance assessment to every 500 ms — frame-perfect precision not needed
+    this.cpuStanceMs += ticker.deltaMS;
+    if (this.cpuStanceMs >= 500) {
+      this.cpuStanceMs = 0;
+      this.cpuStance = this.assessCpuStance('enemy', this.enemyLive, this.playerLive);
+      if (this.cpuVsCpu) this.playerStance = this.assessCpuStance('player', this.playerLive, this.enemyLive);
+    }
 
     // CPU auto-spawn (uses liveChars for strategic decisions)
     this.cpuSpawnTimer += ticker.deltaMS;
     if (this.cpuSpawnTimer >= this.cpuSpawnInterval) {
-      this.spawnCpu('enemy', liveChars);  // resets timer internally
+      this.spawnCpu('enemy', this.enemyLive, this.playerLive);
     }
 
     // CPU vs CPU: drive the player side with a second AI instance
     if (this.cpuVsCpu) {
-      this.playerStance = this.assessCpuStance('player', liveChars);
       this.playerSpawnTimer += ticker.deltaMS;
       if (this.playerSpawnTimer >= this.playerSpawnInterval) {
-        this.spawnCpu('player', liveChars);  // resets player timer internally
+        this.spawnCpu('player', this.playerLive, this.enemyLive);
       }
     }
 
@@ -809,51 +907,35 @@ export class Game {
     // Update sheep
     if (this.sheep) this.sheep.update(dt);
 
-    const liveCoins = this.coins.filter(c => !c.isDead);
+    this.liveCoins.length = 0;
+    for (const c of this.coins) { if (!c.isDead) this.liveCoins.push(c); }
+    const liveCoins = this.liveCoins;
 
-    this.tickCpuCollectAI('enemy', liveChars, liveCoins);
-    this.tickCpuBehaviorAI('enemy', liveChars);
+    this.tickCpuCollectAI('enemy', this.enemyLive, liveCoins);
+    this.tickCpuBehaviorAI('enemy', this.enemyLive);
     if (this.cpuVsCpu) {
-      this.tickCpuCollectAI('player', liveChars, liveCoins);
-      this.tickCpuBehaviorAI('player', liveChars);
+      this.tickCpuCollectAI('player', this.playerLive, liveCoins);
+      this.tickCpuBehaviorAI('player', this.playerLive);
     }
 
-    // Update characters
+    // Update characters — reuse pre-allocated ctx objects; patch only the fields
+    // that change each tick to eliminate per-character object + closure allocation.
+    const towerY = GROUND_Y - TOWER_HEIGHT * 0.5;
+    this.playerCtx.dt               = dt;
+    this.playerCtx.enemyTowerFrontX = this.enemyTower.frontX;
+    this.playerCtx.enemyTowerY      = towerY;
+    this.playerCtx.homeTowerFrontX  = this.playerTower.frontX;
+    this.playerCtx.worldWidth       = this.mapDef.worldWidth;
+
+    this.enemyCtx.dt               = dt;
+    this.enemyCtx.enemyTowerFrontX = this.playerTower.frontX;
+    this.enemyCtx.enemyTowerY      = towerY;
+    this.enemyCtx.homeTowerFrontX  = this.enemyTower.frontX;
+    this.enemyCtx.worldWidth       = this.mapDef.worldWidth;
+
     for (const c of liveChars) {
-      const isPlayer    = c.side === 'player';
-      const enemyTower  = isPlayer ? this.enemyTower  : this.playerTower;
-      const towerFrontX = enemyTower.frontX;
-      const towerY      = GROUND_Y - TOWER_HEIGHT * 0.5;
-
-      const ctx: UpdateContext = {
-        dt,
-        allChars:          liveChars,
-        enemyTowerFrontX:  towerFrontX,
-        enemyTowerY:       towerY,
-        homeTowerFrontX:   isPlayer ? this.playerTower.frontX : this.enemyTower.frontX,
-        worldWidth:        this.mapDef.worldWidth,
-        coins:             liveCoins,
-        platforms:         this.platformData,
-        blocks:            this.blockData,
-        navGraph:          this.navGraph,
-        onFire:        (req: FireRequest) => this.fireProjectile(req),
-        onDamageTower: (dmg: number)     => enemyTower.takeDamage(dmg),
-        onDepositCoin: (value: number) => {
-          if (isPlayer) {
-            this.coinBalance += value;
-            this.notifyCoins();
-          } else {
-            this.cpuCoinBalance += value;
-          }
-          this.diagnostics.noteEvent(this.elapsedSeconds,
-            `Coin deposit: #${c.id} ${c.name} (${c.side}) +${value}`, {
-              playerTotal: Math.floor(this.coinBalance),
-              cpuTotal:    Math.floor(this.cpuCoinBalance),
-            });
-        },
-      };
-
-      c.update(ctx);
+      this.updateChar = c;
+      c.update(c.side === 'player' ? this.playerCtx : this.enemyCtx);
     }
 
     // Physics step: push AI positions → engine → read results back
@@ -874,9 +956,9 @@ export class Game {
     // Tower fire
     const fireShot = (shot: TowerShot, side: 'player' | 'enemy') =>
       this.fireProjectile({ ...shot, side, projectileKind: 'arrow' });
-    const shotP = this.playerTower.tryFire(dt, liveChars.filter(c => c.side === 'enemy'));
+    const shotP = this.playerTower.tryFire(dt, this.enemyLive);
     if (shotP) fireShot(shotP, 'player');
-    const shotE = this.enemyTower.tryFire(dt, liveChars.filter(c => c.side === 'player'));
+    const shotE = this.enemyTower.tryFire(dt, this.playerLive);
     if (shotE) fireShot(shotE, 'enemy');
 
     // Spawn coins dropped or thrown by characters (scan all — some may have just died)
@@ -981,50 +1063,65 @@ export class Game {
       }
     }
 
-    // Cull dead entities
-    this.characters = this.characters.filter(c => {
-      if (c.isDead) {
-        this.unitLayer.removeChild(c.container);
-        this.releaseCharId(c.id);
-        const reward = c.killedBy === 'tower' ? TOWER_KILL_REWARD : KILL_REWARD;
-        c.destroy();
-        if (c.side === 'enemy') {
-          this.coinBalance += reward;
-          this.notifyCoins();
-        } else {
-          this.cpuCoinBalance += reward;
-          this.notifyCpuCoins();
-        }
-        return false;
+    // Cull dead entities — in-place to avoid allocating new arrays each tick
+    { let wi = 0;
+      for (let ri = 0; ri < this.characters.length; ri++) {
+        const c = this.characters[ri];
+        if (c.isDead) {
+          this.unitLayer.removeChild(c.container);
+          this.releaseCharId(c.id);
+          const reward = c.killedBy === 'tower' ? TOWER_KILL_REWARD : KILL_REWARD;
+          c.destroy();
+          if (c.side === 'enemy') { this.coinBalance += reward; this.notifyCoins(); }
+          else                    { this.cpuCoinBalance += reward; this.notifyCpuCoins(); }
+        } else { this.characters[wi++] = c; }
       }
-      return true;
-    });
-    this.projectiles = this.projectiles.filter(p => {
-      if (p.isDead) { this.projLayer.removeChild(p.container); p.destroy(); return false; }
-      return true;
-    });
-    this.grenades = this.grenades.filter(g => {
-      if (g.isDead) { this.grenadeLayer.removeChild(g.container); g.destroy(); return false; }
-      return true;
-    });
-    this.rockets = this.rockets.filter(r => {
-      if (r.isDead) { this.rocketLayer.removeChild(r.container); r.destroy(); return false; }
-      return true;
-    });
-    this.coins = this.coins.filter(coin => {
-      if (coin.isDead) { this.coinLayer.removeChild(coin.container); coin.destroy(); return false; }
-      return true;
-    });
-    this.powerUps = this.powerUps.filter(pu => {
-      if (pu.isDead) { this.powerUpLayer.removeChild(pu.container); pu.destroy(); return false; }
-      return true;
-    });
-    this.damageLabels = this.damageLabels.filter(l => {
-      if (l.isDead) { this.labelLayer.removeChild(l.container); l.destroy(); return false; }
-      return true;
-    });
+      this.characters.length = wi; }
+    { let wi = 0;
+      for (let ri = 0; ri < this.projectiles.length; ri++) {
+        const p = this.projectiles[ri];
+        if (p.isDead) { this.projLayer.removeChild(p.container); p.destroy(); }
+        else          { this.projectiles[wi++] = p; }
+      }
+      this.projectiles.length = wi; }
+    { let wi = 0;
+      for (let ri = 0; ri < this.grenades.length; ri++) {
+        const g = this.grenades[ri];
+        if (g.isDead) { this.grenadeLayer.removeChild(g.container); g.destroy(); }
+        else          { this.grenades[wi++] = g; }
+      }
+      this.grenades.length = wi; }
+    { let wi = 0;
+      for (let ri = 0; ri < this.rockets.length; ri++) {
+        const r = this.rockets[ri];
+        if (r.isDead) { this.rocketLayer.removeChild(r.container); r.destroy(); }
+        else          { this.rockets[wi++] = r; }
+      }
+      this.rockets.length = wi; }
+    { let wi = 0;
+      for (let ri = 0; ri < this.coins.length; ri++) {
+        const coin = this.coins[ri];
+        if (coin.isDead) { this.coinLayer.removeChild(coin.container); coin.destroy(); }
+        else             { this.coins[wi++] = coin; }
+      }
+      this.coins.length = wi; }
+    { let wi = 0;
+      for (let ri = 0; ri < this.powerUps.length; ri++) {
+        const pu = this.powerUps[ri];
+        if (pu.isDead) { this.powerUpLayer.removeChild(pu.container); pu.destroy(); }
+        else           { this.powerUps[wi++] = pu; }
+      }
+      this.powerUps.length = wi; }
+    { let wi = 0;
+      for (let ri = 0; ri < this.damageLabels.length; ri++) {
+        const l = this.damageLabels[ri];
+        if (l.isDead) { this.labelLayer.removeChild(l.container); l.destroy(); }
+        else          { this.damageLabels[wi++] = l; }
+      }
+      this.damageLabels.length = wi; }
 
-    this.hud.update();
+    this.cullingFrame++;
+    if (this.cullingFrame % 3 === 0) this.hud.update();
 
     // Collision-box debug overlay
     if (this.showCollisionBoxes) this.drawCollisionDebug(liveChars);
@@ -1044,6 +1141,25 @@ export class Game {
 
     if (this.enemyTower.isDead)       this.end('player', 'tower');
     else if (this.playerTower.isDead) this.end('enemy',  'tower');
+
+    if (this.cullingFrame % 2 === 0) this.updateCulling();
+  }
+
+  // ── Viewport culling ─────────────────────────────────────────────────────────
+
+  private updateCulling() {
+    const viewL  = this.cameraX - 100;
+    const viewR  = this.cameraX + VIEWPORT_WIDTH / GAME_ZOOM + 100;
+    const inView = (x: number) => x >= viewL && x <= viewR;
+
+    for (const c  of this.characters)   c.container.visible  = inView(c.x);
+    for (const c  of this.coins)        c.container.visible  = inView(c.x);
+    for (const p  of this.projectiles)  p.container.visible  = inView(p.x);
+    for (const g  of this.grenades)     g.container.visible  = inView(g.x);
+    for (const r  of this.rockets)      r.container.visible  = inView(r.x);
+    for (const pu of this.powerUps)     pu.container.visible = inView(pu.x);
+    for (const l  of this.damageLabels) l.container.visible  = inView(l.container.x);
+    if (this.sheep) this.sheep.container.visible = inView(this.sheep.x);
   }
 
   // ── Collision debug overlay ──────────────────────────────────────────────────
@@ -1247,9 +1363,8 @@ export class Game {
 
   // ── CPU collect AI ───────────────────────────────────────────────────────────
 
-  private tickCpuCollectAI(self: 'player' | 'enemy', liveChars: Character[], liveCoins: Coin[]) {
+  private tickCpuCollectAI(self: 'player' | 'enemy', selfChars: Character[], liveCoins: Coin[]) {
     const stance     = self === 'enemy' ? this.cpuStance : this.playerStance;
-    const selfChars  = liveChars.filter(c => c.side === self);
     const collectors = selfChars.filter(c => c.behavior === 'collecting');
     const noteDecision = (msg: string) => { if (self === 'enemy') this.cpuStrategyInfo.decision = msg; };
 
@@ -1258,31 +1373,27 @@ export class Game {
       stance === 'push'   ? 1 :
       stance === 'defend' ? (selfChars.length >= 3 ? 1 : 0) : 2;
 
-    // Recall excess non-carrying collectors
-    if (collectors.length > wantedCollectors) {
+    // Recall excess non-carrying collectors — track count inline, no inner filter
+    let activeCount = collectors.length;
+    if (activeCount > wantedCollectors) {
       for (const c of collectors) {
-        if (collectors.filter(x => x.behavior === 'collecting').length <= wantedCollectors) break;
+        if (activeCount <= wantedCollectors) break;
         if (!c.isCarryingCoin) {
           c.behavior = 'attacking';
+          activeCount--;
           noteDecision(`← Recalled #${c.id} (${c.config.type})`);
         }
       }
     }
 
     if (liveCoins.length > 0) {
-      const active = selfChars.filter(c => c.behavior === 'collecting').length;
-      if (active < wantedCollectors) {
+      if (activeCount < wantedCollectors) {
         // Prefer light attackers that are marching (not engaged), closest to a coin.
         // Tankers and heavies are too valuable for collection runs.
-        const pool = selfChars.filter(
-          c => c.behavior === 'attacking'
-            && c.config.type !== 'tanker'
-            && c.config.type !== 'heavy'
-            && c.state === 'marching',
-        );
         let best: Character | null = null;
         let minDist = Infinity;
-        for (const c of pool) {
+        for (const c of selfChars) {
+          if (c.behavior !== 'attacking' || c.config.type === 'tanker' || c.config.type === 'heavy' || c.state !== 'marching') continue;
           for (const coin of liveCoins) {
             const d = Math.abs(c.x - coin.x);
             if (d < minDist) { minDist = d; best = c; }
@@ -1305,9 +1416,8 @@ export class Game {
 
   // ── CPU behaviour AI ─────────────────────────────────────────────────────────
 
-  private tickCpuBehaviorAI(self: 'player' | 'enemy', liveChars: Character[]) {
+  private tickCpuBehaviorAI(self: 'player' | 'enemy', selfChars: Character[]) {
     const stance    = self === 'enemy' ? this.cpuStance : this.playerStance;
-    const selfChars = liveChars.filter(c => c.side === self);
     const noteDecision = (msg: string) => { if (self === 'enemy') this.cpuStrategyInfo.decision = msg; };
 
     const isMelee = (type: string) => type === 'warrior' || type === 'heavy' || type === 'tanker';
@@ -1412,6 +1522,7 @@ export class Game {
     this.powerUpIndicatorActive = false;
     this.powerUpLastCountdown   = -1;
     this.isOver                = false;
+    this.isPaused              = false;
     this.nextCharId            = 1;
     this.freeCharIds           = [];
     this.lastCpuCharsSig       = '';
@@ -1427,6 +1538,10 @@ export class Game {
     this.timeRemaining         = GAME_DURATION_SEC;
     this.lastNotifiedTime      = -1;
 
+    this.notifyCpuCharsMs    = 0;
+    this.notifyCpuStrategyMs = 0;
+    this.cpuStanceMs         = 0;
+    this.cullingFrame        = 0;
     this.cameraX = 0;
     this.hud.clear();
     this.app.stage.removeChildren();
