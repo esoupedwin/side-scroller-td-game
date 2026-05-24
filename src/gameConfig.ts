@@ -91,6 +91,16 @@ export const GameConfig = {
       cost:        100,
       critical:    0.05, // 5 % miss chance — trained marksman
     },
+    viking: {
+      type:        'viking'   as const,
+      hp:          280,
+      speed:       100,
+      attackRange: 44,
+      attackPower: 20,
+      fireRate:    1.0,
+      cost:        120,
+      critical:    0.12,
+    },
     heavy: {
       type:        'heavy'    as const,
       hp:          220,
@@ -261,5 +271,29 @@ export const GameConfig = {
     hpBoostPerRank:    0.20,  // +20% max HP per rank above Private
     speedBoostPerRank: 0.10,  // +10% speed per rank
     atkBoostPerRank:   0.15,  // +15% attack power per rank
+  },
+
+  audio: {
+    sfxVolume: 0.32,
+    // Spatial attenuation: sounds originating outside the viewport fade with distance.
+    spatialMaxDist: 800,  // world-px beyond the viewport edge at which volume reaches its minimum
+    spatialMinVol:  0.05, // volume fraction at or beyond spatialMaxDist (0 = silent)
+    // Each sound maps to one or more source files — Howler picks the first format the browser supports.
+    // WAV and FLAC work in all browsers; OGG works everywhere except Safari.
+    // An empty array disables that sound gracefully — no file required until you have it.
+    sounds: {
+      // List every format you might have — Howler picks the first file that actually exists.
+      // Keep the format your file is in as the first entry for fastest loading.
+      sword_slash:      ['/audio/sword_slash.ogg',       '/audio/sword_slash.mp3',      '/audio/sword_slash.wav'],
+      punch:            ['/audio/punch.wav',              '/audio/punch.mp3',             '/audio/punch.ogg'],
+      arrow_fire:       ['/audio/arrow_fire.wav',         '/audio/arrow_fire.mp3',        '/audio/arrow_fire.ogg'],
+      gun_fire:         ['/audio/gun_fire.wav',           '/audio/gun_fire.mp3',          '/audio/gun_fire.ogg'],
+      sniper_shot:      ['/audio/sniper_shot.wav',        '/audio/sniper_shot.mp3',       '/audio/sniper_shot.ogg'],
+      rocket_launch:    ['/audio/rocket_launch.mp3',      '/audio/rocket_launch.wav',     '/audio/rocket_launch.ogg'],
+      grenade_throw:    ['/audio/grenade_throw.wav',      '/audio/grenade_throw.mp3',     '/audio/grenade_throw.ogg'],
+      rocket_explosion: ['/audio/rocket_explosion.wav',   '/audio/rocket_explosion.mp3',  '/audio/rocket_explosion.ogg'],
+      grenade_explosion:['/audio/grenade_explosion.wav',  '/audio/grenade_explosion.mp3', '/audio/grenade_explosion.ogg'],
+      level_up:         ['/audio/level_up.wav',           '/audio/level_up.mp3',          '/audio/level_up.ogg'],
+    },
   },
 } as const;

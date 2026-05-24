@@ -27,6 +27,10 @@ export class Tower {
   private label:             PIXI.Text;
   private lastDrawnTowerRatio = -1;
 
+  // HP bar dimensions — 1.4× height, 1.2× width relative to the original design
+  private static readonly BAR_H = Math.round(10 * 1.4);                   // 14 px
+  private static readonly BAR_W = Math.round((TOWER_WIDTH + 8) * 1.8);    // ~158 px
+
   constructor(side: Side, x: number, skinUrl?: string, skinW?: number, skinH?: number) {
     this.side  = side;
     this.x     = x;
@@ -72,7 +76,7 @@ export class Tower {
     const BAR_OFFSET = 262;
     const barBg = new PIXI.Graphics();
     barBg.beginFill(0x333333);
-    barBg.drawRect(cx - 4, GROUND_Y - TOWER_HEIGHT - BAR_OFFSET, TOWER_WIDTH + 8, 10);
+    barBg.drawRoundedRect(x - Tower.BAR_W / 2, GROUND_Y - TOWER_HEIGHT - BAR_OFFSET, Tower.BAR_W, Tower.BAR_H, Tower.BAR_H / 2);
     barBg.endFill();
     this.container.addChild(barBg);
 
@@ -82,7 +86,7 @@ export class Tower {
 
     // HP numeric overlay
     this.hpText = new PIXI.Text('', {
-      fontSize: 9,
+      fontSize: 13,
       fill: 0xffffff,
       fontWeight: 'bold',
       stroke: 0x000000,
@@ -93,32 +97,31 @@ export class Tower {
 
     // Label
     this.label = new PIXI.Text(side === 'player' ? 'YOUR TOWER' : 'ENEMY TOWER', {
-      fontSize: 9,
+      fontSize: 13,
       fill: 0xffffff,
       fontWeight: 'bold',
     });
-    this.label.x = cx + TOWER_WIDTH / 2 - this.label.width / 2;
-    this.label.y = GROUND_Y - TOWER_HEIGHT - BAR_OFFSET - 14;
+    this.label.x = x - this.label.width / 2;
+    this.label.y = GROUND_Y - TOWER_HEIGHT - BAR_OFFSET - 18;
     this.container.addChild(this.label);
   }
 
   private drawBar() {
-    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const color  = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const ratio  = Math.max(0, this.hp / TOWER_HP);
     if (Math.abs(ratio - this.lastDrawnTowerRatio) < 0.005) return;
     this.lastDrawnTowerRatio = ratio;
-    const cx     = this.x - TOWER_WIDTH / 2;
+    const barX   = this.x - Tower.BAR_W / 2;
     const barY   = GROUND_Y - TOWER_HEIGHT - 262;
-    const barW   = TOWER_WIDTH + 8;
 
     this.bar.clear();
     this.bar.beginFill(color);
-    this.bar.drawRect(cx - 4, barY, barW * ratio, 10);
+    this.bar.drawRoundedRect(barX, barY, Math.max(Tower.BAR_H, Tower.BAR_W * ratio), Tower.BAR_H, Tower.BAR_H / 2);
     this.bar.endFill();
 
     this.hpText.text = `${Math.ceil(this.hp)} / ${TOWER_HP}`;
-    this.hpText.x    = cx - 4 + (barW - this.hpText.width) / 2;
-    this.hpText.y    = barY + (10 - this.hpText.height) / 2;
+    this.hpText.x    = barX + (Tower.BAR_W - this.hpText.width) / 2;
+    this.hpText.y    = barY + (Tower.BAR_H - this.hpText.height) / 2;
   }
 
   /** Call each tick; returns a shot descriptor if the tower fires, otherwise null. */

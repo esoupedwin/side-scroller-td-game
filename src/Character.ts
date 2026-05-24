@@ -57,7 +57,7 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 
 export interface CharacterConfig {
-  type:        'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer';
+  type:        'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'viking' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer';
   hp:          number;
   speed:       number;
   attackRange: number;
@@ -92,6 +92,7 @@ export interface UpdateContext {
   onFire?:           (req: FireRequest) => void;
   onDamageTower?:    (dmg: number) => void;
   onDepositCoin:     (value: number) => void;
+  onMeleeHit?:       (unitType: string, x: number) => void;
 }
 
 type State = 'marching' | 'fighting' | 'collecting' | 'returning' | 'dead';
@@ -343,6 +344,7 @@ export class Character {
     else if (this.config.type === 'archer')     this.buildArcherSprite();
     else if (this.config.type === 'rifleman')   this.buildRiflemanSprite();
     else if (this.config.type === 'sniper')     this.buildSniperSprite();
+    else if (this.config.type === 'viking')     this.buildVikingSprite();
     else if (this.config.type === 'heavy')      this.buildHeavySprite();
     else if (this.config.type === 'tanker')     this.buildTankerSprite();
     else if (this.config.type === 'grenadier')  this.buildGrenadierSprite();
@@ -765,6 +767,91 @@ export class Character {
     g.beginFill(0x444444);
     g.drawRect(dir > 0 ? dir * 8  : dir * 8  - 2, ry - 2, 2, 4);
     g.drawRect(dir > 0 ? dir * 14 : dir * 14 - 2, ry - 2, 2, 4);
+    g.endFill();
+
+    this.container.addChild(g);
+  }
+
+  private buildVikingSprite() {
+    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const w = this.config.width, h = this.config.height;
+    const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.30, w * 0.30, w * 0.38, h * 0.45, 0.65);
+
+    const g = new PIXI.Graphics();
+
+    // ── Shield (non-weapon side — left for player) ────────────────────────────
+    const sX = -dir * w * 0.52;
+    const sW =  w  * 0.52;
+    const sH =  h  * 0.55;
+    const sY =  h  * 0.13;
+    g.beginFill(color, 0.85);
+    g.drawRoundedRect(sX - sW * 0.5, sY, sW, sH, 7);
+    g.endFill();
+    g.lineStyle(2, 0xffd166, 0.55);
+    g.drawRoundedRect(sX - sW * 0.5, sY, sW, sH, 7);
+    g.lineStyle(0);
+    g.beginFill(0xffd166, 0.75);
+    g.drawCircle(sX, sY + sH * 0.46, sW * 0.17);
+    g.endFill();
+
+    // ── Torso ─────────────────────────────────────────────────────────────────
+    g.beginFill(color);
+    g.drawRoundedRect(-w * 0.46, h * 0.19, w * 0.92, h * 0.42, 5);
+    g.endFill();
+    // Fur collar
+    g.beginFill(0xdddddd, 0.22);
+    g.drawRoundedRect(-w * 0.46, h * 0.19, w * 0.92, h * 0.10, 5);
+    g.endFill();
+    // Belt
+    g.beginFill(0x5a3010, 0.45);
+    g.drawRect(-w * 0.46, h * 0.54, w * 0.92, 4);
+    g.endFill();
+
+    // ── Head ─────────────────────────────────────────────────────────────────
+    g.beginFill(color, 0.9);
+    g.drawCircle(0, h * 0.10, w * 0.40);
+    g.endFill();
+    // Helmet cap
+    g.beginFill(color);
+    g.drawRoundedRect(-w * 0.35, h * 0.02 - 7, w * 0.70, 9, 3);
+    g.endFill();
+    // Horns
+    g.beginFill(0xeeeecc, 0.85);
+    g.drawPolygon([-w * 0.35, h * 0.02 - 2, -w * 0.52, h * 0.02 - 15, -w * 0.26, h * 0.02]);
+    g.drawPolygon([ w * 0.35, h * 0.02 - 2,  w * 0.52, h * 0.02 - 15,  w * 0.26, h * 0.02]);
+    g.endFill();
+    // Nose guard
+    g.beginFill(color, 0.55);
+    g.drawRect(-1.5, h * 0.10, 3, 7);
+    g.endFill();
+
+    // ── Axe (weapon side) ─────────────────────────────────────────────────────
+    const hx0 = dir * w * 0.44;
+    const hx1 = hx0 + dir * w * 0.55;
+    const axeY = h * 0.29;
+    // Handle
+    g.beginFill(0x7a4f2e);
+    g.drawRect(Math.min(hx0, hx1), axeY, w * 0.55, 4);
+    g.endFill();
+    // Axe head — swept crescent
+    g.beginFill(0xb0b0b0);
+    g.drawPolygon([
+      hx1,              axeY - 2,
+      hx1 + dir *  9,   axeY - 11,
+      hx1 + dir * 13,   axeY + 2,
+      hx1 + dir * 11,   axeY + 16,
+      hx1,              axeY + 6,
+    ]);
+    g.endFill();
+    // Edge highlight
+    g.beginFill(0xd8d8d8, 0.7);
+    g.drawPolygon([
+      hx1 + dir *  9, axeY - 10,
+      hx1 + dir * 13, axeY +  2,
+      hx1 + dir * 11, axeY + 15,
+      hx1 + dir *  9, axeY +  2,
+    ]);
     g.endFill();
 
     this.container.addChild(g);
@@ -1354,7 +1441,7 @@ export class Character {
   }
 
   private static isMeleeType(type: CharacterConfig['type']) {
-    return type === 'conscript' || type === 'warrior' || type === 'heavy';
+    return type === 'conscript' || type === 'warrior' || type === 'viking' || type === 'heavy';
   }
 
   update(ctx: UpdateContext) {
@@ -1363,7 +1450,7 @@ export class Character {
     this.attackTimer        = Math.max(0, this.attackTimer        - ctx.dt);
     this.evasiveJumpTimer   = Math.max(0, this.evasiveJumpTimer   - ctx.dt);
     this.attackFacingTimer  = Math.max(0, this.attackFacingTimer  - ctx.dt);
-    this.tickPendingMeleeSwing(ctx.dt);
+    this.tickPendingMeleeSwing(ctx);
 
     if (this.powerUpSpeedTimer > 0) {
       this.powerUpSpeedTimer -= ctx.dt;
@@ -2218,10 +2305,10 @@ export class Character {
    * Targets that died or moved out of melee range simply waste the swing — no
    * homing — which matches how melee feels visually.
    */
-  private tickPendingMeleeSwing(dt: number) {
+  private tickPendingMeleeSwing(ctx: UpdateContext) {
     const swing = this.pendingMeleeSwing;
     if (!swing) return;
-    swing.delay -= dt;
+    swing.delay -= ctx.dt;
     if (swing.delay > 0) return;
     this.pendingMeleeSwing = null;
     if (this.isDead) return;
@@ -2230,8 +2317,10 @@ export class Character {
       const reach = this.config.attackRange + this.config.width * 0.5 + swing.target.config.width * 0.5 + 8;
       if (Math.abs(swing.target.x - this.x) > reach) return;
       swing.target.takeDamage(swing.damage, swing.damage > 0 ? this : undefined);
+      if (swing.damage > 0) ctx.onMeleeHit?.(this.config.type, this.x);   // no sound on misses (damage === 0)
     } else if (swing.onTower) {
       swing.onTower(swing.damage);
+      ctx.onMeleeHit?.(this.config.type, this.x);
     }
   }
 
@@ -2243,7 +2332,7 @@ export class Character {
     const windUp = this.beginAttack();
     const miss   = Math.random() < this.config.critical;
     const damage = miss ? 0 : this.effectiveAtk;
-    if (this.config.type === 'conscript' || this.config.type === 'warrior' || this.config.type === 'heavy') {
+    if (this.config.type === 'conscript' || this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'heavy') {
       this.pendingMeleeSwing = { target, damage, delay: windUp };
     } else if (onFire) {
       if (this.config.type === 'grenadier') {
@@ -2295,7 +2384,7 @@ export class Character {
     const windUp = this.beginAttack();
     this.attackTimer = this.config.fireRate;
     if (Math.random() < this.config.critical) return;  // miss — silent, towers have no label system
-    if (this.config.type === 'warrior' || this.config.type === 'heavy') {
+    if (this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'heavy') {
       this.pendingMeleeSwing = { target: null, damage: this.effectiveAtk, delay: windUp, onTower: onDamageTower };
     } else if (onFire) {
       if (this.config.type === 'grenadier') {
@@ -2338,7 +2427,7 @@ export class Character {
    */
   private canSnapHit(target: Character): boolean {
     const t = this.config.type;
-    if (t === 'conscript' || t === 'warrior' || t === 'heavy' || t === 'grenadier' || t === 'rocketeer') return true;
+    if (t === 'conscript' || t === 'warrior' || t === 'viking' || t === 'heavy' || t === 'grenadier' || t === 'rocketeer') return true;
     // Horizontal-only fire — the projectile travels along the shooter's bowY
     // without arcing. A target is hittable only when its collision box
     // vertically spans the bow line (i.e. they're on roughly the same plane).

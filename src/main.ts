@@ -2,10 +2,12 @@ import { Game, type CpuStrategyInfo } from './Game';
 import { CHAR_COST } from './constants';
 import { TYPE_ICON } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
+import { initAudio } from './AudioManager';
 
 const loadingScreen = document.getElementById('loading-screen')!;
 
 await preloadAllSprites();
+initAudio(); // fire-and-forget — loads in background, never delays game start
 
 // Fade out and remove the loading screen once sprites are ready
 loadingScreen.classList.add('fade-out');
@@ -24,7 +26,7 @@ const enemyTowerHpEl  = document.getElementById('enemy-tower-hp')!;
 // the player can no longer manually spawn it.
 const UNIT_TYPES = [
   'conscript', 'warrior', 'archer', 'rifleman', 'sniper',
-  'heavy', 'grenadier', 'rocketeer',
+  'viking', 'heavy', 'grenadier', 'rocketeer',
 ] as const;
 type UnitType = typeof UNIT_TYPES[number];
 

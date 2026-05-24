@@ -37,7 +37,7 @@ import {
   VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, SNIPER, HEAVY, TANKER, GRENADIER, ROCKETEER,
+  CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, SNIPER, VIKING, HEAVY, TANKER, GRENADIER, ROCKETEER,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
   GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY,
   ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX, ROCKET_SPLASH_MIN_FRAC,
@@ -56,6 +56,7 @@ import {
   POWERUP_DROP_INTERVAL, POWERUP_INDICATOR_LEAD,
   CHEAT_PLAYER_COIN_GRANT, CHEAT_CPU_COIN_GRANT,
 } from './constants';
+import { playSoundAt, setViewport } from './AudioManager';
 
 function spawnBoost(): number {
   return Math.min(Math.floor(Math.random() * 11), Math.floor(Math.random() * 11));
@@ -77,6 +78,7 @@ const CHAR_CONFIGS = {
   archer:    ARCHER,
   rifleman:  RIFLEMAN,
   sniper:    SNIPER,
+  viking:    VIKING,
   heavy:     HEAVY,
   tanker:    TANKER,
   grenadier: GRENADIER,
@@ -458,6 +460,7 @@ export class Game {
       navGraph:         this.navGraph,
       onFire:           (req) => this.fireProjectile(req),
       onDamageTower:    (dmg) => this.enemyTower.takeDamage(dmg),
+      onMeleeHit:       (unitType, x) => playSoundAt(unitType === 'conscript' ? 'punch' : 'sword_slash', x),
       onDepositCoin:    (value) => {
         this.coinBalance += value;
         this.notifyCoins();
@@ -482,6 +485,7 @@ export class Game {
       navGraph:         this.navGraph,
       onFire:           (req) => this.fireProjectile(req),
       onDamageTower:    (dmg) => this.playerTower.takeDamage(dmg),
+      onMeleeHit:       (unitType, x) => playSoundAt(unitType === 'conscript' ? 'punch' : 'sword_slash', x),
       onDepositCoin:    (value) => {
         this.cpuCoinBalance += value;
         const c = this.updateChar;
@@ -806,6 +810,7 @@ export class Game {
     this.cameraX        = Math.max(0, Math.min(this.mapDef.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM, this.cameraX));
     this.world.x        = -this.cameraX * GAME_ZOOM;
     this.parallaxGfx.x  = -this.cameraX * PARALLAX_FACTOR;
+    setViewport(this.cameraX, this.cameraX + VIEWPORT_WIDTH / GAME_ZOOM);
 
     if (this.isOver)   { this.updateCulling(); return; }
     if (this.isPaused) { this.updateCulling(); return; }
@@ -1028,6 +1033,7 @@ export class Game {
 
       if (c.pendingPromotion) {
         c.pendingPromotion = false;
+        playSoundAt('level_up', c.x);
         const label = new DamageLabel(c.x, c.y - c.config.height - 14, 0, color, RANK_NAMES[c.rank]);
         this.damageLabels.push(label);
         this.labelLayer.addChild(label.container);
@@ -1074,6 +1080,7 @@ export class Game {
       }
       const ex = r.consumeExplosion();
       if (ex) {
+        playSoundAt('rocket_explosion', ex.x);
         this.processAoE(
           ex, r.side,
           ROCKET_SPLASH_MIN_FRAC,
@@ -1090,6 +1097,7 @@ export class Game {
       g.update(dt, this.platformData, this.blockData);
       const ex = g.consumeExplosion();
       if (ex) {
+        playSoundAt('grenade_explosion', ex.x);
         this.processAoE(
           ex, g.side,
           GRENADE_SPLASH_MIN_FRAC,
@@ -1505,6 +1513,7 @@ export class Game {
 
   private fireProjectile(req: FireRequest) {
     if (req.projectileKind === 'grenade') {
+      playSoundAt('grenade_throw', req.sx);
       const g = new Grenade(
         req.side, req.sx, req.sy, req.tx, req.ty,
         req.damage, GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX,
@@ -1513,6 +1522,7 @@ export class Game {
       this.grenades.push(g);
       this.grenadeLayer.addChild(g.container);
     } else if (req.projectileKind === 'rocket') {
+      playSoundAt('rocket_launch', req.sx);
       const r = new Rocket(
         req.side, req.sx, req.sy, req.tx,
         req.damage, ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX,
@@ -1521,6 +1531,12 @@ export class Game {
       this.rockets.push(r);
       this.rocketLayer.addChild(r.container);
     } else {
+      playSoundAt(
+        req.projectileKind === 'arrow'         ? 'arrow_fire'  :
+        req.shooter?.config.type === 'sniper'  ? 'sniper_shot' :
+        'gun_fire',
+        req.sx,
+      );
       const p = new Projectile(req.side, req.sx, req.sy, req.tx, req.ty, req.damage, req.projectileKind, req.shooter ?? null);
       this.projectiles.push(p);
       this.projLayer.addChild(p.container);

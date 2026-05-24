@@ -155,6 +155,7 @@ export const CHAR_COST = {
   archer:    ch.archer.cost,
   rifleman:  ch.rifleman.cost,
   sniper:    ch.sniper.cost,
+  viking:    ch.viking.cost,
   heavy:     ch.heavy.cost,
   tanker:    ch.tanker.cost,
   grenadier: ch.grenadier.cost,
@@ -220,6 +221,18 @@ export const SNIPER = {
   attackPower: ch.sniper.attackPower,
   fireRate:    ch.sniper.fireRate,
   critical:    ch.sniper.critical,
+  width:       ch.width,
+  height:      ch.height,
+};
+
+export const VIKING = {
+  type:        ch.viking.type,
+  hp:          ch.viking.hp,
+  speed:       ch.viking.speed,
+  attackRange: ch.viking.attackRange,
+  attackPower: ch.viking.attackPower,
+  fireRate:    ch.viking.fireRate,
+  critical:    ch.viking.critical,
   width:       ch.width,
   height:      ch.height,
 };
@@ -292,3 +305,9 @@ export const ROCKET_SPLASH_MIN_FRAC    = rkt.splashMinDamageFrac;
 export const ROCKET_KNOCKBACK_MAX_VX   = rkt.knockbackMaxVx;
 export const ROCKET_KNOCKBACK_MAX_VY   = rkt.knockbackMaxVy;
 export const ROCKET_KNOCKBACK_DECAY    = rkt.knockbackDecay;
+
+// ── Audio ────────────────────────────────────────────────────────────────────
+export const SFX_VOLUME           = GameConfig.audio.sfxVolume;
+export const SFX_SOUNDS           = GameConfig.audio.sounds;
+export const SFX_SPATIAL_MAX_DIST = GameConfig.audio.spatialMaxDist;
+export const SFX_SPATIAL_MIN_VOL  = GameConfig.audio.spatialMinVol;
