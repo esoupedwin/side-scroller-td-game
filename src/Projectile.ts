@@ -35,6 +35,11 @@ export class Projectile {
   // Muzzle flash (bullet only) — fades over one frame
   private flash: PIXI.Graphics | null = null;
 
+  // Set on land() when the projectile actually hit a character. Drained by
+  // Game.ts after each update() call so the VFX layer (which Projectile must
+  // not know about directly) can spawn a hit spark at the impact point.
+  private pendingImpact: { x: number; y: number } | null = null;
+
   constructor(
     side:   Side,
     sx: number, sy: number,
@@ -195,6 +200,7 @@ export class Projectile {
       if (c.isDead || c.side === this.side) continue;
       if (Math.abs(c.x - this.tx) <= splash) {
         c.takeDamage(this.damage, this.shooter ?? undefined);
+        this.pendingImpact = { x: c.x, y: c.y - c.config.height * 0.5 };
         hitChar = true;
         break;
       }
@@ -203,6 +209,13 @@ export class Projectile {
     if (!hitChar && Math.abs(this.tx - targetTower.frontX) <= splash + PROJ_TOWER_SPLASH) {
       targetTower.takeDamage(this.damage);
     }
+  }
+
+  /** Returns the impact location once (if the projectile just hit a character), then clears it. */
+  consumeImpact(): { x: number; y: number } | null {
+    const i = this.pendingImpact;
+    this.pendingImpact = null;
+    return i;
   }
 
   destroy() {

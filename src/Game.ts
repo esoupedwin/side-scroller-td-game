@@ -57,6 +57,7 @@ import {
   CHEAT_PLAYER_COIN_GRANT, CHEAT_CPU_COIN_GRANT,
 } from './constants';
 import { playSoundAt, setViewport } from './AudioManager';
+import { initVfx, tickVfx, clearVfx, spawnHitSpark } from './Vfx';
 
 function spawnBoost(): number {
   return Math.min(Math.floor(Math.random() * 11), Math.floor(Math.random() * 11));
@@ -109,6 +110,7 @@ export class Game {
   private coinLayer!:    PIXI.Container;
   private sheepLayer!:   PIXI.Container;
   private powerUpLayer!: PIXI.Container;
+  private vfxLayer!:     PIXI.Container;
   private labelLayer!:   PIXI.Container;
   private damageLabels:  DamageLabel[] = [];
 
@@ -140,7 +142,9 @@ export class Game {
 
   readonly diagnostics = new Diagnostics();
 
-  get elapsedSeconds(): number { return GAME_DURATION_SEC - this.timeRemaining; }
+  private get mapDurationSec(): number { return this.mapDef.durationSec ?? GAME_DURATION_SEC; }
+
+  get elapsedSeconds(): number { return this.mapDurationSec - this.timeRemaining; }
 
   // Collision-box debug overlay (toggled with 'B')
   private collisionDebugLayer!: PIXI.Graphics;
@@ -213,7 +217,7 @@ export class Game {
   private playerSpawnTimer    = 0;
   private playerSpawnInterval = 0;
   private cpuVsCpu            = false;
-  private timeRemaining    = GAME_DURATION_SEC;
+  private timeRemaining    = this.mapDurationSec;
   private lastNotifiedTime = -1;
   private cpuStrategyInfo: CpuStrategyInfo = {
     stance: 'economy', score: 0, unitAdv: 0, towerAdv: 0, coinAdv: 0, decision: '—',
@@ -280,7 +284,7 @@ export class Game {
     this.notifyCoins();
     this.notifyCpuCoins();
     this.notifyEnemyTowerHp();
-    this.onTimeChanged(GAME_DURATION_SEC);
+    this.onTimeChanged(this.mapDurationSec);
   }
 
   // ── Scene construction ───────────────────────────────────────────────────────
@@ -327,6 +331,7 @@ export class Game {
     this.grenadeLayer  = new PIXI.Container();
     this.rocketLayer   = new PIXI.Container();
     this.unitLayer     = new PIXI.Container();
+    this.vfxLayer      = new PIXI.Container();
     this.labelLayer    = new PIXI.Container();
     this.world.addChild(this.coinLayer);
     this.world.addChild(this.sheepLayer);
@@ -335,7 +340,9 @@ export class Game {
     this.world.addChild(this.grenadeLayer);
     this.world.addChild(this.rocketLayer);
     this.world.addChild(this.unitLayer);
+    this.world.addChild(this.vfxLayer);
     this.world.addChild(this.labelLayer);
+    initVfx(this.vfxLayer);
 
     this.playerTower = new Tower('player', m.playerTowerX, m.playerTowerSkin, m.playerTowerSkinW, m.playerTowerSkinH);
     this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerSkin,  m.enemyTowerSkinW,  m.enemyTowerSkinH);
@@ -989,7 +996,7 @@ export class Game {
     for (const c of liveChars) c.syncFromBody(this.platformData, this.blockData);
 
     this.diagnostics.tick({
-      time:      GAME_DURATION_SEC - this.timeRemaining,
+      time:      this.mapDurationSec - this.timeRemaining,
       chars:     liveChars,
       platforms: this.platformData,
       blocks:    this.blockData,
@@ -1047,6 +1054,8 @@ export class Game {
     for (const p of this.projectiles) {
       const wasAlive = !p.isDead;
       p.update(dt, liveChars, this.playerTower, this.enemyTower, this.blockData);
+      const impact = p.consumeImpact();
+      if (impact) spawnHitSpark(impact.x, impact.y);
       // Startle the sheep when a projectile lands within 55 px of it
       if (wasAlive && p.isDead && this.sheep && Math.abs(p.x - this.sheep.x) <= 55) {
         this.sheep.reactToHit(p.x);
@@ -1107,6 +1116,9 @@ export class Game {
         );
       }
     }
+
+    // Tick short-lived VFX (slash arcs, hit sparks) after combat resolution
+    tickVfx(dt);
 
     // Cull dead entities — in-place to avoid allocating new arrays each tick
     { let wi = 0;
@@ -1562,6 +1574,7 @@ export class Game {
     for (const coin of this.coins)      { coin.destroy(); }
     for (const pu of this.powerUps)     { pu.destroy(); }
     for (const l of this.damageLabels)  { l.destroy(); }
+    clearVfx();
     this.sheep?.destroy();
     this.sheep = null;
     this.characters   = [];
@@ -1588,7 +1601,7 @@ export class Game {
     this.lastNotifiedCoins     = -1;
     this.lastNotifiedCpuCoins  = -1;
     this.lastNotifiedEnemyTowerHp = -1;
-    this.timeRemaining         = GAME_DURATION_SEC;
+    this.timeRemaining         = this.mapDurationSec;
     this.lastNotifiedTime      = -1;
 
     this.notifyCpuCharsMs    = 0;
@@ -1608,7 +1621,7 @@ export class Game {
     this.notifyCoins();
     this.notifyCpuCoins();
     this.notifyEnemyTowerHp();
-    this.onTimeChanged(GAME_DURATION_SEC);
+    this.onTimeChanged(this.mapDurationSec);
   }
 
   destroy() {

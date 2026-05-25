@@ -163,6 +163,43 @@
         user-select: none;
       }
 
+      /* ── Mute indicator (top-right, under coin counter) ───────────────────── */
+      #mute-indicator {
+        position: absolute;
+        top: 38px; right: 10px;
+        z-index: 25;
+        pointer-events: all;
+        background: rgba(10,10,24,0.6);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 6px;
+        padding: 2px 8px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        color: #ccc;
+        font-size: 15px;
+        line-height: 1.2;
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+      }
+      #mute-indicator:hover {
+        background: rgba(20,20,40,0.9);
+        color: #fff;
+      }
+      #mute-indicator.is-muted {
+        color: #ff8a93;
+        border-color: rgba(255,138,147,0.5);
+      }
+      #mute-indicator .mute-hint {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        color: #888;
+        font-family: 'Courier New', monospace;
+      }
+      #mute-indicator.is-muted .mute-hint { color: rgba(255,138,147,0.7); }
+
       /* ── Character HUD (top strip) ─────────────────────────────────────────── */
       #char-hud {
         position: absolute;
@@ -459,6 +496,10 @@
       <div id="char-hud"></div>
       <div id="countdown">3:00</div>
       <div id="coin-counter">💰 <span id="coin-amount">150</span></div>
+      <div id="mute-indicator" title="Toggle mute (M)">
+        <span id="mute-icon">🔇</span>
+        <span class="mute-hint">M</span>
+      </div>
 
       <div id="ui-overlay">
         <button id="spawn-conscript-btn" class="spawn-btn">

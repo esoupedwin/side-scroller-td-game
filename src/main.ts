@@ -2,7 +2,7 @@ import { Game, type CpuStrategyInfo } from './Game';
 import { CHAR_COST } from './constants';
 import { TYPE_ICON } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
-import { initAudio } from './AudioManager';
+import { initAudio, toggleMute, isMuted } from './AudioManager';
 
 const loadingScreen = document.getElementById('loading-screen')!;
 
@@ -76,7 +76,28 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'b' || e.key === 'B') {
     game.toggleDevMode();
   }
+  if (e.key === 'm' || e.key === 'M') {
+    toggleMute();
+    refreshMuteUi();
+  }
 });
+
+// ── Mute indicator ────────────────────────────────────────────────────────
+const muteIndicator = document.getElementById('mute-indicator')!;
+const muteIcon      = document.getElementById('mute-icon')!;
+function refreshMuteUi() {
+  const m = isMuted();
+  muteIcon.textContent = m ? '🔇' : '🔊';
+  muteIndicator.classList.toggle('is-muted', m);
+  muteIndicator.title  = m
+    ? 'Sound off — press M or click to unmute'
+    : 'Sound on — press M or click to mute';
+}
+muteIndicator.addEventListener('click', () => {
+  toggleMute();
+  refreshMuteUi();
+});
+refreshMuteUi();
 
 // ── Performance stats ──────────────────────────────────────────────────────
 {

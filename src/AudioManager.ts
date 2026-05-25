@@ -11,8 +11,17 @@ export type AudioSpriteId = keyof typeof SFX_SOUNDS;
  */
 const instances = new Map<AudioSpriteId, Howl[]>();
 
+// ── Mute ────────────────────────────────────────────────────────────────────
+// Game starts muted by default. masterVolume is the *effective* volume passed
+// to Howl instances, while preMuteVolume remembers the level to restore on
+// unmute. Both are decoupled from the configured SFX_VOLUME baseline so
+// changing volume at runtime (e.g. via a settings panel) plays nicely with
+// the mute toggle.
+let muted: boolean        = true;
+let preMuteVolume: number = SFX_VOLUME;
+
 /** Master volume — tracks the user-adjusted level so per-play volumes scale with it. */
-let masterVolume: number = SFX_VOLUME;
+let masterVolume: number = muted ? 0 : SFX_VOLUME;
 
 /** Current viewport bounds in world-space px (updated each tick by Game.ts). */
 let viewportLeft  = 0;
@@ -154,4 +163,22 @@ export function playSound(id: AudioSpriteId): void {
 export function setSfxVolume(v: number): void {
   masterVolume = Math.max(0, Math.min(1, v));
   instances.forEach((pool) => pool.forEach((h) => h.volume(masterVolume)));
+}
+
+export function isMuted(): boolean { return muted; }
+
+export function setMuted(next: boolean): void {
+  if (next === muted) return;
+  muted = next;
+  if (muted) {
+    preMuteVolume = masterVolume;
+    setSfxVolume(0);
+  } else {
+    setSfxVolume(preMuteVolume);
+  }
+}
+
+export function toggleMute(): boolean {
+  setMuted(!muted);
+  return muted;
 }

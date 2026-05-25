@@ -21,8 +21,18 @@ import {
   getLegsAnimFps, getLegsSpriteScale, getLegsFeetAnchorY,
 } from './SpriteRegistry';
 import { type Tribe, tribeForSide } from './Tribes';
+import { spawnSlashArc, spawnHitSpark } from './Vfx';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
+
+/** Icon shown next to the character's name in-world, reflecting current behavior. */
+const BEHAVIOR_ICON: Record<'attacking' | 'collecting' | 'harass' | 'defend' | 'rush', string> = {
+  attacking:  '⚔',
+  collecting: '💰',
+  harass:     '🎯',
+  defend:     '🛡',
+  rush:       '⚡',
+};
 
 // Physics collision box is taller than the visual character so projectiles and
 // stacking interactions register reliably even when sprite art is small. Visual
@@ -142,6 +152,7 @@ export class Character {
   private ap            = 0;
   get currentAP(): number { return this.ap; }
   private rankGfx!:     PIXI.Graphics;
+  private idLabel!:     PIXI.Text;
   private promoAnimGfx: PIXI.Graphics | null = null;
   private promoAnimTimer = -1;
 
@@ -277,17 +288,17 @@ export class Character {
     this.container.addChild(this.rankGfx);
     this.drawRankBadge();
 
-    const idLabel = new PIXI.Text(name, {
+    this.idLabel = new PIXI.Text(this.labelText(), {
       fontSize:        12,
       fontWeight:      'bold',
       fill:            0xffffff,
       stroke:          0x000000,
       strokeThickness: 2,
     });
-    idLabel.anchor.set(0.5, 1);
-    idLabel.x = 0;
-    idLabel.y = this.hpBarOffsetY() - 2;
-    this.container.addChild(idLabel);
+    this.idLabel.anchor.set(0.5, 1);
+    this.idLabel.x = 0;
+    this.idLabel.y = this.hpBarOffsetY() - 2;
+    this.container.addChild(this.idLabel);
 
     this.syncPosition();
   }
@@ -334,6 +345,16 @@ export class Character {
       if (this.carryingCoin) this.dropCarriedCoin();
     }
     this._behavior = val;
+    this.refreshLabel();
+  }
+
+  /** "<behavior-icon> <name>", shown above the HP bar. */
+  private labelText(): string {
+    return `${BEHAVIOR_ICON[this._behavior]} ${this.name}`;
+  }
+
+  private refreshLabel(): void {
+    if (this.idLabel) this.idLabel.text = this.labelText();
   }
 
   // ── Sprite builders ──────────────────────────────────────────────────────────
@@ -2317,10 +2338,14 @@ export class Character {
       const reach = this.config.attackRange + this.config.width * 0.5 + swing.target.config.width * 0.5 + 8;
       if (Math.abs(swing.target.x - this.x) > reach) return;
       swing.target.takeDamage(swing.damage, swing.damage > 0 ? this : undefined);
-      if (swing.damage > 0) ctx.onMeleeHit?.(this.config.type, this.x);   // no sound on misses (damage === 0)
+      if (swing.damage > 0) {
+        ctx.onMeleeHit?.(this.config.type, this.x);   // no sound on misses (damage === 0)
+        spawnHitSpark(swing.target.x, swing.target.y - swing.target.config.height * 0.5);
+      }
     } else if (swing.onTower) {
       swing.onTower(swing.damage);
       ctx.onMeleeHit?.(this.config.type, this.x);
+      spawnHitSpark(this.x + this.lastAttackDir * this.config.attackRange, this.y - this.config.height * 0.5);
     }
   }
 
@@ -2334,6 +2359,7 @@ export class Character {
     const damage = miss ? 0 : this.effectiveAtk;
     if (this.config.type === 'conscript' || this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'heavy') {
       this.pendingMeleeSwing = { target, damage, delay: windUp };
+      spawnSlashArc(this.x, this.y - this.config.height * 0.4, this.lastAttackDir, this.side);
     } else if (onFire) {
       if (this.config.type === 'grenadier') {
         // Lead targeting: predict where the target will be when the grenade arrives.
@@ -2386,6 +2412,7 @@ export class Character {
     if (Math.random() < this.config.critical) return;  // miss — silent, towers have no label system
     if (this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'heavy') {
       this.pendingMeleeSwing = { target: null, damage: this.effectiveAtk, delay: windUp, onTower: onDamageTower };
+      spawnSlashArc(this.x, this.y - this.config.height * 0.4, this.lastAttackDir, this.side);
     } else if (onFire) {
       if (this.config.type === 'grenadier') {
         onFire({
