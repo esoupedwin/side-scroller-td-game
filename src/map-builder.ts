@@ -45,6 +45,7 @@ class MapBuilder {
   private selectedCoinBox    = false;
   private selectedGround     = false;
   private selectedBackground = false;
+  private selectedMapSettings = false;
 
   constructor() {
     this.map    = structuredClone(loadMapWithOverride(DEFAULT_MAP));
@@ -775,6 +776,7 @@ class MapBuilder {
     this.selectedCoinBox   = false;
     this.selectedGround    = false;
     this.selectedBackground = false;
+    this.selectedMapSettings = false;
   }
 
   private onMouseUp(_e?: MouseEvent) {
@@ -845,6 +847,28 @@ class MapBuilder {
       this.syncInputsFromMap();
       document.getElementById('section-background')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
+
+    // Map Settings button
+    document.getElementById('btn-map-settings')!.addEventListener('click', () => {
+      this.clearSelection();
+      this.selectedMapSettings = true;
+      this.syncInputsFromMap();
+      document.getElementById('section-map-settings')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+
+    // Map duration inputs (minutes + seconds → durationSec)
+    const readDuration = () => {
+      const minStr = (document.getElementById('input-map-duration-min') as HTMLInputElement).value;
+      const secStr = (document.getElementById('input-map-duration-sec') as HTMLInputElement).value;
+      if (minStr === '' && secStr === '') { delete this.map.durationSec; return; }
+      const mins = parseInt(minStr, 10);
+      const secs = parseInt(secStr, 10);
+      const total = (isNaN(mins) ? 0 : mins) * 60 + (isNaN(secs) ? 0 : secs);
+      if (total <= 0) delete this.map.durationSec;
+      else            this.map.durationSec = total;
+    };
+    document.getElementById('input-map-duration-min')!.addEventListener('input', readDuration);
+    document.getElementById('input-map-duration-sec')!.addEventListener('input', readDuration);
 
     // Background skin picker
     document.getElementById('input-bg-skin')!.addEventListener('change', e => {
@@ -1098,6 +1122,7 @@ class MapBuilder {
     const coinSel    = this.selectedCoinBox;
     const groundSel  = this.selectedGround;
     const bgSel      = this.selectedBackground;
+    const settingsSel = this.selectedMapSettings;
     const platSel    = this.selected !== null && this.selectedKind === 'platform' && this.selected < m.platforms.length;
     const blockSel   = this.selected !== null && this.selectedKind === 'block'    && this.selected < m.blocks.length;
 
@@ -1106,7 +1131,8 @@ class MapBuilder {
     document.getElementById('section-enemy-tower')! .style.display = enemySel  ? 'flex' : 'none';
     document.getElementById('section-coinbox')!     .style.display = coinSel   ? 'flex' : 'none';
     document.getElementById('section-ground')!      .style.display = groundSel ? 'flex' : 'none';
-    document.getElementById('section-background')!  .style.display = bgSel     ? 'flex' : 'none';
+    document.getElementById('section-background')!  .style.display = bgSel       ? 'flex' : 'none';
+    document.getElementById('section-map-settings')!.style.display = settingsSel ? 'flex' : 'none';
     document.getElementById('section-platforms')!   .style.display = platSel   ? 'flex' : 'none';
     document.getElementById('section-blocks')!      .style.display = blockSel  ? 'flex' : 'none';
 
@@ -1159,6 +1185,18 @@ class MapBuilder {
     if (bgSel) {
       this.syncBackgroundSkinPreview();
     }
+    if (settingsSel) {
+      const total       = m.durationSec ?? GameConfig.canvas.durationSec;
+      const isOverride  = m.durationSec !== undefined;
+      const mins        = Math.floor(total / 60);
+      const secs        = total % 60;
+      const minInput = document.getElementById('input-map-duration-min') as HTMLInputElement;
+      const secInput = document.getElementById('input-map-duration-sec') as HTMLInputElement;
+      minInput.value = isOverride ? String(mins) : '';
+      secInput.value = isOverride ? String(secs) : '';
+      minInput.placeholder = String(Math.floor(GameConfig.canvas.durationSec / 60));
+      secInput.placeholder = String(GameConfig.canvas.durationSec % 60);
+    }
 
     document.getElementById('plat-count')!.textContent  = `${m.platforms.length} platform(s)`;
     document.getElementById('block-count')!.textContent = `${m.blocks.length} block(s)`;
@@ -1187,6 +1225,9 @@ class MapBuilder {
     } else if (bgSel) {
       dot.style.background = '#7b98aa'; label.style.color = '#a8bcc9';
       label.style.fontStyle = 'normal'; label.textContent = 'Background';
+    } else if (settingsSel) {
+      dot.style.background = '#94a3b8'; label.style.color = '#cbd5e1';
+      label.style.fontStyle = 'normal'; label.textContent = 'Map Settings';
     } else {
       dot.style.background = '#334'; label.style.color = 'var(--muted-fg, #64748b)';
       label.style.fontStyle = 'italic';

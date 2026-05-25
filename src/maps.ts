@@ -34,6 +34,7 @@ export interface MapDefinition {
   groundSkinTileH?:  number;  // tile height in world px (default: image natural height)
   backgroundSkin?:   string;  // data URL; replaces the procedural parallax mountain layer
   backgroundSkinY?:  number;  // screen-space Y offset of the parallax image (default 0 = top of sky)
+  durationSec?:      number;  // match countdown in seconds (default: GAME_DURATION_SEC from gameConfig)
 }
 
 export const DEFAULT_MAP: MapDefinition = {
