@@ -157,6 +157,49 @@ class HitSpark implements VfxEffect {
   }
 }
 
+// ── MuzzleGlow ──────────────────────────────────────────────────────────────
+// Soft additively-blended orange disc at the gun tip — simulates the front of
+// the shooter being lit up by the flash. Drawn for gun-wielding units only
+// (rifleman / sniper / tanker); arrows and rockets have their own visuals.
+
+const GLOW_DUR     = 0.08;     // seconds
+const GLOW_R_OUTER = 22;
+const GLOW_R_MID   = 14;
+const GLOW_R_CORE  = 6;
+const GLOW_COLOR_OUTER = 0xffd0a0;  // pale orange
+const GLOW_COLOR_MID   = 0xffb070;
+const GLOW_COLOR_CORE  = 0xffffff;  // white-hot centre
+
+class MuzzleGlow implements VfxEffect {
+  container: PIXI.Container;
+  isDone   = false;
+  private g:    PIXI.Graphics;
+  private life = 0;
+
+  constructor(x: number, y: number) {
+    this.container = new PIXI.Container();
+    this.container.x = x;
+    this.container.y = y;
+    this.g = new PIXI.Graphics();
+    // Additive blend brightens what's behind the disc — the body sprite under
+    // the glow reads as lit, the open background only picks up a faint warmth.
+    this.g.blendMode = PIXI.BLEND_MODES.ADD;
+    this.container.addChild(this.g);
+  }
+
+  update(dt: number): void {
+    this.life += dt;
+    const t = this.life / GLOW_DUR;
+    if (t >= 1) { this.isDone = true; return; }
+    const alpha = (1 - t) * 0.9;
+
+    this.g.clear();
+    this.g.beginFill(GLOW_COLOR_OUTER, alpha);       this.g.drawCircle(0, 0, GLOW_R_OUTER); this.g.endFill();
+    this.g.beginFill(GLOW_COLOR_MID,   alpha * 0.7); this.g.drawCircle(0, 0, GLOW_R_MID);   this.g.endFill();
+    this.g.beginFill(GLOW_COLOR_CORE,  alpha * 0.5); this.g.drawCircle(0, 0, GLOW_R_CORE);  this.g.endFill();
+  }
+}
+
 // ── Spawn helpers ───────────────────────────────────────────────────────────
 
 export function spawnSlashArc(x: number, y: number, dir: 1 | -1, side: 'player' | 'enemy'): void {
@@ -165,4 +208,8 @@ export function spawnSlashArc(x: number, y: number, dir: 1 | -1, side: 'player' 
 
 export function spawnHitSpark(x: number, y: number): void {
   register(new HitSpark(x, y));
+}
+
+export function spawnMuzzleGlow(x: number, y: number): void {
+  register(new MuzzleGlow(x, y));
 }

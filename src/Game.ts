@@ -1266,6 +1266,7 @@ export class Game {
         const isCur   = i === currentIdx;
         const stepColor = step.action === 'jump' ? 0x00eeff
                         : step.action === 'fall' ? 0xff8800
+                        : step.action === 'drop' ? 0xff44ff
                         : charColor;
         const alpha   = isCur ? 1.0 : 0.45;
         const thick   = isCur ? 2.0 : 1.0;
@@ -1304,6 +1305,7 @@ export class Game {
         const isCur = i === currentIdx;
         const dotColor = step.action === 'jump' ? 0x00eeff
                        : step.action === 'fall' ? 0xff8800
+                       : step.action === 'drop' ? 0xff44ff
                        : charColor;
         g.lineStyle(0);
         g.beginFill(dotColor, isCur ? 1.0 : 0.5);

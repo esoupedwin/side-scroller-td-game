@@ -14,7 +14,7 @@ export interface NavSurface {
 }
 
 export interface PathStep {
-  action:        'walk' | 'jump' | 'fall';
+  action:        'walk' | 'jump' | 'fall' | 'drop';
   targetX:       number;  // destination X on this step's target surface
   floorY:        number;  // floor Y of the target surface
   jumpTriggerX?: number;  // for jump: walk here first, then jump
@@ -350,6 +350,12 @@ export class NavGraph {
         steps.push({ action: 'walk', targetX: jumpTriggerX, floorY: cur.y });
         steps.push({ action: 'jump', targetX: actualLandX, floorY: next.y, jumpTriggerX, sourceFloorY: cur.y });
         curX = actualLandX;
+      } else if (!cur.solid && curX >= next.x && curX <= next.x + next.width) {
+        // Drop straight down through the current platform — the destination
+        // surface spans our current x, so there's no need to walk to the edge.
+        // Only emitted for non-solid platforms; blocks always force walk-off.
+        steps.push({ action: 'drop', targetX: curX, floorY: next.y });
+        // curX unchanged — we land directly below.
       } else {
         // Walk to the fall-off edge, then fall. Pick the side closer to the final
         // destination toX rather than the precomputed edge — otherwise a character

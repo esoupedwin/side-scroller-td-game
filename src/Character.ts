@@ -21,7 +21,7 @@ import {
   getLegsAnimFps, getLegsSpriteScale, getLegsFeetAnchorY,
 } from './SpriteRegistry';
 import { type Tribe, tribeForSide } from './Tribes';
-import { spawnSlashArc, spawnHitSpark } from './Vfx';
+import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow } from './Vfx';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
 
@@ -130,6 +130,10 @@ export class Character {
   private knockbackDecayFactor = 1;  // precomputed per frame by caller: Math.exp(-decay * dt)
   private isAirborne  = false;
   private floorY     = GROUND_Y;
+  // When non-null, syncFromBody ignores the platform at this y while resolving
+  // landing — used for "drop in place" through the platform the character is
+  // currently standing on. Cleared automatically on any landing.
+  private dropFromY:   number | null = null;
   // World bounds between tower faces — set each tick from UpdateContext, used in syncToBody.
   private boundL     = 0;
   private boundR     = 0;
@@ -1545,6 +1549,32 @@ export class Character {
 
   // ── Physics ──────────────────────────────────────────────────────────────────
 
+  /**
+   * Drop straight through the platform we're currently standing on.
+   * Sets isAirborne and records dropFromY so syncFromBody ignores this
+   * platform on the next landing pass — gravity then carries the character
+   * down to the next surface (lower platform or ground).
+   * No-op if the character is airborne, on the ground, or on a block (the
+   * pathfinder only emits 'drop' steps for non-solid platforms, so a block
+   * floor here means the character has drifted; the step will time out).
+   */
+  private dropFromPlatform(platforms: PlatformData[]): boolean {
+    if (this.isAirborne) return false;
+    if (this.floorY >= GROUND_Y) return false;
+    // Verify we're actually on a platform (not a block at this y).
+    const onPlat = platforms.some(p =>
+      this.x >= p.x && this.x <= p.x + p.width && Math.abs(p.y - this.floorY) < 1,
+    );
+    if (!onPlat) return false;
+
+    this.dropFromY  = this.floorY;
+    this.isAirborne = true;
+    this.jumpVx     = 0;
+    // No velocity boost — gravity does the work.
+    Matter.Body.setVelocity(this.body, { x: 0, y: 0 });
+    return true;
+  }
+
   private jump(dirX: number, _dt: number) {
     if (this.isAirborne) return;
     if (this.config.type === 'tanker') return;   // tanks cannot jump
@@ -1666,9 +1696,18 @@ export class Character {
     this.y          = this.body.position.y + halfH;
 
     if (this.isAirborne) {
+      // Drop-through clears once feet are clear of the source platform — after
+      // that, normal landing logic resumes (so lower platforms still catch us).
+      if (this.dropFromY !== null && this.y > this.dropFromY + 5) {
+        this.dropFromY = null;
+      }
+
       // Platform/block landing: detect feet crossing the surface while falling (tunneling-safe).
       if (this.body.velocity.y >= 0) {
         for (const p of platforms) {
+          // During an in-place drop, skip the platform we're dropping through
+          // so it doesn't immediately re-snap our feet to its surface.
+          if (this.dropFromY !== null && Math.abs(p.y - this.dropFromY) < 1) continue;
           if (this.x >= p.x && this.x <= p.x + p.width && prevFeetY <= p.y && this.y >= p.y) {
             this.y = p.y;
             Matter.Body.setPosition(this.body, { x: this.body.position.x, y: p.y - halfH });
@@ -1676,6 +1715,7 @@ export class Character {
             this.isAirborne = false;
             this.jumpVx     = 0;
             this.floorY     = p.y;
+            this.dropFromY  = null;
             this.recordJumpOutcome(p.y);
             return;
           }
@@ -1688,6 +1728,7 @@ export class Character {
             this.isAirborne = false;
             this.jumpVx     = 0;
             this.floorY     = b.y;
+            this.dropFromY  = null;
             this.recordJumpOutcome(b.y);
             return;
           }
@@ -1701,6 +1742,7 @@ export class Character {
         this.jumpVx     = 0;
         this.floorY     = GROUND_Y;
         this.y          = GROUND_Y;
+        this.dropFromY  = null;
         this.recordJumpOutcome(GROUND_Y);
       }
     } else if (this.floorY < GROUND_Y) {
@@ -1762,7 +1804,7 @@ export class Character {
    * Returns true when the final step is reached; false while still en-route.
    * Modifies this.x and may call this.jump().
    */
-  private followPath(dt: number): boolean {
+  private followPath(dt: number, platforms: PlatformData[]): boolean {
     if (this.pathIdx >= this.path.length) return true;
 
     const step = this.path[this.pathIdx];
@@ -1836,6 +1878,27 @@ export class Character {
       return false;
     }
 
+    // ── drop ─────────────────────────────────────────────────────────────────
+    // In-place fall through the current platform. Only emitted by the planner
+    // when the character is standing on a platform (not a block) and the
+    // destination surface spans the character's current x.
+    if (step.action === 'drop') {
+      // Landed at target — advance
+      if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20) {
+        this.pathIdx++;
+        return this.pathIdx >= this.path.length;
+      }
+      // Mid-drop — wait for landing
+      if (this.isAirborne) return false;
+      // Standing on something but not on the target floor: initiate the drop.
+      // If it can't initiate (e.g. drifted onto a block), skip the step so the
+      // outer behavior code can rebuild a fresh path next tick.
+      if (!this.dropFromPlatform(platforms)) {
+        this.pathIdx++;
+      }
+      return false;
+    }
+
     return true;
   }
 
@@ -1870,7 +1933,7 @@ export class Character {
       this.state = 'marching';
       // Use pathfinding so the character navigates down from platforms en route.
       this.requestPath(enemyTowerFrontX, GROUND_Y, navGraph, dt);
-      this.followPath(dt);
+      this.followPath(dt, ctx.platforms);
     }
   }
 
@@ -1913,7 +1976,7 @@ export class Character {
 
     this.state = 'marching';
     this.requestPath(enemyTowerFrontX, GROUND_Y, navGraph, dt);
-    this.followPath(dt);
+    this.followPath(dt, ctx.platforms);
   }
 
   // ── Collecting behaviour ─────────────────────────────────────────────────────
@@ -1974,7 +2037,7 @@ export class Character {
         this.coinThrowTimer = -1;  // moved close enough — cancel any pending windup
         this.state = 'returning';
         this.requestPath(homeTowerFrontX, GROUND_Y, navGraph, dt);
-        this.followPath(dt);
+        this.followPath(dt, ctx.platforms);
         return;
       }
     }
@@ -1998,7 +2061,7 @@ export class Character {
       // Navigate to the coin's settled floor level (coin.floorY is correct once settled,
       // falls back to GROUND_Y for in-flight coins which is fine — pathfinding adjusts en-route).
       this.requestPath(this.targetCoin.x, this.targetCoin.floorY, navGraph, dt);
-      this.followPath(dt);
+      this.followPath(dt, ctx.platforms);
 
       this.state = 'collecting';
 
@@ -2106,7 +2169,7 @@ export class Character {
         // enemy is on the ground/a different surface, using this.floorY snaps the destination
         // to the current platform's edge and the character can stall there.
         this.requestPath(clamp(closest.x), closest.floorY, navGraph, dt);
-        this.followPath(dt);
+        this.followPath(dt, ctx.platforms);
         if (this.state !== 'fighting') this.state = 'marching';
       } else if (toEnemy <= 0) {
         if (!this.isRanged && closestDist <= this.config.attackRange * 4) {
@@ -2116,11 +2179,20 @@ export class Character {
         } else if (dir * (safeX - this.x) > 5) {
           // Ranged or enemy too far behind — use pathfinding to drift to safe line
           this.requestPath(safeX, this.floorY, navGraph, dt);
-          this.followPath(dt);
+          this.followPath(dt, ctx.platforms);
           if (this.state !== 'fighting') this.state = 'marching';
         }
+      } else if (Math.abs(closest.floorY - this.floorY) > 20) {
+        // Enemy is in horizontal attack range but on a different floor (directly
+        // above or below) — we can't actually hit them from here. Path toward
+        // their floor so we either jump up onto their platform or walk off an
+        // edge to drop down. Without this, the character holds position
+        // indefinitely thinking it's already in range.
+        this.requestPath(clamp(closest.x), closest.floorY, navGraph, dt);
+        this.followPath(dt, ctx.platforms);
+        if (this.state !== 'fighting') this.state = 'marching';
       }
-      // else: enemy is ahead and within attack range — hold position
+      // else: enemy is ahead, in attack range, on same plane — hold position
     } else {
       // No enemies — use pathfinding to group up or rally near own tower
       const mate = this.nearestAlly(allChars);
@@ -2129,7 +2201,7 @@ export class Character {
       const thresh = mate ? 55 : 20;
       if (dist > thresh) {
         this.requestPath(rallyX, this.floorY, navGraph, dt);
-        this.followPath(dt);
+        this.followPath(dt, ctx.platforms);
         this.state = 'marching';
       }
     }
@@ -2183,7 +2255,7 @@ export class Character {
       const pursueX = Math.max(zoneNearX, Math.min(zoneFarX, intruder.x));
       this.state = 'marching';
       this.requestPath(pursueX, intruder.floorY, navGraph, dt);
-      this.followPath(dt);
+      this.followPath(dt, ctx.platforms);
       return;
     }
 
@@ -2195,7 +2267,7 @@ export class Character {
     if (Math.abs(delta) > 20) {
       this.state = 'marching';
       this.requestPath(restX, this.floorY, navGraph, dt);
-      this.followPath(dt);
+      this.followPath(dt, ctx.platforms);
     } else {
       this.state = 'marching';
     }
@@ -2393,6 +2465,11 @@ export class Character {
           damage, projectileKind: this.projectileKind,
           shooter: miss ? undefined : this,
         });
+        // Gun-wielders (rifleman / sniper / tanker) get a muzzle flash that
+        // additively lights up the front of the body. Archers don't.
+        if (this.projectileKind === 'bullet') {
+          spawnMuzzleGlow(this.x + this.lastAttackDir * 18, this.bowY);
+        }
       }
     }
     this.attackTimer = this.config.fireRate;
@@ -2433,6 +2510,10 @@ export class Character {
           tx: snapped.tx,  ty: snapped.ty,
           damage: this.effectiveAtk, projectileKind: this.projectileKind,
         });
+        // Gun-wielders only — see attackEnemy for rationale.
+        if (this.projectileKind === 'bullet') {
+          spawnMuzzleGlow(this.x + this.lastAttackDir * 18, this.bowY);
+        }
       }
     }
   }
