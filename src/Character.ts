@@ -90,7 +90,10 @@ export interface FireRequest {
 /** Context passed to Character.update() each tick. */
 export interface UpdateContext {
   dt:                number;
-  allChars:          Character[];
+  /** Living characters on the OPPOSITE side from the one being updated. */
+  enemies:           Character[];
+  /** Living characters on the SAME side (still includes self — callers must skip `c === this`). */
+  allies:            Character[];
   enemyTowerFrontX:  number;
   enemyTowerY:       number;
   homeTowerFrontX:   number;   // the collecting character's own tower
@@ -237,6 +240,10 @@ export class Character {
   // Seconds since path was built; stale paths are discarded and rebuilt.
   private pathAge      = 0;
   private readonly PATH_TTL = 8;   // s — re-plan after this many seconds
+  // NavGraph version when the current path was built. If the graph has been
+  // rebuilt since (e.g. an animated block moved surfaces around), the cached
+  // path is invalidated even if its target key hasn't changed.
+  private pathNavVersion = -1;
   // Diagnostic counters (lifetime).
   clampedCount      = 0;
   pathRebuildCount  = 0;
@@ -1401,6 +1408,24 @@ export class Character {
    *  a syncFromBody-driven landing without going through update(). */
   syncVisual(): void { this.syncPosition(); }
 
+  /** Shift this character by (dx, dy) — used to carry units that are standing
+   *  on an animated block. Updates x, y, floorY, and the Matter body together
+   *  so subsequent syncToBody / syncFromBody calls see a consistent state.
+   *  Also drops the cached path because its walk-steps' floorY was anchored
+   *  to the old surface position; the next behaviour tick will request fresh. */
+  carryWith(dx: number, dy: number): void {
+    if (this.isDead) return;
+    if (dx === 0 && dy === 0) return;
+    this.x      += dx;
+    this.y      += dy;
+    this.floorY += dy;
+    Matter.Body.setPosition(this.body, {
+      x: this.body.position.x + dx,
+      y: this.body.position.y + dy,
+    });
+    this.clearPath();
+  }
+
   // ── Coin carry visual ────────────────────────────────────────────────────────
 
   private showCoinCarry() {
@@ -1503,6 +1528,10 @@ export class Character {
 
   get isDead()         { return this.state === 'dead'; }
   get isCarryingCoin() { return this.carryingCoin; }
+  /** Read-only — true while mid-jump or mid-fall. */
+  get airborne()       { return this.isAirborne; }
+  /** Read-only — y of the surface (ground / platform / block top) the character is standing on. */
+  get currentFloorY()  { return this.floorY; }
 
   pauseAnimations()  { this.bodySprite?.stop(); this.legsSprite?.stop(); this.container.alpha = 1; }
   resumeAnimations() { this.bodySprite?.play(); this.legsSprite?.play(); }
@@ -1830,21 +1859,24 @@ export class Character {
     // character drifting a few pixels) doesn't trigger a full path rebuild every tick.
     const key = `${Math.round(toX / 20) * 20},${Math.round(toFloorY)}`;
     this.pathAge += dt;
-    if (key === this.pathTargetKey && this.pathAge < this.PATH_TTL && this.path.length > 0) return;
+    const navStale = navGraph.version !== this.pathNavVersion;
+    if (!navStale && key === this.pathTargetKey && this.pathAge < this.PATH_TTL && this.path.length > 0) return;
 
     this.path         = navGraph.findPath(this.x, this.floorY, toX, toFloorY, this.moveSpeed);
     this.pathIdx      = 0;
     this.pathTargetKey = key;
     this.pathAge      = 0;
+    this.pathNavVersion = navGraph.version;
     this.pathRebuildCount++;
     this.lastBuiltPath = this.path.slice();
   }
 
   /** Invalidate the current path (e.g. after a coin is picked up, target changes). */
   clearPath(): void {
-    this.path          = [];
-    this.pathIdx       = 0;
-    this.pathTargetKey = '';
+    this.path           = [];
+    this.pathIdx        = 0;
+    this.pathTargetKey  = '';
+    this.pathNavVersion = -1;
   }
 
   private tickStuck(dt: number): void {
@@ -1865,114 +1897,112 @@ export class Character {
   /**
    * Follow the current path one tick.
    * Returns true when the final step is reached; false while still en-route.
-   * Modifies this.x and may call this.jump().
+   *
+   * Steps that are "instant-complete" (walk within 10-px stop tolerance,
+   * jump-target-already-reached, fall-landed, drop-landed, drop-init failed,
+   * tanker hitting a jump step) just bump `pathIdx` and chain into the next
+   * step in the same tick — otherwise a character that spawns 8 px from a
+   * jump trigger would burn a tick on the walk-complete advance and only
+   * jump on the *next* tick (looking like a delay before takeoff). Capped
+   * at MAX_STEPS_PER_TICK iterations as a safety against pathological paths.
    */
   private followPath(dt: number, platforms: PlatformData[]): boolean {
-    if (this.pathIdx >= this.path.length) return true;
+    const MAX_STEPS_PER_TICK = 6;
+    for (let iter = 0; iter < MAX_STEPS_PER_TICK; iter++) {
+      if (this.pathIdx >= this.path.length) return true;
+      const step = this.path[this.pathIdx];
 
-    const step = this.path[this.pathIdx];
-
-    // ── walk ─────────────────────────────────────────────────────────────────
-    if (step.action === 'walk') {
-      // If the character has already transitioned to a different surface (e.g. fell
-      // off a block before reaching the planned walk target), skip this step so the
-      // character doesn't walk backward to an edge that no longer makes sense.
-      if (!this.isAirborne && Math.abs(this.floorY - step.floorY) > 20) {
-        this.pathIdx++;
-        return this.pathIdx >= this.path.length;
-      }
-      const dx = step.targetX - this.x;
-      if (Math.abs(dx) <= 10) {
-        this.pathIdx++;
-        return this.pathIdx >= this.path.length;
-      }
-      if (!this.isAirborne) this.x += Math.sign(dx) * this.moveSpeed * dt;
-      return false;
-    }
-
-    // ── jump ─────────────────────────────────────────────────────────────────
-    if (step.action === 'jump') {
-      // Tanker cannot jump — skip the step and walk toward the target x on the ground.
-      if (this.config.type === 'tanker') {
-        this.pathIdx++;
+      // ── walk ───────────────────────────────────────────────────────────────
+      if (step.action === 'walk') {
+        // Already on a different surface (e.g. fell off mid-walk) — skip.
+        if (!this.isAirborne && Math.abs(this.floorY - step.floorY) > 20) {
+          this.pathIdx++;
+          continue;
+        }
+        const dx = step.targetX - this.x;
+        if (Math.abs(dx) <= 10) {
+          this.pathIdx++;
+          continue;  // try the next step (often a jump that should fire now)
+        }
+        if (!this.isAirborne) this.x += Math.sign(dx) * this.moveSpeed * dt;
         return false;
       }
-      // If already on the target surface, advance (redundant step)
-      if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20 && step.floorY < GROUND_Y - 10) {
-        this.pathIdx++;
-        return this.pathIdx >= this.path.length;
-      }
-      // Source-floor guard: if we've drifted off the floor the pathfinder
-      // assumed we'd launch from (e.g. walked off the platform edge while
-      // approaching the trigger), the planned jump can't possibly land — its
-      // arc was sized for a higher starting elevation. Scrap the path so the
-      // next requestPath re-routes from our actual position.
-      if (!this.isAirborne && step.sourceFloorY !== undefined &&
-          Math.abs(this.floorY - step.sourceFloorY) > 20) {
-        this.clearPath();
+
+      // ── jump ───────────────────────────────────────────────────────────────
+      if (step.action === 'jump') {
+        if (this.config.type === 'tanker') {
+          this.pathIdx++;
+          continue;
+        }
+        // Already on the target surface — redundant step, advance.
+        if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20 && step.floorY < GROUND_Y - 10) {
+          this.pathIdx++;
+          continue;
+        }
+        // Source-floor guard: drifted off the floor the planner assumed.
+        if (!this.isAirborne && step.sourceFloorY !== undefined &&
+            Math.abs(this.floorY - step.sourceFloorY) > 20) {
+          this.clearPath();
+          return false;
+        }
+        if (this.isAirborne) return false;  // physics arc in progress
+
+        const triggerX = step.jumpTriggerX ?? step.targetX;
+        const dx       = triggerX - this.x;
+        if (Math.abs(dx) <= 16) {
+          const dir = Math.sign(step.targetX - this.x) || 1;
+          this.pendingJumpLog = { startX: this.x, startFloorY: this.floorY, targetX: step.targetX, targetFloorY: step.floorY };
+          this.jump(dir, dt);
+        } else {
+          this.x += Math.sign(dx) * this.moveSpeed * dt;
+        }
         return false;
       }
-      if (this.isAirborne) return false;  // physics arc in progress
 
-      const triggerX = step.jumpTriggerX ?? step.targetX;
-      const dx       = triggerX - this.x;
-      if (Math.abs(dx) <= 16) {
-        const dir = Math.sign(step.targetX - this.x) || 1;
-        this.pendingJumpLog = { startX: this.x, startFloorY: this.floorY, targetX: step.targetX, targetFloorY: step.floorY };
-        this.jump(dir, dt);
-      } else {
-        this.x += Math.sign(dx) * this.moveSpeed * dt;
+      // ── fall ───────────────────────────────────────────────────────────────
+      if (step.action === 'fall') {
+        if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20) {
+          this.pathIdx++;
+          continue;
+        }
+        if (this.isAirborne) return false;
+        const dx = step.targetX - this.x;
+        if (Math.abs(dx) > 5) this.x += Math.sign(dx) * this.moveSpeed * dt;
+        return false;
       }
-      return false;
+
+      // ── drop ───────────────────────────────────────────────────────────────
+      // In-place fall through the current platform. Only emitted by the planner
+      // when the character is on a non-solid platform and the destination
+      // surface spans the character's current x.
+      if (step.action === 'drop') {
+        if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20) {
+          this.pathIdx++;
+          continue;
+        }
+        if (this.isAirborne) return false;
+        // dropFromPlatform fails if the character has drifted onto a block /
+        // off the platform — skip so the outer behaviour can rebuild a path.
+        if (!this.dropFromPlatform(platforms)) {
+          this.pathIdx++;
+          continue;
+        }
+        return false;
+      }
+
+      return true;  // unknown action — abort
     }
-
-    // ── fall ─────────────────────────────────────────────────────────────────
-    if (step.action === 'fall') {
-      // Landed at target surface — advance
-      if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20) {
-        this.pathIdx++;
-        return this.pathIdx >= this.path.length;
-      }
-      // While airborne, physics handles the descent
-      if (this.isAirborne) return false;
-      // Walk toward the fall-off edge
-      const dx = step.targetX - this.x;
-      if (Math.abs(dx) > 5) this.x += Math.sign(dx) * this.moveSpeed * dt;
-      return false;
-    }
-
-    // ── drop ─────────────────────────────────────────────────────────────────
-    // In-place fall through the current platform. Only emitted by the planner
-    // when the character is standing on a platform (not a block) and the
-    // destination surface spans the character's current x.
-    if (step.action === 'drop') {
-      // Landed at target — advance
-      if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20) {
-        this.pathIdx++;
-        return this.pathIdx >= this.path.length;
-      }
-      // Mid-drop — wait for landing
-      if (this.isAirborne) return false;
-      // Standing on something but not on the target floor: initiate the drop.
-      // If it can't initiate (e.g. drifted onto a block), skip the step so the
-      // outer behavior code can rebuild a fresh path next tick.
-      if (!this.dropFromPlatform(platforms)) {
-        this.pathIdx++;
-      }
-      return false;
-    }
-
-    return true;
+    return false;
   }
 
   // ── Attacking behaviour ──────────────────────────────────────────────────────
 
   private updateAttacking(ctx: UpdateContext) {
-    const { dt, allChars, enemyTowerFrontX, enemyTowerY, onFire, navGraph, blocks } = ctx;
+    const { dt, enemies, enemyTowerFrontX, enemyTowerY, onFire, navGraph, blocks } = ctx;
     if (this.isAirborne) return;   // don't change horizontal intent mid-air
 
     const dir         = this.side === 'player' ? 1 : -1;
-    const nearest     = this.nearestEnemy(allChars, this.config.attackRange, blocks);
+    const nearest     = this.nearestEnemy(enemies, this.config.attackRange, blocks);
     const distToTower = Math.abs(this.x - enemyTowerFrontX);
 
     if (nearest !== null) {
@@ -2005,7 +2035,7 @@ export class Character {
   // them. Fires at any enemy in range while moving — does not stop to engage.
 
   private updateRushing(ctx: UpdateContext) {
-    const { dt, allChars, enemyTowerFrontX, enemyTowerY, onFire, blocks, navGraph } = ctx;
+    const { dt, enemies, enemyTowerFrontX, enemyTowerY, onFire, blocks, navGraph } = ctx;
     if (this.isAirborne) return;
 
     const dir         = this.side === 'player' ? 1 : -1;
@@ -2018,14 +2048,14 @@ export class Character {
     }
 
     // Opportunistic attack: fire at any enemy in range without stopping movement
-    const nearest = this.nearestEnemy(allChars, this.config.attackRange, blocks);
+    const nearest = this.nearestEnemy(enemies, this.config.attackRange, blocks);
     if (nearest) this.attackEnemy(nearest, onFire);
 
     // Dodge enemies directly in front by jumping over them.
     const RUSH_DODGE_LOOKAHEAD = 90;
     const RUSH_FLOOR_TOL       = 25;
-    const blocker = allChars.find(c =>
-      !c.isDead && c.side !== this.side &&
+    const blocker = enemies.find(c =>
+      !c.isDead &&
       dir * (c.x - this.x) > 0 &&
       dir * (c.x - this.x) < RUSH_DODGE_LOOKAHEAD &&
       Math.abs(c.floorY - this.floorY) < RUSH_FLOOR_TOL,
@@ -2045,11 +2075,11 @@ export class Character {
   // ── Collecting behaviour ─────────────────────────────────────────────────────
 
   private updateCollecting(ctx: UpdateContext) {
-    const { dt, allChars, coins, homeTowerFrontX, onFire, onDepositCoin, navGraph, blocks } = ctx;
+    const { dt, enemies, allies, coins, homeTowerFrontX, onFire, onDepositCoin, navGraph, blocks } = ctx;
 
     // Attack any enemy that wanders into range without stopping movement
     if (!this.isAirborne) {
-      const nearest = this.nearestEnemy(allChars, this.config.attackRange, blocks);
+      const nearest = this.nearestEnemy(enemies, this.config.attackRange, blocks);
       if (nearest) this.attackEnemy(nearest, onFire);
     }
 
@@ -2060,8 +2090,8 @@ export class Character {
         ? Math.sign(homeTowerFrontX - this.x)
         : this.targetCoin ? Math.sign(this.targetCoin.x - this.x) : 0;
       if (dirToTarget !== 0) {
-        const blocking = allChars.find(c =>
-          !c.isDead && c.side !== this.side &&
+        const blocking = enemies.find(c =>
+          !c.isDead &&
           Math.sign(c.x - this.x) === dirToTarget &&
           Math.abs(c.x - this.x) < 60,
         );
@@ -2112,8 +2142,8 @@ export class Character {
     if (!this.targetCoin) {
       // Exclude coins already claimed by an ally collector so teammates spread out
       const claimed = new Set(
-        ctx.allChars
-          .filter(c => c !== this && c.side === this.side && c.behavior === 'collecting' && c.claimedCoin)
+        allies
+          .filter(c => c !== this && c.behavior === 'collecting' && c.claimedCoin)
           .map(c => c.claimedCoin!),
       );
       const free = coins.filter(c => !claimed.has(c));
@@ -2163,7 +2193,7 @@ export class Character {
   // ── Harass behaviour ─────────────────────────────────────────────────────────
 
   private updateHarass(ctx: UpdateContext) {
-    const { dt, allChars, enemyTowerFrontX, homeTowerFrontX, onFire, platforms, blocks, navGraph } = ctx;
+    const { dt, enemies, allies, enemyTowerFrontX, homeTowerFrontX, onFire, platforms, blocks, navGraph } = ctx;
     if (this.isAirborne) return;
 
     const dir   = this.side === 'player' ? 1 : -1;
@@ -2174,13 +2204,13 @@ export class Character {
       this.state = 'marching';
       this.x -= dir * this.moveSpeed * dt;
       // Still fire at enemies while retreating
-      const target = this.nearestEnemy(allChars, this.config.attackRange, blocks);
+      const target = this.nearestEnemy(enemies, this.config.attackRange, blocks);
       if (target) this.attackEnemy(target, onFire);
       return;
     }
 
     // Attack any enemy in range (no position change)
-    const inRange = this.nearestEnemy(allChars, this.config.attackRange, blocks);
+    const inRange = this.nearestEnemy(enemies, this.config.attackRange, blocks);
     if (inRange) {
       this.state = 'fighting';
       this.attackEnemy(inRange, onFire);
@@ -2204,8 +2234,8 @@ export class Character {
     // Find the closest enemy (no range limit) to guide movement
     let closest: Character | null = null;
     let closestDist = Infinity;
-    for (const c of allChars) {
-      if (c.isDead || c.side === this.side) continue;
+    for (const c of enemies) {
+      if (c.isDead) continue;
       const d = Math.abs(c.x - this.x);
       if (d < closestDist) { closestDist = d; closest = c; }
     }
@@ -2258,7 +2288,7 @@ export class Character {
       // else: enemy is ahead, in attack range, on same plane — hold position
     } else {
       // No enemies — use pathfinding to group up or rally near own tower
-      const mate = this.nearestAlly(allChars);
+      const mate = this.nearestAlly(allies);
       const rallyX = mate ? mate.x : homeTowerFrontX + dir * 80;
       const dist   = Math.abs(this.x - rallyX);
       const thresh = mate ? 55 : 20;
@@ -2273,7 +2303,7 @@ export class Character {
   // ── Defend behaviour ─────────────────────────────────────────────────────────
 
   private updateDefending(ctx: UpdateContext) {
-    const { dt, allChars, homeTowerFrontX, onFire, blocks, navGraph } = ctx;
+    const { dt, enemies, allies, homeTowerFrontX, onFire, blocks, navGraph } = ctx;
     if (this.isAirborne) return;
 
     const dir = this.side === 'player' ? 1 : -1;
@@ -2295,8 +2325,8 @@ export class Character {
     // dog-pile on the same enemy. Each defender exposes its pursuit target
     // via claimedIntruder; we filter those out when picking our own target.
     const claimed = new Set<Character>();
-    for (const c of allChars) {
-      if (c === this || c.side !== this.side || c.isDead) continue;
+    for (const c of allies) {
+      if (c === this || c.isDead) continue;
       if (c.behavior !== 'defend') continue;
       const t = c.claimedIntruder;
       if (t) claimed.add(t);
@@ -2311,8 +2341,8 @@ export class Character {
       intruder = this.defendTargetIntruder;
     } else {
       let minDist = Infinity;
-      for (const c of allChars) {
-        if (c.isDead || c.side === this.side) continue;
+      for (const c of enemies) {
+        if (c.isDead) continue;
         if (c.x < atkNearX || c.x > atkFarX) continue;
         if (claimed.has(c)) continue;   // already covered by another defender
         const d = Math.abs(c.x - this.x);
@@ -2326,7 +2356,7 @@ export class Character {
 
       // Within personal attack range — fire (uses nearestEnemy so LOS / canSnapHit
       // gating still applies; falls through to pursuit if the geometry blocks the shot).
-      const target = this.nearestEnemy(allChars, this.config.attackRange, blocks);
+      const target = this.nearestEnemy(enemies, this.config.attackRange, blocks);
       if (target) {
         this.state = 'fighting';
         this.attackEnemy(target, onFire);
@@ -2655,12 +2685,13 @@ export class Character {
    * Enemies more than 30 px below the shooter are excluded — projectiles cannot arc
    * downward and melee cannot swing through a platform floor.
    */
-  private nearestEnemy(chars: Character[], range: number, blocks: BlockData[] = []): Character | null {
+  /** `enemies` must already be filtered to characters on the other side. */
+  private nearestEnemy(enemies: Character[], range: number, blocks: BlockData[] = []): Character | null {
     let best: Character | null = null;
     let minDistSq = Infinity;
     const rangeSq = range * range;
-    for (const t of chars) {
-      if (t.isDead || t.side === this.side) continue;
+    for (const t of enemies) {
+      if (t.isDead) continue;
       // Skip enemies that are meaningfully below — projectiles cannot fire downward,
       // and melee cannot swing through the floor of a platform.
       if (t.y > this.y + 30) continue;
@@ -2677,11 +2708,12 @@ export class Character {
     return best;
   }
 
-  private nearestAlly(chars: Character[]): Character | null {
+  /** `allies` must already be filtered to characters on the same side (this character will skip itself). */
+  private nearestAlly(allies: Character[]): Character | null {
     let best: Character | null = null;
     let minDist = Infinity;
-    for (const c of chars) {
-      if (c === this || c.isDead || c.side !== this.side) continue;
+    for (const c of allies) {
+      if (c === this || c.isDead) continue;
       const dist = Math.abs(this.x - c.x);
       if (dist < minDist) { minDist = dist; best = c; }
     }

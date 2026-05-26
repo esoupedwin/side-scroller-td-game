@@ -586,6 +586,20 @@
               <img id="preview-plat-skin" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
               <button id="btn-clear-plat-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
             </div>
+            <!-- Animation: oscillate between (x, y) and (endX, endY) at the given speed -->
+            <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
+              <label style="display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="input-plat-anim" style="width:auto; height:auto;" />
+                <span>Animate</span>
+              </label>
+              <span class="hint">ping-pong between (X, Y) and (End X, End Y)</span>
+            </div>
+            <div id="plat-anim-fields" style="width:100%; display:none; flex-wrap:wrap; gap:6px; align-items:center;">
+              <label>End X:</label><input type="number" id="input-plat-anim-end-x" value="0" />
+              <label>End Y:</label><input type="number" id="input-plat-anim-end-y" value="0" />
+              <label>Speed:</label><input type="number" id="input-plat-anim-speed" min="1" value="60" />
+              <span class="hint">px/s</span>
+            </div>
           </div>
 
           <!-- Ground (only when ground is selected) -->
@@ -650,6 +664,20 @@
               <input type="file" id="input-block-skin" accept="image/*" />
               <img id="preview-block-skin" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
               <button id="btn-clear-block-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
+            </div>
+            <!-- Animation: oscillate between (x, y) and (endX, endY) at the given speed -->
+            <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
+              <label style="display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="input-block-anim" style="width:auto; height:auto;" />
+                <span>Animate</span>
+              </label>
+              <span class="hint">ping-pong between (X, Y) and (End X, End Y)</span>
+            </div>
+            <div id="block-anim-fields" style="width:100%; display:none; flex-wrap:wrap; gap:6px; align-items:center;">
+              <label>End X:</label><input type="number" id="input-block-anim-end-x" value="0" />
+              <label>End Y:</label><input type="number" id="input-block-anim-end-y" value="0" />
+              <label>Speed:</label><input type="number" id="input-block-anim-speed" min="1" value="60" />
+              <span class="hint">px/s</span>
             </div>
           </div>
 

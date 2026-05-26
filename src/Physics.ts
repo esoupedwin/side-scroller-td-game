@@ -21,7 +21,10 @@ export const CAT_BLOCK     = 0x0100;
 export class Physics {
   readonly engine: Matter.Engine;
 
-  private platformBodies: Matter.Body[] = [];
+  private _platformBodies: Matter.Body[] = [];
+  /** Parallel to the map's `platforms` array — used by Game.tickPlatforms to
+   *  setPosition on each body when the platform animates. */
+  get platformBodies(): readonly Matter.Body[] { return this._platformBodies; }
   private onSurface = new Set<number>();
 
   constructor(
@@ -81,7 +84,7 @@ export class Physics {
           collisionFilter: { category: CAT_PLATFORM, mask: CAT_CHARACTER | CAT_COIN | CAT_POWERUP | CAT_SHEEP },
         },
       );
-      this.platformBodies.push(pb);
+      this._platformBodies.push(pb);
       Matter.Composite.add(this.engine.world, pb);
     }
 
@@ -110,7 +113,7 @@ export class Physics {
   updatePlatformPassthrough(body: Matter.Body) {
     const isRising       = body.velocity.y < -0.1;
     const passingThrough = isRising &&
-      this.platformBodies.some(pb => body.bounds.min.y > pb.bounds.min.y);
+      this._platformBodies.some(pb => body.bounds.min.y > pb.bounds.min.y);
 
     const baseMask = passingThrough
       ? CAT_GROUND

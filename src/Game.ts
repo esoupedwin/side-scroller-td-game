@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js';
+import Matter from 'matter-js';
 
 export interface CpuStrategyInfo {
   stance:   'push' | 'economy' | 'defend';
@@ -131,6 +132,9 @@ export class Game {
   private platforms:     Platform[]    = [];
   private readonly platformData: PlatformData[] = [];
   private blocks:        Block[]       = [];
+  // Parallel to `blocks` — Matter body for each block, so tickBlocks can
+  // setPosition on the body each tick when the block animates.
+  private blockBodies:   Matter.Body[] = [];
   private readonly blockData:    BlockData[]    = [];
   private physics!:      Physics;
 
@@ -368,7 +372,11 @@ export class Game {
     }
 
     this.physics = new Physics(m.worldWidth, m.playerTowerX, m.enemyTowerX, m.platforms);
-    for (const b of m.blocks) this.physics.createBlockBody(b.x, b.y, b.width, b.height);
+    this.blockBodies.length = 0;
+    for (const blk of this.blocks) {
+      const body = this.physics.createBlockBody(blk.data.x, blk.data.y, blk.data.width, blk.data.height);
+      this.blockBodies.push(body);
+    }
 
     this.coinLayer     = new PIXI.Container();
     this.sheepLayer    = new PIXI.Container();
@@ -415,16 +423,8 @@ export class Game {
         width: TOWER_WIDTH, height: TOWER_HEIGHT,
         type: 'solid', label: 'Enemy Tower',
       },
-      ...m.platforms.map((p, i) => ({
-        x: p.x, y: p.y,
-        width: p.width, height: p.height,
-        type: 'passthrough' as const, label: `Platform ${i + 1}`,
-      })),
-      ...m.blocks.map((b, i) => ({
-        x: b.x, y: b.y,
-        width: b.width, height: b.height,
-        type: 'solid' as const, label: `Block ${i + 1}`,
-      })),
+      // Platforms and blocks intentionally excluded — they're drawn live in
+      // drawCollisionDebug() so animated surfaces' overlay follows the body.
       {
         x: m.coinBox.x - m.coinBox.width / 2, y: m.coinBox.y,
         width: m.coinBox.width, height: m.coinBox.height,
@@ -502,7 +502,8 @@ export class Game {
     const towerY = GROUND_Y - TOWER_HEIGHT * 0.5;
     this.playerCtx = {
       dt: 0,
-      allChars:         this.liveChars,
+      enemies:          this.enemyLive,
+      allies:           this.playerLive,
       enemyTowerFrontX: this.enemyTower.frontX,
       enemyTowerY:      towerY,
       homeTowerFrontX:  this.playerTower.frontX,
@@ -527,7 +528,8 @@ export class Game {
     };
     this.enemyCtx = {
       dt: 0,
-      allChars:         this.liveChars,
+      enemies:          this.playerLive,
+      allies:           this.enemyLive,
       enemyTowerFrontX: this.playerTower.frontX,
       enemyTowerY:      towerY,
       homeTowerFrontX:  this.enemyTower.frontX,
@@ -851,6 +853,69 @@ export class Game {
   }
 
   /**
+   * Animate each block AND each platform that has an `anim` definition, sync
+   * its Matter body to the new position, and carry any character standing on
+   * it so units ride the surface instead of being left hovering. Called from
+   * both the normal tick loop and the post-game-over loop so animations
+   * continue to play while the player reviews the field.
+   */
+  private tickBlocks(dt: number): void {
+    let anyMoved = false;
+
+    // Helper: carry any character whose feet were on a surface that just
+    // moved. We test against the PREVIOUS surface position (current minus
+    // delta) because the character's floorY hasn't been updated yet.
+    const carryStanders = (
+      newX: number, newY: number, width: number, dx: number, dy: number,
+    ) => {
+      const oldTop  = newY - dy;
+      const oldLeft = newX - dx;
+      const right   = oldLeft + width;
+      for (const c of this.characters) {
+        if (c.isDead || c.airborne) continue;
+        if (Math.abs(c.currentFloorY - oldTop) > 1) continue;
+        if (c.x < oldLeft || c.x > right) continue;
+        c.carryWith(dx, dy);
+      }
+    };
+
+    for (let i = 0; i < this.blocks.length; i++) {
+      const blk = this.blocks[i];
+      const { dx, dy } = blk.update(dt);
+      if (dx === 0 && dy === 0) continue;
+      anyMoved = true;
+
+      Matter.Body.setPosition(this.blockBodies[i], {
+        x: blk.data.x + blk.data.width  / 2,
+        y: blk.data.y + blk.data.height / 2,
+      });
+      carryStanders(blk.data.x, blk.data.y, blk.data.width, dx, dy);
+    }
+
+    const platformBodies = this.physics.platformBodies;
+    for (let i = 0; i < this.platforms.length; i++) {
+      const plat = this.platforms[i];
+      const { dx, dy } = plat.update(dt);
+      if (dx === 0 && dy === 0) continue;
+      anyMoved = true;
+
+      Matter.Body.setPosition(platformBodies[i], {
+        x: plat.data.x + plat.data.width  / 2,
+        y: plat.data.y + plat.data.height / 2,
+      });
+      carryStanders(plat.data.x, plat.data.y, plat.data.width, dx, dy);
+    }
+
+    // Any animated surface that actually moved this tick invalidates the
+    // NavGraph: surface splits shift, block-top + platform surfaces relocate.
+    // Rebuild so the next requestPath() sees the live geometry. Characters
+    // cache navGraph.version and refresh their cached paths when it bumps.
+    if (anyMoved) {
+      this.navGraph.build(this.platformData, this.mapDef.playerTowerX, this.mapDef.enemyTowerX, this.blockData);
+    }
+  }
+
+  /**
    * Lightweight tick that runs once the match is over. Skips AI, combat,
    * spawning, income, power-ups, and tower fire — keeps only:
    *   • Coin-box drop timers + visuals (so the field stays alive while the
@@ -878,6 +943,9 @@ export class Game {
     for (const coin of this.coins) {
       if (!coin.isDead && !coin.isPickedUp) this.physics.updatePlatformPassthrough(coin.body);
     }
+
+    // Animate moving blocks (and carry any units still standing on them).
+    this.tickBlocks(dt);
 
     // Step the physics world so airborne characters fall and land. Characters
     // were already frozen in end() (motion zeroed, anims to idle), so this is
@@ -1066,6 +1134,10 @@ export class Game {
       this.tickCpuCollectAI('player', this.playerLive, liveCoins);
       this.tickCpuBehaviorAI('player', this.playerLive);
     }
+
+    // Animate moving blocks (and carry any units still standing on them) BEFORE
+    // characters' AI runs so each character's tick sees its post-carry x/y.
+    this.tickBlocks(dt);
 
     // Update characters — reuse pre-allocated ctx objects; patch only the fields
     // that change each tick to eliminate per-character object + closure allocation.
@@ -1334,6 +1406,22 @@ export class Game {
       g.endFill();
     }
 
+    // Platforms (passthrough=yellow) drawn live so animated platforms follow.
+    for (const plat of this.platforms) {
+      g.lineStyle(2, 0xffdd00, 0.85);
+      g.beginFill(0xffdd00, 0.08);
+      g.drawRect(plat.data.x, plat.data.y, plat.data.width, plat.data.height);
+      g.endFill();
+    }
+
+    // Blocks (solid=red) drawn live from this.blocks so animated blocks follow.
+    for (const blk of this.blocks) {
+      g.lineStyle(2, 0xff3333, 0.85);
+      g.beginFill(0xff3333, 0.08);
+      g.drawRect(blk.data.x, blk.data.y, blk.data.width, blk.data.height);
+      g.endFill();
+    }
+
     // Coins: circular collision bodies (radius 10)
     for (const coin of this.coins) {
       if (coin.isDead || coin.isPickedUp) continue;
@@ -1513,11 +1601,19 @@ export class Game {
   }
 
   private notifyCpuChars() {
-    const cpuChars = this.characters.filter(c => c.side === 'enemy' && !c.isDead);
-    const sig = cpuChars.map(c => `${c.id}:${c.behavior}`).join(',');
+    // Walk the prepooled enemyLive array once. Build a change-detection signature
+    // by string-concatenation in a single pass (no intermediate filter/map array).
+    let sig = '';
+    for (const c of this.enemyLive) sig += c.id + ':' + c.behavior + ',';
     if (sig === this.lastCpuCharsSig) return;
     this.lastCpuCharsSig = sig;
-    this.onCpuCharsChanged(cpuChars.map(c => ({ id: c.id, name: c.name, type: c.config.type, behavior: c.behavior })));
+    // Only allocate the snapshot array on the change path.
+    const snapshot = new Array<{ id: number; name: string; type: string; behavior: string }>(this.enemyLive.length);
+    for (let i = 0; i < this.enemyLive.length; i++) {
+      const c = this.enemyLive[i];
+      snapshot[i] = { id: c.id, name: c.name, type: c.config.type, behavior: c.behavior };
+    }
+    this.onCpuCharsChanged(snapshot);
   }
 
   // ── CPU collect AI ───────────────────────────────────────────────────────────

@@ -178,6 +178,24 @@ export class Projectile {
       }
     }
 
+    // Character collision — strict AABB check against every enemy character
+    // every tick. Without this, a projectile aimed past a clustered group
+    // (e.g. at the tower) flies straight through everyone and only the unit
+    // nearest to its landing tx ever takes damage. land()'s splash check
+    // remains as a leniency fallback for projectiles that arrive after their
+    // intended target has moved.
+    for (const c of characters) {
+      if (c.isDead || c.side === this.side) continue;
+      if (this.x < c.x - c.config.width / 2)  continue;
+      if (this.x > c.x + c.config.width / 2)  continue;
+      if (this.y > c.y)                       continue;  // below feet
+      if (this.y < c.y - c.collisionHeight)   continue;  // above head
+      c.takeDamage(this.damage, this.shooter ?? undefined);
+      this.pendingImpact = { x: c.x, y: c.y - c.config.height * 0.5 };
+      this.isDead = true;
+      return;
+    }
+
     // Angle follows instantaneous velocity
     const vx = (this.tx - this.sx) / this.travelTime;
     const vy = (this.ty - this.sy) / this.travelTime

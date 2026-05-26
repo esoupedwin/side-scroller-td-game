@@ -1,5 +1,12 @@
 import * as PIXI from 'pixi.js';
 
+/** Optional ping-pong animation between (data.x, data.y) and (anim.endX, anim.endY). */
+export interface PlatformAnim {
+  endX:  number;
+  endY:  number;
+  speed: number;   // px/s along the start→end segment
+}
+
 export interface PlatformData {
   id?:     string;  // stable identifier assigned by map builder
   x:       number;  // left edge
@@ -8,65 +15,106 @@ export interface PlatformData {
   height:  number;
   zIndex?: number;  // render order among platforms; higher = in front (default 0)
   skin?:   string;  // data URL (data:image/...;base64,…)
+  anim?:   PlatformAnim;
 }
 
 export class Platform {
+  /**
+   * Per-instance copy of the source map data. data.x and data.y are mutated
+   * during animation to reflect the platform's current position so consumers
+   * that read platformData (Character.syncFromBody, Coin.update, …) see the
+   * live position with no extra plumbing.
+   */
   readonly data:      PlatformData;
   readonly container: PIXI.Container;
-  private  gfx:      PIXI.Graphics;
+  private  gfx:       PIXI.Graphics;
+
+  private readonly startX: number;
+  private readonly startY: number;
+  private phase = 0;
+  private dir:   1 | -1 = 1;
 
   constructor(data: PlatformData) {
-    this.data             = data;
+    this.data = { ...data, anim: data.anim ? { ...data.anim } : undefined };
+    this.startX = this.data.x;
+    this.startY = this.data.y;
+
     this.container        = new PIXI.Container();
-    this.container.zIndex = data.zIndex ?? 0;
+    this.container.zIndex = this.data.zIndex ?? 0;
+    this.container.x      = this.data.x;
+    this.container.y      = this.data.y;
     this.gfx              = this.draw();
 
     if (data.skin) {
       PIXI.Assets.load<PIXI.Texture>(data.skin)
         .then(tex => {
-          this.gfx.visible  = false;
-          const sprite      = new PIXI.Sprite(tex);
-          sprite.x          = data.x;
-          sprite.y          = data.y;
-          sprite.width      = data.width;
-          sprite.height     = data.height;
+          this.gfx.visible = false;
+          const sprite     = new PIXI.Sprite(tex);
+          sprite.x      = 0;
+          sprite.y      = 0;
+          sprite.width  = this.data.width;
+          sprite.height = this.data.height;
           this.container.addChildAt(sprite, 0);
         })
         .catch(() => { /* keep Graphics fallback */ });
     }
   }
 
+  /** Advance ping-pong animation by `dt` seconds, return (dx, dy) for the
+   *  caller to sync the physics body and carry standers on top. */
+  update(dt: number): { dx: number; dy: number } {
+    if (!this.data.anim) return { dx: 0, dy: 0 };
+    const { endX, endY, speed } = this.data.anim;
+    const segLen = Math.hypot(endX - this.startX, endY - this.startY);
+    if (segLen < 0.001 || speed <= 0) return { dx: 0, dy: 0 };
+
+    this.phase += this.dir * (speed * dt) / segLen;
+    if (this.phase >= 1)      { this.phase = Math.max(0, 2 - this.phase); this.dir = -1; }
+    else if (this.phase <= 0) { this.phase = Math.min(1, -this.phase);    this.dir =  1; }
+
+    const oldX = this.data.x;
+    const oldY = this.data.y;
+    this.data.x = this.startX + (endX - this.startX) * this.phase;
+    this.data.y = this.startY + (endY - this.startY) * this.phase;
+    this.container.x = this.data.x;
+    this.container.y = this.data.y;
+    return { dx: this.data.x - oldX, dy: this.data.y - oldY };
+  }
+
+  // ── Drawing ──────────────────────────────────────────────────────────────
+  // All shapes are drawn at (0, 0); the container is positioned absolutely.
+
   private draw(): PIXI.Graphics {
-    const { x, y, width, height } = this.data;
+    const { width, height } = this.data;
     const g = new PIXI.Graphics();
 
     // Drop shadow beneath
     g.beginFill(0x000000, 0.25);
-    g.drawRoundedRect(x + 3, y + height, width - 3, 7, 2);
+    g.drawRoundedRect(3, height, width - 3, 7, 2);
     g.endFill();
 
     // Main plank body
     g.beginFill(0x8B5E3C);
-    g.drawRoundedRect(x, y, width, height, 3);
+    g.drawRoundedRect(0, 0, width, height, 3);
     g.endFill();
 
     // Top-surface highlight
     g.beginFill(0xC4894A, 0.65);
-    g.drawRect(x + 3, y + 1, width - 6, 4);
+    g.drawRect(3, 1, width - 6, 4);
     g.endFill();
 
     // Plank-join lines
     g.lineStyle(1, 0x5c3322, 0.45);
-    for (let px = x + 45; px < x + width - 4; px += 45) {
-      g.moveTo(px, y + 2);
-      g.lineTo(px, y + height - 2);
+    for (let px = 45; px < width - 4; px += 45) {
+      g.moveTo(px, 2);
+      g.lineTo(px, height - 2);
     }
     g.lineStyle(0);
 
     // Left & right end-caps (darker wood grain)
     g.beginFill(0x6B4226, 0.6);
-    g.drawRoundedRect(x, y, 5, height, 2);
-    g.drawRoundedRect(x + width - 5, y, 5, height, 2);
+    g.drawRoundedRect(0, 0, 5, height, 2);
+    g.drawRoundedRect(width - 5, 0, 5, height, 2);
     g.endFill();
 
     this.container.addChild(g);

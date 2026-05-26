@@ -83,6 +83,62 @@ class MapBuilder {
   private sw(worldW: number): number { return worldW * this.scale; }
   private sh(worldH: number): number { return worldH * this.scale; }
 
+  /**
+   * Draws the animation overlay for a block or platform: dashed indigo ghost
+   * at the end position, a connector line + arrow from start centre to end
+   * centre, and "S (x, y)" / "E (endX, endY)" labels above each rectangle.
+   * Selected items get a brighter / thicker ghost and a slightly larger font.
+   */
+  private drawAnimGhost(
+    ctx: CanvasRenderingContext2D,
+    startX: number, startY: number,
+    endX:   number, endY:   number,
+    width:  number, height: number,
+    selected: boolean,
+  ): void {
+    const sx = this.wx(startX), sy = this.wy(startY);
+    const ex = this.wx(endX),   ey = this.wy(endY);
+    const w  = this.sw(width),  h  = this.sh(height);
+    const ghostAlpha = selected ? 0.9 : 0.45;
+    ctx.save();
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth   = selected ? 2 : 1.25;
+    ctx.strokeStyle = `rgba(99, 102, 241, ${ghostAlpha})`;     // indigo
+    ctx.strokeRect(ex, ey, w, h);
+    // Connector line from start centre to end centre
+    ctx.setLineDash([]);
+    ctx.strokeStyle = `rgba(99, 102, 241, ${ghostAlpha * 0.8})`;
+    ctx.beginPath();
+    const cx0 = sx + w / 2, cy0 = sy + h / 2;
+    const cx1 = ex + w / 2, cy1 = ey + h / 2;
+    ctx.moveTo(cx0, cy0);
+    ctx.lineTo(cx1, cy1);
+    ctx.stroke();
+    // Arrowhead
+    const ang = Math.atan2(cy1 - cy0, cx1 - cx0);
+    const aLen = 8;
+    ctx.beginPath();
+    ctx.moveTo(cx1, cy1);
+    ctx.lineTo(cx1 - aLen * Math.cos(ang - Math.PI / 6), cy1 - aLen * Math.sin(ang - Math.PI / 6));
+    ctx.moveTo(cx1, cy1);
+    ctx.lineTo(cx1 - aLen * Math.cos(ang + Math.PI / 6), cy1 - aLen * Math.sin(ang + Math.PI / 6));
+    ctx.stroke();
+    // Endpoint coordinate labels with dark halo for legibility.
+    ctx.font         = `${selected ? 13 : 11}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.lineWidth    = 3;
+    ctx.strokeStyle  = 'rgba(7, 7, 15, 0.85)';
+    ctx.fillStyle    = `rgba(165, 180, 252, ${ghostAlpha})`;  // indigo-300
+    const sLabel = `S (${Math.round(startX)}, ${Math.round(startY)})`;
+    const eLabel = `E (${Math.round(endX)}, ${Math.round(endY)})`;
+    ctx.strokeText(sLabel, sx + w / 2, sy - 4);
+    ctx.fillText  (sLabel, sx + w / 2, sy - 4);
+    ctx.strokeText(eLabel, ex + w / 2, ey - 4);
+    ctx.fillText  (eLabel, ex + w / 2, ey - 4);
+    ctx.restore();
+  }
+
   private resizeCanvas() {
     const area = document.getElementById('canvas-area')!;
     const w    = Math.max(200, area.clientWidth);
@@ -263,6 +319,11 @@ class MapBuilder {
         ctx.fillRect(bx - hw / 2,      by + bh / 2 - hh / 2, hw, hh);
         ctx.fillRect(bx + bw - hw / 2, by + bh / 2 - hh / 2, hw, hh);
       }
+
+      // Animation ghost: dashed outline at end position + connector + S/E labels.
+      if (b.anim) {
+        this.drawAnimGhost(ctx, b.x, b.y, b.anim.endX, b.anim.endY, b.width, b.height, sel);
+      }
     }
 
     // Platforms — draw in ascending zIndex order so higher-z platforms render on top.
@@ -307,6 +368,11 @@ class MapBuilder {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(px - hw / 2,      py + ph / 2 - hh / 2, hw, hh);
         ctx.fillRect(px + pw - hw / 2, py + ph / 2 - hh / 2, hw, hh);
+      }
+
+      // Animation ghost — dashed outline at end position + arrow + S/E labels
+      if (p.anim) {
+        this.drawAnimGhost(ctx, p.x, p.y, p.anim.endX, p.anim.endY, p.width, p.height, sel);
       }
     }
 
@@ -934,11 +1000,14 @@ class MapBuilder {
     });
 
     // Number inputs for selected platform
-    ['plat-x', 'plat-y', 'plat-w', 'plat-h', 'plat-z'].forEach(id => {
+    ['plat-x', 'plat-y', 'plat-w', 'plat-h', 'plat-z',
+     'plat-anim-end-x', 'plat-anim-end-y', 'plat-anim-speed'].forEach(id => {
       document.getElementById(`input-${id}`)!.addEventListener('change', () => this.readPlatformInputs());
     });
     // Z-index: also update on every keystroke so the canvas reflects order changes in real time
     document.getElementById('input-plat-z')!.addEventListener('input', () => this.readPlatformInputs());
+    // Animate checkbox toggles anim on/off + hides/shows the field set
+    document.getElementById('input-plat-anim')!.addEventListener('change', () => this.readPlatformInputs());
 
     // Platform skin picker
     document.getElementById('input-plat-skin')!.addEventListener('change', e => {
@@ -1001,9 +1070,13 @@ class MapBuilder {
     });
 
     // Number inputs for selected block
-    ['block-x', 'block-y', 'block-w', 'block-h'].forEach(id => {
+    ['block-x', 'block-y', 'block-w', 'block-h',
+     'block-anim-end-x', 'block-anim-end-y', 'block-anim-speed'].forEach(id => {
       document.getElementById(`input-${id}`)!.addEventListener('change', () => this.readBlockInputs());
     });
+    // Animate checkbox — fire on toggle and on initial wire so the field set
+    // shows/hides the moment the user ticks the box.
+    document.getElementById('input-block-anim')!.addEventListener('change', () => this.readBlockInputs());
 
     // Coin box inputs
     ['cb-x', 'cb-y', 'cb-w', 'cb-h', 'cb-spread'].forEach(id => {
@@ -1093,6 +1166,17 @@ class MapBuilder {
     p.height = parseInt((document.getElementById('input-plat-h') as HTMLInputElement).value, 10);
     const z  = parseInt((document.getElementById('input-plat-z') as HTMLInputElement).value, 10);
     p.zIndex = isNaN(z) || z === 0 ? undefined : z;
+    // Animation — same pattern as blocks
+    const animOn = (document.getElementById('input-plat-anim') as HTMLInputElement).checked;
+    if (animOn) {
+      const endX  = parseInt((document.getElementById('input-plat-anim-end-x') as HTMLInputElement).value, 10);
+      const endY  = parseInt((document.getElementById('input-plat-anim-end-y') as HTMLInputElement).value, 10);
+      const speed = Math.max(1, parseInt((document.getElementById('input-plat-anim-speed') as HTMLInputElement).value, 10) || 0);
+      p.anim = { endX: isNaN(endX) ? p.x : endX, endY: isNaN(endY) ? p.y : endY, speed };
+    } else {
+      delete p.anim;
+    }
+    (document.getElementById('plat-anim-fields') as HTMLElement).style.display = animOn ? 'flex' : 'none';
   }
 
   private readBlockInputs() {
@@ -1102,6 +1186,17 @@ class MapBuilder {
     b.y      = parseInt((document.getElementById('input-block-y') as HTMLInputElement).value, 10);
     b.width  = parseInt((document.getElementById('input-block-w') as HTMLInputElement).value, 10);
     b.height = parseInt((document.getElementById('input-block-h') as HTMLInputElement).value, 10);
+    // Animation fields — anim is only attached when the "Animate" checkbox is on.
+    const animOn = (document.getElementById('input-block-anim') as HTMLInputElement).checked;
+    if (animOn) {
+      const endX  = parseInt((document.getElementById('input-block-anim-end-x') as HTMLInputElement).value, 10);
+      const endY  = parseInt((document.getElementById('input-block-anim-end-y') as HTMLInputElement).value, 10);
+      const speed = Math.max(1, parseInt((document.getElementById('input-block-anim-speed') as HTMLInputElement).value, 10) || 0);
+      b.anim = { endX: isNaN(endX) ? b.x : endX, endY: isNaN(endY) ? b.y : endY, speed };
+    } else {
+      delete b.anim;
+    }
+    (document.getElementById('block-anim-fields') as HTMLElement).style.display = animOn ? 'flex' : 'none';
   }
 
   private readCoinBoxInputs() {
@@ -1163,6 +1258,17 @@ class MapBuilder {
       (document.getElementById('input-plat-w')  as HTMLInputElement).value = String(p.width);
       (document.getElementById('input-plat-h')  as HTMLInputElement).value = String(p.height);
       (document.getElementById('input-plat-z')  as HTMLInputElement).value = String(p.zIndex ?? 0);
+      const animCb  = document.getElementById('input-plat-anim')         as HTMLInputElement;
+      const animEX  = document.getElementById('input-plat-anim-end-x')   as HTMLInputElement;
+      const animEY  = document.getElementById('input-plat-anim-end-y')   as HTMLInputElement;
+      const animSp  = document.getElementById('input-plat-anim-speed')   as HTMLInputElement;
+      const animBox = document.getElementById('plat-anim-fields')        as HTMLElement;
+      const hasAnim = !!p.anim;
+      animCb.checked = hasAnim;
+      animEX.value = String(p.anim?.endX  ?? (p.x + p.width));
+      animEY.value = String(p.anim?.endY  ?? p.y);
+      animSp.value = String(p.anim?.speed ?? 60);
+      animBox.style.display = hasAnim ? 'flex' : 'none';
       document.getElementById('plat-label')!.textContent = `Platform ${this.selected! + 1}`;
       this.syncPlatformSkinPreview();
     }
@@ -1172,6 +1278,20 @@ class MapBuilder {
       (document.getElementById('input-block-y') as HTMLInputElement).value = String(b.y);
       (document.getElementById('input-block-w') as HTMLInputElement).value = String(b.width);
       (document.getElementById('input-block-h') as HTMLInputElement).value = String(b.height);
+      const animCb  = document.getElementById('input-block-anim')         as HTMLInputElement;
+      const animEX  = document.getElementById('input-block-anim-end-x')   as HTMLInputElement;
+      const animEY  = document.getElementById('input-block-anim-end-y')   as HTMLInputElement;
+      const animSp  = document.getElementById('input-block-anim-speed')   as HTMLInputElement;
+      const animBox = document.getElementById('block-anim-fields')        as HTMLElement;
+      const hasAnim = !!b.anim;
+      animCb.checked = hasAnim;
+      // Default end point sits a block-width to the right and the configured
+      // speed at 60 px/s if anim hasn't been set yet — gives a sensible
+      // starting state the moment the user ticks the box.
+      animEX.value = String(b.anim?.endX  ?? (b.x + b.width));
+      animEY.value = String(b.anim?.endY  ?? b.y);
+      animSp.value = String(b.anim?.speed ?? 60);
+      animBox.style.display = hasAnim ? 'flex' : 'none';
       document.getElementById('block-label')!.textContent = `Block ${this.selected! + 1}`;
       this.syncBlockSkinPreview();
     }

@@ -65,10 +65,17 @@ export class NavGraph {
   private surfaces:    NavSurface[]            = [];
   private edges:       Map<number, SurfEdge[]> = new Map();
   private surfaceById: Map<number, NavSurface> = new Map();
+  // Incremented on every build(). Characters compare this against their
+  // cached lastNavVersion to know when to invalidate a stored path — needed
+  // when animated blocks change the graph mid-game.
+  private _version = 0;
+  get version(): number { return this._version; }
 
   /**
    * (Re)build the graph from the current platform list.
-   * Call this whenever the map changes.
+   * Call this whenever the map changes — including each tick while any block
+   * has an `anim` definition, since moving blocks change surface splits and
+   * block-top surfaces.
    */
   build(
     platforms:    { x: number; y: number; width: number; height?: number }[],
@@ -166,6 +173,8 @@ export class NavGraph {
         }
       }
     }
+
+    this._version++;
   }
 
   /**
