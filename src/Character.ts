@@ -6,6 +6,7 @@ import {
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
   SAFE_ZONE_HEAL_RATE, HIT_JUMP_CHANCE,
+  ATTACK_KNOCKBACK_VY, ATTACK_KNOCKBACK_DECAY,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
@@ -73,9 +74,10 @@ export interface CharacterConfig {
   attackRange: number;
   attackPower: number;
   fireRate:    number;
-  critical:    number;  // miss probability [0, 1] — roll each attack
+  critical:    number;   // miss probability [0, 1] — roll each attack
   width:       number;
   height:      number;
+  knockback:   number;   // px/s horizontal impulse applied to the victim on a successful hit (melee or ranged)
 }
 
 export interface FireRequest {
@@ -2548,6 +2550,12 @@ export class Character {
       if (swing.damage > 0) {
         ctx.onMeleeHit?.(this.config.type, this.x);   // no sound on misses (damage === 0)
         spawnHitSpark(swing.target.x, swing.target.y - swing.target.config.height * 0.5);
+        // Knockback the victim in the attack direction (relative x).
+        if (this.config.knockback > 0 && !swing.target.isDead) {
+          const dir   = Math.sign(swing.target.x - this.x) || this.lastAttackDir;
+          const decay = Math.exp(-ATTACK_KNOCKBACK_DECAY * ctx.dt);
+          swing.target.applyKnockback(this.config.knockback * dir, ATTACK_KNOCKBACK_VY, ctx.dt, decay);
+        }
       }
     } else if (swing.onTower) {
       swing.onTower(swing.damage);

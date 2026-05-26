@@ -4,6 +4,7 @@ import {
   BULLET_SPEED, BULLET_MIN_TIME, BULLET_ARC_FACTOR, BULLET_SPLASH,
   ARROW_SPEED, ARROW_MIN_TIME, ARROW_ARC_FACTOR, ARROW_SPLASH,
   PROJ_TOWER_SPLASH,
+  ATTACK_KNOCKBACK_VY, ATTACK_KNOCKBACK_DECAY,
 } from './constants';
 import type { Character } from './Character';
 import type { Tower, Side } from './Tower';
@@ -191,6 +192,7 @@ export class Projectile {
       if (this.y > c.y)                       continue;  // below feet
       if (this.y < c.y - c.collisionHeight)   continue;  // above head
       c.takeDamage(this.damage, this.shooter ?? undefined);
+      this.applyKnockback(c, dt);
       this.pendingImpact = { x: c.x, y: c.y - c.config.height * 0.5 };
       this.isDead = true;
       return;
@@ -205,10 +207,10 @@ export class Projectile {
     this.container.x = this.x;
     this.container.y = this.y;
 
-    if (t >= 1) this.land(characters, playerTower, enemyTower);
+    if (t >= 1) this.land(characters, playerTower, enemyTower, dt);
   }
 
-  private land(characters: Character[], playerTower: Tower, enemyTower: Tower) {
+  private land(characters: Character[], playerTower: Tower, enemyTower: Tower, dt: number) {
     this.isDead = true;
     const targetTower = this.side === 'player' ? enemyTower : playerTower;
 
@@ -218,6 +220,7 @@ export class Projectile {
       if (c.isDead || c.side === this.side) continue;
       if (Math.abs(c.x - this.tx) <= splash) {
         c.takeDamage(this.damage, this.shooter ?? undefined);
+        this.applyKnockback(c, dt);
         this.pendingImpact = { x: c.x, y: c.y - c.config.height * 0.5 };
         hitChar = true;
         break;
@@ -227,6 +230,20 @@ export class Projectile {
     if (!hitChar && Math.abs(this.tx - targetTower.frontX) <= splash + PROJ_TOWER_SPLASH) {
       targetTower.takeDamage(this.damage);
     }
+  }
+
+  /**
+   * Apply the shooter's per-type knockback to `target`. Direction is the
+   * bullet's travel direction (sign of tx - sx), so a victim takes the hit
+   * in the same direction the projectile was moving. No-op when the shooter
+   * is missing or has zero knockback.
+   */
+  private applyKnockback(target: Character, dt: number): void {
+    const kb = this.shooter?.config.knockback ?? 0;
+    if (kb <= 0 || target.isDead) return;
+    const dir   = Math.sign(this.tx - this.sx) || (this.side === 'player' ? 1 : -1);
+    const decay = Math.exp(-ATTACK_KNOCKBACK_DECAY * dt);
+    target.applyKnockback(kb * dir, ATTACK_KNOCKBACK_VY, dt, decay);
   }
 
   /** Returns the impact location once (if the projectile just hit a character), then clears it. */

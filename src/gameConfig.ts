@@ -41,6 +41,8 @@ export const GameConfig = {
     coinThrowHoldSec:   0.5, // seconds the character holds the coin before releasing the throw
     safeZoneHealRate:    5,  // HP/s passively healed while within own tower's attack range
     hitJumpChance:    0.75,  // probability of jumping when struck by a projectile
+    attackKnockbackVy:    80,  // px/s — small upward impulse applied with every per-character knockback
+    attackKnockbackDecay: 4.0, // multiplied against knockbackVx each second (e^-decay); shared by melee + projectile hits
 
     conscript: {
       type:        'conscript' as const,
@@ -51,6 +53,7 @@ export const GameConfig = {
       fireRate:    0.65, // rapid punches
       cost:        15,
       critical:    0.18, // untrained brawler
+      knockback:   0,    // px/s horizontal impulse imparted on the target when this unit hits
     },
     warrior: {
       type:        'warrior'  as const,
@@ -61,6 +64,7 @@ export const GameConfig = {
       fireRate:    0.8,  // seconds between swings
       cost:        25,
       critical:    0.10, // 10 % miss chance
+      knockback:   0,
     },
     archer: {
       type:        'archer'   as const,
@@ -71,6 +75,7 @@ export const GameConfig = {
       fireRate:    2.2,
       cost:        50,
       critical:    0.08, // 8 % miss chance
+      knockback:   0,
     },
     rifleman: {
       type:        'rifleman' as const,
@@ -81,6 +86,7 @@ export const GameConfig = {
       fireRate:    0.5,
       cost:        70,
       critical:    0.07, // 7 % miss chance
+      knockback:   0,
     },
     sniper: {
       type:        'sniper' as const,
@@ -91,6 +97,7 @@ export const GameConfig = {
       fireRate:    2.8,
       cost:        100,
       critical:    0.05, // 5 % miss chance — trained marksman
+      knockback:   0,
     },
     viking: {
       type:        'viking'   as const,
@@ -101,6 +108,7 @@ export const GameConfig = {
       fireRate:    1.0,
       cost:        120,
       critical:    0.12,
+      knockback:   400,  // staggers melee victims back a clear ~100 px before decay zeroes vx
     },
     heavy: {
       type:        'heavy'    as const,
@@ -113,6 +121,7 @@ export const GameConfig = {
       critical:    0.12, // 12 % miss chance — slow and imprecise
       width:       28,
       height:      44,
+      knockback:   0,
     },
     tanker: {
       type:        'tanker'   as const,
@@ -125,6 +134,7 @@ export const GameConfig = {
       critical:    0.08,
       width:       80,
       height:      70,
+      knockback:   0,
     },
     grenadier: {
       type:        'grenadier' as const,
@@ -135,6 +145,7 @@ export const GameConfig = {
       fireRate:    2,
       cost:        90,
       critical:    0.08,
+      knockback:   0,
     },
     rocketeer: {
       type:        'rocketeer' as const,
@@ -145,6 +156,7 @@ export const GameConfig = {
       fireRate:    2.5,
       cost:        120,
       critical:    0.06,
+      knockback:   0,
     },
   },
 

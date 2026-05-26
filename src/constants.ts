@@ -141,6 +141,8 @@ export const PROMO_THRESHOLDS: number[] = [...promo.thresholds];
 // ── Characters ───────────────────────────────────────────────────────────────
 export const SAFE_ZONE_HEAL_RATE      = ch.safeZoneHealRate;
 export const HIT_JUMP_CHANCE        = ch.hitJumpChance;
+export const ATTACK_KNOCKBACK_VY    = ch.attackKnockbackVy;
+export const ATTACK_KNOCKBACK_DECAY = ch.attackKnockbackDecay;
 export const HARASS_SAFETY_BUFFER   = ch.harassSafetyBuffer;
 export const DEFEND_PURSUIT_RANGE   = ch.defendPursuitRange;
 export const RANGED_KITE_THRESHOLD  = ch.rangedKiteThreshold;
@@ -176,6 +178,7 @@ export const CONSCRIPT = {
   critical:    ch.conscript.critical,
   width:       ch.width,
   height:      ch.height,
+  knockback:   ch.conscript.knockback,
 };
 
 export const WARRIOR = {
@@ -188,6 +191,7 @@ export const WARRIOR = {
   critical:    ch.warrior.critical,
   width:       ch.width,
   height:      ch.height,
+  knockback:   ch.warrior.knockback,
 };
 
 export const ARCHER = {
@@ -200,6 +204,7 @@ export const ARCHER = {
   critical:    ch.archer.critical,
   width:       ch.width,
   height:      ch.height,
+  knockback:   ch.archer.knockback,
 };
 
 export const RIFLEMAN = {
@@ -212,6 +217,7 @@ export const RIFLEMAN = {
   critical:    ch.rifleman.critical,
   width:       ch.width,
   height:      ch.height,
+  knockback:   ch.rifleman.knockback,
 };
 
 export const SNIPER = {
@@ -224,6 +230,7 @@ export const SNIPER = {
   critical:    ch.sniper.critical,
   width:       ch.width,
   height:      ch.height,
+  knockback:   ch.sniper.knockback,
 };
 
 export const VIKING = {
@@ -236,6 +243,7 @@ export const VIKING = {
   critical:    ch.viking.critical,
   width:       ch.width,
   height:      ch.height,
+  knockback:   ch.viking.knockback,
 };
 
 export const HEAVY = {
@@ -248,6 +256,7 @@ export const HEAVY = {
   critical:    ch.heavy.critical,
   width:       ch.heavy.width,
   height:      ch.heavy.height,
+  knockback:   ch.heavy.knockback,
 };
 
 export const TANKER = {
@@ -260,6 +269,7 @@ export const TANKER = {
   critical:    ch.tanker.critical,
   width:       ch.tanker.width,
   height:      ch.tanker.height,
+  knockback:   ch.tanker.knockback,
 };
 
 export const GRENADIER = {
@@ -272,6 +282,7 @@ export const GRENADIER = {
   critical:    ch.grenadier.critical,
   width:       ch.width,
   height:      ch.height,
+  knockback:   ch.grenadier.knockback,
 };
 
 export const ROCKETEER = {
@@ -284,6 +295,7 @@ export const ROCKETEER = {
   critical:    ch.rocketeer.critical,
   width:       ch.width,
   height:      ch.height,
+  knockback:   ch.rocketeer.knockback,
 };
 
 // ── Grenade ──────────────────────────────────────────────────────────────────
