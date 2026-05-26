@@ -38,9 +38,10 @@ export class Block {
     this.startX = this.data.x;
     this.startY = this.data.y;
 
-    this.container   = new PIXI.Container();
-    this.container.x = this.data.x;
-    this.container.y = this.data.y;
+    this.container        = new PIXI.Container();
+    this.container.zIndex = this.data.zIndex ?? 0;
+    this.container.x      = this.data.x;
+    this.container.y      = this.data.y;
     this.gfx         = this.draw();
 
     if (data.skin) {

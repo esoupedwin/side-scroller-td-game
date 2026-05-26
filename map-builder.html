@@ -420,6 +420,30 @@
       }
       button.size-option:hover .size-bar { background: #a57048; }
 
+      .size-custom-preview {
+        width: 82%;
+        height: 22px;
+        border: 2px dashed #C4894A;
+        border-radius: 4px;
+        background: rgba(139, 94, 60, 0.12);
+        position: relative;
+      }
+      .size-custom-preview::after {
+        content: '✛';
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        color: #C4894A;
+        line-height: 1;
+      }
+      button.size-option:hover .size-custom-preview {
+        border-color: #e0a060;
+        background: rgba(165, 112, 72, 0.22);
+      }
+
       .size-tag {
         font-size: 22px;
         font-weight: 700;
@@ -659,6 +683,8 @@
             <label>Y:</label><input type="number" id="input-block-y" value="0" />
             <label>W:</label><input type="number" id="input-block-w" value="200" />
             <label>H:</label><input type="number" id="input-block-h" value="40" />
+            <label title="Render order — higher draws in front">Z:</label>
+            <input type="number" id="input-block-z" value="0" style="width:80px;" title="z-index: higher = rendered in front" />
             <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
               <span class="skin-label">Skin</span>
               <input type="file" id="input-block-skin" accept="image/*" />
@@ -714,6 +740,13 @@
             </div>
             <div class="size-tag">L</div>
             <div class="size-dims">900 × 120</div>
+          </button>
+          <button id="btn-platform-custom" class="size-option">
+            <div class="size-preview-wrap">
+              <div class="size-custom-preview"></div>
+            </div>
+            <div class="size-tag" style="font-size:18px;">Custom</div>
+            <div class="size-dims">drag to draw</div>
           </button>
         </div>
         <button id="platform-size-cancel">Cancel</button>

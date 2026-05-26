@@ -2,3 +2,6 @@ node_modules/
 dist/
 .claude/*
 !.claude/skills/
+.playwright-mcp/
+/*.png
+game-perf-improvements.md

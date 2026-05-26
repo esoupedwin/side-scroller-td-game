@@ -47,6 +47,23 @@ class MapBuilder {
   private selectedBackground = false;
   private selectedMapSettings = false;
 
+  // ── Copy / Paste clipboard ────────────────────────────────────────────────
+  private clipboard: {
+    kind: 'platform'; data: MapDefinition['platforms'][number];
+  } | {
+    kind: 'block'; data: MapDefinition['blocks'][number];
+  } | null = null;
+
+  // ── Custom platform draw mode (drag on canvas to size a new platform) ────
+  private customDrawMode: 'off' | 'ready' | 'drawing' = 'off';
+  private customDrawWx0 = 0; private customDrawWy0 = 0;  // start corner (world)
+  private customDrawWx1 = 0; private customDrawWy1 = 0;  // current corner (world)
+
+  // ── Undo / Redo history ───────────────────────────────────────────────────
+  private undoStack: MapDefinition[] = [];
+  private redoStack: MapDefinition[] = [];
+  private static readonly MAX_HISTORY = 100;
+
   constructor() {
     this.map    = structuredClone(loadMapWithOverride(DEFAULT_MAP));
     this.canvas = document.getElementById('builder-canvas') as HTMLCanvasElement;
@@ -285,8 +302,12 @@ class MapBuilder {
     drawTower(m.playerTowerX, '#00b4d8', '#007fa3', m.playerTowerSkin, m.playerTowerSkinW, m.playerTowerSkinH);
     drawTower(m.enemyTowerX,  '#e63946', '#a02830', m.enemyTowerSkin,  m.enemyTowerSkinW,  m.enemyTowerSkinH);
 
-    // Blocks
-    for (let i = 0; i < m.blocks.length; i++) {
+    // Blocks — draw in ascending zIndex order so higher-z blocks render on top.
+    const blockDrawOrder = m.blocks
+      .map((_, i) => i)
+      .sort((a, b) => (m.blocks[a].zIndex ?? 0) - (m.blocks[b].zIndex ?? 0));
+
+    for (const i of blockDrawOrder) {
       const b   = m.blocks[i];
       const sel = this.selectedKind === 'block' && i === this.selected;
       const bx  = this.wx(b.x);
@@ -387,6 +408,55 @@ class MapBuilder {
     ctx.font      = `bold ${Math.max(10, Math.round(14 * this.scale))}px monospace`;
     ctx.textAlign = 'center';
     ctx.fillText('★', this.wx(cb.x), this.wy(cb.y + cb.height / 2) + 4);
+
+    // ── Custom draw silhouette + hint ─────────────────────────────────────
+    if (this.customDrawMode !== 'off') {
+      if (this.customDrawMode === 'drawing') {
+        const rx0 = Math.min(this.customDrawWx0, this.customDrawWx1);
+        const ry0 = Math.min(this.customDrawWy0, this.customDrawWy1);
+        const rx1 = Math.max(this.customDrawWx0, this.customDrawWx1);
+        const ry1 = Math.max(this.customDrawWy0, this.customDrawWy1);
+        const rx  = this.wx(rx0), ry = this.wy(ry0);
+        const rw  = this.sw(rx1 - rx0), rh = this.sh(ry1 - ry0);
+        ctx.save();
+        // Filled ghost
+        ctx.fillStyle = 'rgba(141, 94, 60, 0.30)';
+        ctx.fillRect(rx, ry, rw, rh);
+        // Dashed border
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = '#f5c542';
+        ctx.lineWidth   = 2;
+        ctx.strokeRect(rx, ry, rw, rh);
+        // Dimension label (only if big enough to read)
+        const dimW = Math.round(rx1 - rx0), dimH = Math.round(ry1 - ry0);
+        if (rw > 50 && rh > 14) {
+          const label = `${dimW} × ${dimH}`;
+          ctx.setLineDash([]);
+          ctx.font          = 'bold 13px ui-sans-serif, system-ui, sans-serif';
+          ctx.textAlign     = 'center';
+          ctx.textBaseline  = 'middle';
+          ctx.lineWidth     = 3;
+          ctx.strokeStyle   = 'rgba(7,7,15,0.85)';
+          ctx.strokeText(label, rx + rw / 2, ry + rh / 2);
+          ctx.fillStyle = '#fff';
+          ctx.fillText(label, rx + rw / 2, ry + rh / 2);
+        }
+        ctx.restore();
+      }
+      // Hint banner pinned to the bottom of the canvas
+      const hint = this.customDrawMode === 'ready'
+        ? 'Click and drag on the canvas to draw a platform  •  Esc or RMB to cancel'
+        : 'Release to place  •  Esc or RMB to cancel';
+      ctx.save();
+      ctx.fillStyle = 'rgba(10,10,24,0.82)';
+      ctx.fillRect(0, H - 32, W, 32);
+      ctx.fillStyle     = '#f5c542';
+      ctx.font          = '13px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign     = 'center';
+      ctx.textBaseline  = 'middle';
+      ctx.fillText(hint, W / 2, H - 16);
+      ctx.restore();
+    }
 
     // ── HUD ──────────────────────────────────────────────────────────────────
     const fitScale = W / m.worldWidth;
@@ -501,63 +571,16 @@ class MapBuilder {
     return this.skinImages.get(url)!;
   }
 
-  private syncPlatformSkinPreview() {
-    const skin    = (this.selected !== null && this.selectedKind === 'platform')
-                    ? this.map.platforms[this.selected]?.skin
-                    : undefined;
-    const preview = document.getElementById('preview-plat-skin') as HTMLImageElement;
-    const clear   = document.getElementById('btn-clear-plat-skin') as HTMLButtonElement;
-    if (skin) {
-      preview.src           = skin;
-      preview.style.display = 'inline';
-      clear.style.display   = 'inline';
-    } else {
-      preview.style.display = 'none';
-      clear.style.display   = 'none';
-    }
-    const fileInput = document.getElementById('input-plat-skin') as HTMLInputElement;
-    if (!skin) fileInput.value = '';
-  }
-
-  private syncSkinPreviews() {
-    const m = this.map;
-    (['player', 'enemy'] as const).forEach(side => {
-      const url     = side === 'player' ? m.playerTowerSkin : m.enemyTowerSkin;
-      const preview = document.getElementById(`preview-${side}-skin`) as HTMLImageElement;
-      const clear   = document.getElementById(`btn-clear-${side}-skin`) as HTMLButtonElement;
-      if (url) {
-        preview.src           = url;
-        preview.style.display = 'inline';
-        clear.style.display   = 'inline';
-      } else {
-        preview.style.display = 'none';
-        clear.style.display   = 'none';
-      }
-    });
-  }
-
-  private syncBlockSkinPreview() {
-    const skin    = (this.selected !== null && this.selectedKind === 'block')
-                    ? this.map.blocks[this.selected]?.skin
-                    : undefined;
-    const preview = document.getElementById('preview-block-skin') as HTMLImageElement;
-    const clear   = document.getElementById('btn-clear-block-skin') as HTMLButtonElement;
-    if (skin) {
-      preview.src           = skin;
-      preview.style.display = 'inline';
-      clear.style.display   = 'inline';
-    } else {
-      preview.style.display = 'none';
-      clear.style.display   = 'none';
-    }
-    const fileInput = document.getElementById('input-block-skin') as HTMLInputElement;
-    if (!skin) fileInput.value = '';
-  }
-
-  private syncBackgroundSkinPreview() {
-    const url     = this.map.backgroundSkin;
-    const preview = document.getElementById('preview-bg-skin') as HTMLImageElement;
-    const clear   = document.getElementById('btn-clear-bg-skin') as HTMLButtonElement;
+  /**
+   * Core helper: shows/hides a preview `<img>` + clear button for a skin URL.
+   * When `url` is absent, also resets the file input so re-selecting the same
+   * file still fires the `change` event next time.
+   */
+  private syncSkinPreview(
+    previewId: string, clearId: string, url: string | undefined, fileInputId: string
+  ): void {
+    const preview = document.getElementById(previewId) as HTMLImageElement;
+    const clear   = document.getElementById(clearId)   as HTMLButtonElement;
     if (url) {
       preview.src           = url;
       preview.style.display = 'inline';
@@ -565,27 +588,37 @@ class MapBuilder {
     } else {
       preview.style.display = 'none';
       clear.style.display   = 'none';
+      (document.getElementById(fileInputId) as HTMLInputElement).value = '';
     }
-    const fileInput = document.getElementById('input-bg-skin') as HTMLInputElement;
-    if (!url) fileInput.value = '';
+  }
+
+  private syncPlatformSkinPreview() {
+    const skin = this.selected !== null && this.selectedKind === 'platform'
+      ? this.map.platforms[this.selected]?.skin : undefined;
+    this.syncSkinPreview('preview-plat-skin', 'btn-clear-plat-skin', skin, 'input-plat-skin');
+  }
+
+  private syncSkinPreviews() {
+    (['player', 'enemy'] as const).forEach(side => {
+      const url = side === 'player' ? this.map.playerTowerSkin : this.map.enemyTowerSkin;
+      this.syncSkinPreview(`preview-${side}-skin`, `btn-clear-${side}-skin`, url, `input-${side}-skin`);
+    });
+  }
+
+  private syncBlockSkinPreview() {
+    const skin = this.selected !== null && this.selectedKind === 'block'
+      ? this.map.blocks[this.selected]?.skin : undefined;
+    this.syncSkinPreview('preview-block-skin', 'btn-clear-block-skin', skin, 'input-block-skin');
+  }
+
+  private syncBackgroundSkinPreview() {
+    this.syncSkinPreview('preview-bg-skin', 'btn-clear-bg-skin', this.map.backgroundSkin, 'input-bg-skin');
     (document.getElementById('input-bg-skin-y') as HTMLInputElement).value =
       String(this.map.backgroundSkinY ?? 0);
   }
 
   private syncGroundSkinPreview() {
-    const url     = this.map.groundSkin;
-    const preview = document.getElementById('preview-ground-skin') as HTMLImageElement;
-    const clear   = document.getElementById('btn-clear-ground-skin') as HTMLButtonElement;
-    if (url) {
-      preview.src           = url;
-      preview.style.display = 'inline';
-      clear.style.display   = 'inline';
-    } else {
-      preview.style.display = 'none';
-      clear.style.display   = 'none';
-    }
-    const fileInput = document.getElementById('input-ground-skin') as HTMLInputElement;
-    if (!url) fileInput.value = '';
+    this.syncSkinPreview('preview-ground-skin', 'btn-clear-ground-skin', this.map.groundSkin, 'input-ground-skin');
   }
 
   // ── Canvas interaction ────────────────────────────────────────────────────
@@ -594,7 +627,10 @@ class MapBuilder {
     this.canvas.addEventListener('mousemove',   e => this.onMouseMove(e));
     this.canvas.addEventListener('mousedown',   e => this.onMouseDown(e));
     this.canvas.addEventListener('mouseup',     e => this.onMouseUp(e));
-    this.canvas.addEventListener('mouseleave',  e => this.onMouseUp(e));
+    this.canvas.addEventListener('mouseleave', e => {
+      if (this.customDrawMode !== 'off') { this.customDrawMode = 'off'; return; }
+      this.onMouseUp(e);
+    });
     this.canvas.addEventListener('wheel',       e => this.onWheel(e), { passive: false });
     this.canvas.addEventListener('contextmenu', e => e.preventDefault());
     this.canvas.style.cursor = 'crosshair';
@@ -626,6 +662,16 @@ class MapBuilder {
       this.panY += e.clientY - this.panLastY;
       this.panLastX = e.clientX;
       this.panLastY = e.clientY;
+      return;
+    }
+
+    // Custom draw — keep cursor and update live corner while dragging
+    if (this.customDrawMode !== 'off') {
+      if (this.customDrawMode === 'drawing') {
+        this.customDrawWx1 = this.cw(cx);
+        this.customDrawWy1 = this.ch(cy);
+      }
+      this.canvas.style.cursor = 'crosshair';
       return;
     }
 
@@ -721,6 +767,12 @@ class MapBuilder {
   }
 
   private onMouseDown(e: MouseEvent) {
+    // Custom draw mode: RMB/MMB cancels instead of starting a pan
+    if (this.customDrawMode !== 'off' && (e.button === 1 || e.button === 2)) {
+      this.customDrawMode = 'off';
+      e.preventDefault();
+      return;
+    }
     // Middle or right click → pan mode
     if (e.button === 1 || e.button === 2) {
       this.isPanning  = true;
@@ -734,6 +786,15 @@ class MapBuilder {
     const [cx, cy] = this.canvasPos(e);
     const wx = this.cw(cx);
     const wy = this.ch(cy);
+
+    // Custom draw — left click anchors the start corner
+    if (this.customDrawMode === 'ready') {
+      this.customDrawMode = 'drawing';
+      this.customDrawWx0  = wx;  this.customDrawWy0 = wy;
+      this.customDrawWx1  = wx;  this.customDrawWy1 = wy;
+      return;
+    }
+
     const m  = this.map;
 
     // Platforms (drawn on top of blocks, so checked first)
@@ -743,6 +804,7 @@ class MapBuilder {
       if (Math.abs(cx - this.wx(p.x)) <= HANDLE_ZONE &&
           wy >= p.y && wy <= p.y + p.height) {
         this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
+        this.pushUndo();
         this.drag = { kind: 'platform-left', idx: i, origX: p.x, origW: p.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
@@ -750,12 +812,14 @@ class MapBuilder {
       if (Math.abs(cx - this.wx(p.x + p.width)) <= HANDLE_ZONE &&
           wy >= p.y && wy <= p.y + p.height) {
         this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
+        this.pushUndo();
         this.drag = { kind: 'platform-right', idx: i, origW: p.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
       if (wx >= p.x && wx <= p.x + p.width && wy >= p.y && wy <= p.y + p.height) {
         this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
+        this.pushUndo();
         this.drag = { kind: 'platform-move', idx: i, ox: wx - p.x, oy: wy - p.y };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
@@ -768,6 +832,7 @@ class MapBuilder {
       if (Math.abs(cx - this.wx(b.x)) <= HANDLE_ZONE &&
           wy >= b.y && wy <= b.y + b.height) {
         this.clearSelection(); this.selected = i; this.selectedKind = 'block';
+        this.pushUndo();
         this.drag = { kind: 'block-left', idx: i, origX: b.x, origW: b.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
@@ -775,12 +840,14 @@ class MapBuilder {
       if (Math.abs(cx - this.wx(b.x + b.width)) <= HANDLE_ZONE &&
           wy >= b.y && wy <= b.y + b.height) {
         this.clearSelection(); this.selected = i; this.selectedKind = 'block';
+        this.pushUndo();
         this.drag = { kind: 'block-right', idx: i, origW: b.width };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
       if (wx >= b.x && wx <= b.x + b.width && wy >= b.y && wy <= b.y + b.height) {
         this.clearSelection(); this.selected = i; this.selectedKind = 'block';
+        this.pushUndo();
         this.drag = { kind: 'block-move', idx: i, ox: wx - b.x, oy: wy - b.y };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
@@ -792,6 +859,7 @@ class MapBuilder {
     if (wx >= cb.x - cb.width / 2 && wx <= cb.x + cb.width / 2 &&
         wy >= cb.y && wy <= cb.y + cb.height) {
       this.clearSelection(); this.selectedCoinBox = true;
+      this.pushUndo();
       this.drag = { kind: 'coinbox', ox: wx - cb.x, oy: wy - cb.y };
       this.syncInputsFromMap();
       document.getElementById('section-coinbox')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -802,6 +870,7 @@ class MapBuilder {
     if (wx >= m.playerTowerX - TOWER_W / 2 && wx <= m.playerTowerX + TOWER_W / 2 &&
         wy >= GROUND_Y - TOWER_H && wy <= GROUND_Y) {
       this.clearSelection(); this.selectedTower = 'player';
+      this.pushUndo();
       this.drag = { kind: 'tower-player' };
       this.syncInputsFromMap();
       document.getElementById('section-player-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -812,6 +881,7 @@ class MapBuilder {
     if (wx >= m.enemyTowerX - TOWER_W / 2 && wx <= m.enemyTowerX + TOWER_W / 2 &&
         wy >= GROUND_Y - TOWER_H && wy <= GROUND_Y) {
       this.clearSelection(); this.selectedTower = 'enemy';
+      this.pushUndo();
       this.drag = { kind: 'tower-enemy' };
       this.syncInputsFromMap();
       document.getElementById('section-enemy-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -845,7 +915,38 @@ class MapBuilder {
     this.selectedMapSettings = false;
   }
 
+  /** Snapshot current map state before a destructive operation. Clears redo stack. */
+  private pushUndo(): void {
+    this.undoStack.push(structuredClone(this.map));
+    if (this.undoStack.length > MapBuilder.MAX_HISTORY) this.undoStack.shift();
+    this.redoStack = [];
+  }
+
+  private undo(): void {
+    const prev = this.undoStack.pop();
+    if (!prev) return;
+    this.redoStack.push(structuredClone(this.map));
+    this.map = prev;
+    this.drag = null;
+    this.clearSelection();
+    this.syncInputsFromMap();
+  }
+
+  private redo(): void {
+    const next = this.redoStack.pop();
+    if (!next) return;
+    this.undoStack.push(structuredClone(this.map));
+    this.map = next;
+    this.drag = null;
+    this.clearSelection();
+    this.syncInputsFromMap();
+  }
+
   private onMouseUp(_e?: MouseEvent) {
+    if (this.customDrawMode === 'drawing') {
+      this.finalizeCustomDraw();
+      return;
+    }
     if (this.isPanning) {
       this.isPanning = false;
       this.canvas.style.cursor = 'crosshair';
@@ -853,6 +954,27 @@ class MapBuilder {
     }
     this.drag = null;
     this.canvas.style.cursor = 'crosshair';
+  }
+
+  /** Called when the user releases the mouse after a custom-draw drag. */
+  private finalizeCustomDraw(): void {
+    this.customDrawMode = 'off';
+    const x0 = Math.min(this.customDrawWx0, this.customDrawWx1);
+    const y0 = Math.min(this.customDrawWy0, this.customDrawWy1);
+    const x1 = Math.max(this.customDrawWx0, this.customDrawWx1);
+    const y1 = Math.max(this.customDrawWy0, this.customDrawWy1);
+    const w  = Math.round(x1 - x0);
+    const h  = Math.round(y1 - y0);
+    if (w < 40 || h < 4) return;  // too small — ignore the gesture
+    const m    = this.map;
+    const id   = `p${Date.now()}`;
+    const maxZ = MapBuilder.maxZOf(m.platforms);
+    this.pushUndo();
+    m.platforms.push({ id, x: Math.round(x0), y: Math.round(y0), width: w, height: h, zIndex: maxZ + 1 });
+    this.clearSelection();
+    this.selected     = m.platforms.length - 1;
+    this.selectedKind = 'platform';
+    this.syncInputsFromMap();
   }
 
   // ── Control bindings ──────────────────────────────────────────────────────
@@ -868,12 +990,21 @@ class MapBuilder {
     overlay.addEventListener('click', e => {
       if (e.target === overlay) overlay.classList.remove('open');
     });
-    document.querySelectorAll('button.size-option').forEach(btn => {
+    document.getElementById('btn-platform-custom')!.addEventListener('click', () => {
+      overlay.classList.remove('open');
+      this.customDrawMode = 'ready';
+      this.canvas.style.cursor = 'crosshair';
+    });
+    document.querySelectorAll('button.size-option[data-w]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const w  = parseInt((btn as HTMLElement).dataset.w ?? '300', 10);
-        const m  = this.map;
-        const id = `p${Date.now()}`;
-        m.platforms.push({ id, x: Math.round(m.worldWidth / 2 - w / 2), y: GROUND_Y - 260, width: w, height: 120 });
+        const w      = parseInt((btn as HTMLElement).dataset.w ?? '300', 10);
+        const m      = this.map;
+        const id     = `p${Date.now()}`;
+        // Auto z-index: one above the current highest so the new platform renders on top
+        const maxZ   = MapBuilder.maxZOf(m.platforms);
+        const zIndex = maxZ + 1;
+        this.pushUndo();
+        m.platforms.push({ id, x: Math.round(m.worldWidth / 2 - w / 2), y: GROUND_Y - 260, width: w, height: 120, zIndex });
         this.clearSelection();
         this.selected     = m.platforms.length - 1;
         this.selectedKind = 'platform';
@@ -884,15 +1015,19 @@ class MapBuilder {
 
     document.getElementById('btn-delete-platform')!.addEventListener('click', () => {
       if (this.selected === null || this.selectedKind !== 'platform') return;
+      this.pushUndo();
       this.map.platforms.splice(this.selected, 1);
       this.selected = null;
       this.syncInputsFromMap();
     });
 
     document.getElementById('btn-add-block')!.addEventListener('click', () => {
-      const m = this.map;
-      const cx = m.worldWidth / 2;
-      m.blocks.push({ x: cx - 100, y: GROUND_Y - 80, width: 200, height: 40 });
+      const m    = this.map;
+      const cx   = m.worldWidth / 2;
+      const maxZ = MapBuilder.maxZOf(m.blocks);
+      const zIndex = maxZ + 1;
+      this.pushUndo();
+      m.blocks.push({ x: cx - 100, y: GROUND_Y - 80, width: 200, height: 40, zIndex });
       this.clearSelection();
       this.selected     = m.blocks.length - 1;
       this.selectedKind = 'block';
@@ -901,6 +1036,7 @@ class MapBuilder {
 
     document.getElementById('btn-delete-block')!.addEventListener('click', () => {
       if (this.selected === null || this.selectedKind !== 'block') return;
+      this.pushUndo();
       this.map.blocks.splice(this.selected, 1);
       this.selected = null;
       this.syncInputsFromMap();
@@ -940,6 +1076,7 @@ class MapBuilder {
     document.getElementById('input-bg-skin')!.addEventListener('change', e => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
+      this.pushUndo();
       const reader = new FileReader();
       reader.onload = () => {
         this.map.backgroundSkin = reader.result as string;
@@ -948,6 +1085,7 @@ class MapBuilder {
       reader.readAsDataURL(file);
     });
     document.getElementById('btn-clear-bg-skin')!.addEventListener('click', () => {
+      this.pushUndo();
       delete this.map.backgroundSkin;
       (document.getElementById('input-bg-skin') as HTMLInputElement).value = '';
       this.syncBackgroundSkinPreview();
@@ -977,6 +1115,7 @@ class MapBuilder {
       const txt = (document.getElementById('json-input') as HTMLTextAreaElement).value.trim();
       try {
         const parsed = JSON.parse(txt) as MapDefinition;
+        this.pushUndo();
         this.map           = parsed;
         this.clearSelection();
         this.syncInputsFromMap();
@@ -992,7 +1131,9 @@ class MapBuilder {
     document.getElementById('btn-json-menu')!.addEventListener('click', openJson);
     document.getElementById('btn-json-close')!.addEventListener('click', closeJson);
     jsonOverlay.addEventListener('click', e => { if (e.target === jsonOverlay) closeJson(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeJson(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { closeJson(); this.customDrawMode = 'off'; }
+    });
 
     // Map name input
     document.getElementById('input-name')!.addEventListener('input', e => {
@@ -1002,18 +1143,20 @@ class MapBuilder {
     // Number inputs for selected platform
     ['plat-x', 'plat-y', 'plat-w', 'plat-h', 'plat-z',
      'plat-anim-end-x', 'plat-anim-end-y', 'plat-anim-speed'].forEach(id => {
-      document.getElementById(`input-${id}`)!.addEventListener('change', () => this.readPlatformInputs());
+      document.getElementById(`input-${id}`)!.addEventListener('change', () => { this.pushUndo(); this.readPlatformInputs(); });
     });
     // Z-index: also update on every keystroke so the canvas reflects order changes in real time
+    // (no pushUndo here — the 'change' event above captures one undo step on commit)
     document.getElementById('input-plat-z')!.addEventListener('input', () => this.readPlatformInputs());
     // Animate checkbox toggles anim on/off + hides/shows the field set
-    document.getElementById('input-plat-anim')!.addEventListener('change', () => this.readPlatformInputs());
+    document.getElementById('input-plat-anim')!.addEventListener('change', () => { this.pushUndo(); this.readPlatformInputs(); });
 
     // Platform skin picker
     document.getElementById('input-plat-skin')!.addEventListener('change', e => {
       if (this.selected === null || this.selectedKind !== 'platform') return;
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
+      this.pushUndo();
       const reader = new FileReader();
       reader.onload = () => {
         this.map.platforms[this.selected!].skin = reader.result as string;
@@ -1023,6 +1166,7 @@ class MapBuilder {
     });
     document.getElementById('btn-clear-plat-skin')!.addEventListener('click', () => {
       if (this.selected === null || this.selectedKind !== 'platform') return;
+      this.pushUndo();
       delete this.map.platforms[this.selected].skin;
       this.syncPlatformSkinPreview();
     });
@@ -1032,6 +1176,7 @@ class MapBuilder {
       if (this.selected === null || this.selectedKind !== 'block') return;
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
+      this.pushUndo();
       const reader = new FileReader();
       reader.onload = () => {
         this.map.blocks[this.selected!].skin = reader.result as string;
@@ -1041,6 +1186,7 @@ class MapBuilder {
     });
     document.getElementById('btn-clear-block-skin')!.addEventListener('click', () => {
       if (this.selected === null || this.selectedKind !== 'block') return;
+      this.pushUndo();
       delete this.map.blocks[this.selected].skin;
       this.syncBlockSkinPreview();
     });
@@ -1049,6 +1195,7 @@ class MapBuilder {
     document.getElementById('input-ground-skin')!.addEventListener('change', e => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
+      this.pushUndo();
       const reader = new FileReader();
       reader.onload = () => {
         this.map.groundSkin = reader.result as string;
@@ -1057,6 +1204,7 @@ class MapBuilder {
       reader.readAsDataURL(file);
     });
     document.getElementById('btn-clear-ground-skin')!.addEventListener('click', () => {
+      this.pushUndo();
       delete this.map.groundSkin;
       this.syncGroundSkinPreview();
     });
@@ -1070,24 +1218,29 @@ class MapBuilder {
     });
 
     // Number inputs for selected block
-    ['block-x', 'block-y', 'block-w', 'block-h',
+    ['block-x', 'block-y', 'block-w', 'block-h', 'block-z',
      'block-anim-end-x', 'block-anim-end-y', 'block-anim-speed'].forEach(id => {
-      document.getElementById(`input-${id}`)!.addEventListener('change', () => this.readBlockInputs());
+      document.getElementById(`input-${id}`)!.addEventListener('change', () => { this.pushUndo(); this.readBlockInputs(); });
     });
+    // Z-index: live update so render order reflects keystrokes in real time
+    // (no pushUndo here — the 'change' event above captures one undo step on commit)
+    document.getElementById('input-block-z')!.addEventListener('input', () => this.readBlockInputs());
     // Animate checkbox — fire on toggle and on initial wire so the field set
     // shows/hides the moment the user ticks the box.
-    document.getElementById('input-block-anim')!.addEventListener('change', () => this.readBlockInputs());
+    document.getElementById('input-block-anim')!.addEventListener('change', () => { this.pushUndo(); this.readBlockInputs(); });
 
     // Coin box inputs
     ['cb-x', 'cb-y', 'cb-w', 'cb-h', 'cb-spread'].forEach(id => {
-      document.getElementById(`input-${id}`)!.addEventListener('change', () => this.readCoinBoxInputs());
+      document.getElementById(`input-${id}`)!.addEventListener('change', () => { this.pushUndo(); this.readCoinBoxInputs(); });
     });
 
     // Tower inputs
     document.getElementById('input-player-x')!.addEventListener('change', () => {
+      this.pushUndo();
       this.map.playerTowerX = parseInt((document.getElementById('input-player-x') as HTMLInputElement).value, 10);
     });
     document.getElementById('input-enemy-x')!.addEventListener('change', () => {
+      this.pushUndo();
       this.map.enemyTowerX = parseInt((document.getElementById('input-enemy-x') as HTMLInputElement).value, 10);
     });
 
@@ -1096,6 +1249,7 @@ class MapBuilder {
       document.getElementById(`input-${side}-skin`)!.addEventListener('change', e => {
         const file = (e.target as HTMLInputElement).files?.[0];
         if (!file) return;
+        this.pushUndo();
         const reader = new FileReader();
         reader.onload = () => {
           const url = reader.result as string;
@@ -1107,6 +1261,7 @@ class MapBuilder {
       });
 
       document.getElementById(`btn-clear-${side}-skin`)!.addEventListener('click', () => {
+        this.pushUndo();
         if (side === 'player') delete this.map.playerTowerSkin;
         else                   delete this.map.enemyTowerSkin;
         (document.getElementById(`input-${side}-skin`) as HTMLInputElement).value = '';
@@ -1124,21 +1279,75 @@ class MapBuilder {
       });
     });
 
-    // Keyboard shortcuts
+    // Fit View button
+    document.getElementById('btn-fit-view')!.addEventListener('click', () => this.fitView());
+
+    this.bindKeyboardShortcuts();
+  }
+
+  /**
+   * Registers the global keyboard shortcuts.
+   * Kept separate from `bindControls` so that method stays focused on DOM wiring.
+   * All shortcuts bail early when a form element has focus so native browser
+   * behaviour (text editing, etc.) is preserved.
+   */
+  private bindKeyboardShortcuts(): void {
     window.addEventListener('keydown', e => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); this.undo();  return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); this.redo();  return; }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+        if (this.selected === null) return;
+        if (this.selectedKind === 'platform') {
+          this.clipboard = { kind: 'platform', data: structuredClone(this.map.platforms[this.selected]) };
+        } else {
+          this.clipboard = { kind: 'block', data: structuredClone(this.map.blocks[this.selected]) };
+        }
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+        if (!this.clipboard) return;
+        e.preventDefault();
+        const PASTE_OFFSET = 20;
+        this.pushUndo();
+        if (this.clipboard.kind === 'platform') {
+          const copy    = structuredClone(this.clipboard.data);
+          copy.id       = `p${Date.now()}`;
+          copy.x       += PASTE_OFFSET;
+          copy.y       += PASTE_OFFSET;
+          copy.zIndex   = MapBuilder.maxZOf(this.map.platforms) + 1;
+          this.map.platforms.push(copy);
+          this.clearSelection();
+          this.selected     = this.map.platforms.length - 1;
+          this.selectedKind = 'platform';
+        } else {
+          const copy    = structuredClone(this.clipboard.data);
+          copy.x       += PASTE_OFFSET;
+          copy.y       += PASTE_OFFSET;
+          copy.zIndex   = MapBuilder.maxZOf(this.map.blocks) + 1;
+          this.map.blocks.push(copy);
+          this.clearSelection();
+          this.selected     = this.map.blocks.length - 1;
+          this.selectedKind = 'block';
+        }
+        this.syncInputsFromMap();
+        return;
+      }
+
       if (e.key === 'f' || e.key === 'F') { this.fitView(); return; }
+
       if ((e.key === 'Delete' || e.key === 'Backspace') && this.selected !== null) {
+        this.pushUndo();
         if (this.selectedKind === 'platform') this.map.platforms.splice(this.selected, 1);
         else                                  this.map.blocks.splice(this.selected, 1);
         this.selected = null;
         this.syncInputsFromMap();
       }
     });
-
-    // Fit View button
-    document.getElementById('btn-fit-view')!.addEventListener('click', () => this.fitView());
   }
 
   private populatePresets() {
@@ -1153,12 +1362,56 @@ class MapBuilder {
     sel.addEventListener('change', () => {
       const found = ALL_MAPS.find(m => m.id === sel.value);
       // Load the saved version of the preset if one exists, so edits aren't lost on switch.
-      if (found) { this.map = structuredClone(loadMapWithOverride(found)); this.clearSelection(); this.syncInputsFromMap(); }
+      if (found) { this.pushUndo(); this.map = structuredClone(loadMapWithOverride(found)); this.clearSelection(); this.syncInputsFromMap(); }
     });
   }
 
+  /** Maximum `zIndex` among `items`, or 0 when the list is empty. */
+  private static maxZOf(items: { zIndex?: number }[]): number {
+    return items.reduce((acc, it) => Math.max(acc, it.zIndex ?? 0), 0);
+  }
+
+  /**
+   * Reads animation inputs (checkbox + end-x/y/speed) for the given UI prefix
+   * ('plat' | 'block') and writes the result into `item.anim`.
+   * Also toggles the anim field-set visibility to match the checkbox state.
+   */
+  private readAnimFields(
+    prefix: string,
+    item: { x: number; y: number; anim?: { endX: number; endY: number; speed: number } },
+  ): void {
+    const animOn = (document.getElementById(`input-${prefix}-anim`) as HTMLInputElement).checked;
+    if (animOn) {
+      const endX  = parseInt((document.getElementById(`input-${prefix}-anim-end-x`) as HTMLInputElement).value, 10);
+      const endY  = parseInt((document.getElementById(`input-${prefix}-anim-end-y`) as HTMLInputElement).value, 10);
+      const speed = Math.max(1, parseInt((document.getElementById(`input-${prefix}-anim-speed`) as HTMLInputElement).value, 10) || 0);
+      item.anim = { endX: isNaN(endX) ? item.x : endX, endY: isNaN(endY) ? item.y : endY, speed };
+    } else {
+      delete item.anim;
+    }
+    (document.getElementById(`${prefix}-anim-fields`) as HTMLElement).style.display = animOn ? 'flex' : 'none';
+  }
+
+  /**
+   * Syncs the animation UI fields (checkbox + end-x/y/speed + fieldset visibility)
+   * from `item.anim`. `defaultEndX` is used when no anim is set yet (sensible
+   * starting value: one item-width to the right of the current position).
+   */
+  private syncAnimToUI(
+    prefix: string,
+    item: { x: number; y: number; anim?: { endX: number; endY: number; speed: number } },
+    defaultEndX: number,
+  ): void {
+    const hasAnim = !!item.anim;
+    (document.getElementById(`input-${prefix}-anim`)         as HTMLInputElement).checked     = hasAnim;
+    (document.getElementById(`input-${prefix}-anim-end-x`)   as HTMLInputElement).value       = String(item.anim?.endX  ?? defaultEndX);
+    (document.getElementById(`input-${prefix}-anim-end-y`)   as HTMLInputElement).value       = String(item.anim?.endY  ?? item.y);
+    (document.getElementById(`input-${prefix}-anim-speed`)   as HTMLInputElement).value       = String(item.anim?.speed ?? 60);
+    (document.getElementById(`${prefix}-anim-fields`)        as HTMLElement).style.display    = hasAnim ? 'flex' : 'none';
+  }
+
   private readPlatformInputs() {
-    if (this.selected === null) return;
+    if (this.selected === null || this.selectedKind !== 'platform') return;
     const p  = this.map.platforms[this.selected];
     p.x      = parseInt((document.getElementById('input-plat-x') as HTMLInputElement).value, 10);
     p.y      = parseInt((document.getElementById('input-plat-y') as HTMLInputElement).value, 10);
@@ -1166,37 +1419,19 @@ class MapBuilder {
     p.height = parseInt((document.getElementById('input-plat-h') as HTMLInputElement).value, 10);
     const z  = parseInt((document.getElementById('input-plat-z') as HTMLInputElement).value, 10);
     p.zIndex = isNaN(z) || z === 0 ? undefined : z;
-    // Animation — same pattern as blocks
-    const animOn = (document.getElementById('input-plat-anim') as HTMLInputElement).checked;
-    if (animOn) {
-      const endX  = parseInt((document.getElementById('input-plat-anim-end-x') as HTMLInputElement).value, 10);
-      const endY  = parseInt((document.getElementById('input-plat-anim-end-y') as HTMLInputElement).value, 10);
-      const speed = Math.max(1, parseInt((document.getElementById('input-plat-anim-speed') as HTMLInputElement).value, 10) || 0);
-      p.anim = { endX: isNaN(endX) ? p.x : endX, endY: isNaN(endY) ? p.y : endY, speed };
-    } else {
-      delete p.anim;
-    }
-    (document.getElementById('plat-anim-fields') as HTMLElement).style.display = animOn ? 'flex' : 'none';
+    this.readAnimFields('plat', p);
   }
 
   private readBlockInputs() {
     if (this.selected === null || this.selectedKind !== 'block') return;
-    const b = this.map.blocks[this.selected];
+    const b  = this.map.blocks[this.selected];
     b.x      = parseInt((document.getElementById('input-block-x') as HTMLInputElement).value, 10);
     b.y      = parseInt((document.getElementById('input-block-y') as HTMLInputElement).value, 10);
     b.width  = parseInt((document.getElementById('input-block-w') as HTMLInputElement).value, 10);
     b.height = parseInt((document.getElementById('input-block-h') as HTMLInputElement).value, 10);
-    // Animation fields — anim is only attached when the "Animate" checkbox is on.
-    const animOn = (document.getElementById('input-block-anim') as HTMLInputElement).checked;
-    if (animOn) {
-      const endX  = parseInt((document.getElementById('input-block-anim-end-x') as HTMLInputElement).value, 10);
-      const endY  = parseInt((document.getElementById('input-block-anim-end-y') as HTMLInputElement).value, 10);
-      const speed = Math.max(1, parseInt((document.getElementById('input-block-anim-speed') as HTMLInputElement).value, 10) || 0);
-      b.anim = { endX: isNaN(endX) ? b.x : endX, endY: isNaN(endY) ? b.y : endY, speed };
-    } else {
-      delete b.anim;
-    }
-    (document.getElementById('block-anim-fields') as HTMLElement).style.display = animOn ? 'flex' : 'none';
+    const z  = parseInt((document.getElementById('input-block-z') as HTMLInputElement).value, 10);
+    b.zIndex = isNaN(z) || z === 0 ? undefined : z;
+    this.readAnimFields('block', b);
   }
 
   private readCoinBoxInputs() {
@@ -1258,17 +1493,7 @@ class MapBuilder {
       (document.getElementById('input-plat-w')  as HTMLInputElement).value = String(p.width);
       (document.getElementById('input-plat-h')  as HTMLInputElement).value = String(p.height);
       (document.getElementById('input-plat-z')  as HTMLInputElement).value = String(p.zIndex ?? 0);
-      const animCb  = document.getElementById('input-plat-anim')         as HTMLInputElement;
-      const animEX  = document.getElementById('input-plat-anim-end-x')   as HTMLInputElement;
-      const animEY  = document.getElementById('input-plat-anim-end-y')   as HTMLInputElement;
-      const animSp  = document.getElementById('input-plat-anim-speed')   as HTMLInputElement;
-      const animBox = document.getElementById('plat-anim-fields')        as HTMLElement;
-      const hasAnim = !!p.anim;
-      animCb.checked = hasAnim;
-      animEX.value = String(p.anim?.endX  ?? (p.x + p.width));
-      animEY.value = String(p.anim?.endY  ?? p.y);
-      animSp.value = String(p.anim?.speed ?? 60);
-      animBox.style.display = hasAnim ? 'flex' : 'none';
+      this.syncAnimToUI('plat', p, p.x + p.width);
       document.getElementById('plat-label')!.textContent = `Platform ${this.selected! + 1}`;
       this.syncPlatformSkinPreview();
     }
@@ -1278,20 +1503,10 @@ class MapBuilder {
       (document.getElementById('input-block-y') as HTMLInputElement).value = String(b.y);
       (document.getElementById('input-block-w') as HTMLInputElement).value = String(b.width);
       (document.getElementById('input-block-h') as HTMLInputElement).value = String(b.height);
-      const animCb  = document.getElementById('input-block-anim')         as HTMLInputElement;
-      const animEX  = document.getElementById('input-block-anim-end-x')   as HTMLInputElement;
-      const animEY  = document.getElementById('input-block-anim-end-y')   as HTMLInputElement;
-      const animSp  = document.getElementById('input-block-anim-speed')   as HTMLInputElement;
-      const animBox = document.getElementById('block-anim-fields')        as HTMLElement;
-      const hasAnim = !!b.anim;
-      animCb.checked = hasAnim;
-      // Default end point sits a block-width to the right and the configured
-      // speed at 60 px/s if anim hasn't been set yet — gives a sensible
-      // starting state the moment the user ticks the box.
-      animEX.value = String(b.anim?.endX  ?? (b.x + b.width));
-      animEY.value = String(b.anim?.endY  ?? b.y);
-      animSp.value = String(b.anim?.speed ?? 60);
-      animBox.style.display = hasAnim ? 'flex' : 'none';
+      (document.getElementById('input-block-z') as HTMLInputElement).value = String(b.zIndex ?? 0);
+      // Default end point: one block-width to the right; speed 60 px/s.
+      // These are only used as initial values when the user first ticks Animate.
+      this.syncAnimToUI('block', b, b.x + b.width);
       document.getElementById('block-label')!.textContent = `Block ${this.selected! + 1}`;
       this.syncBlockSkinPreview();
     }
