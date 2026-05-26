@@ -35,6 +35,7 @@ export const GameConfig = {
     hpBarWidth:         28,     // px
     hpBarHeight:        5,      // px
     harassSafetyBuffer: 40,  // px outside enemy tower range where harass units hold
+    defendPursuitRange: 600, // px — defenders pursue any enemy within this distance of their home tower face (larger than TOWER_ATTACK_RANGE so they can chase off ranged units firing in from just outside the defence zone)
     rangedKiteThreshold: 80, // px — ranged units back away when a melee enemy closes within this distance
     coinThrowScanRange:  80,  // px — scan radius for a new coin after throwing one toward tower
     coinThrowHoldSec:   0.5, // seconds the character holds the coin before releasing the throw

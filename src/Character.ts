@@ -6,7 +6,7 @@ import {
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
   SAFE_ZONE_HEAL_RATE, HIT_JUMP_CHANCE,
-  TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, RANGED_KITE_THRESHOLD,
+  TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
@@ -214,6 +214,20 @@ export class Character {
     life: number;
   }> = [];
   private _behavior:    'attacking' | 'collecting' | 'harass' | 'defend' | 'rush' = 'attacking';
+  // ── Defend behaviour state ──────────────────────────────────────────────
+  // The intruder this defender is currently pursuing in the attack zone, if
+  // any. Other defenders read this via `claimedIntruder` so two units never
+  // converge on the same target — leaving them to spread out and cover the
+  // tower against multiple threats.
+  private defendTargetIntruder: Character | null = null;
+  // Each defender returns to a different randomly-picked spot inside the
+  // defence zone after a pursuit so units don't all stack on the same x.
+  // null = "pick a new one on next rally"; reset to null whenever the
+  // defender finishes pursuing (returns from intruder branch).
+  private defendRallyX: number | null = null;
+  // True last tick we were actively pursuing an intruder. Used to detect the
+  // pursuit→rally transition and refresh defendRallyX exactly once per cycle.
+  private defendWasPursuing = false;
 
   // ── Pathfinding state ─────────────────────────────────────────────────────
   private path:        PathStep[] = [];
@@ -348,9 +362,20 @@ export class Character {
       this.targetCoin = null;
       if (this.carryingCoin) this.dropCarriedCoin();
     }
+    if (this._behavior === 'defend') {
+      // Leaving defend — release any pursuit claim and rally cache so a future
+      // defender doesn't see stale state.
+      this.defendTargetIntruder = null;
+      this.defendRallyX         = null;
+      this.defendWasPursuing    = false;
+    }
     this._behavior = val;
     this.refreshLabel();
   }
+
+  /** Intruder this defender is currently pursuing, if any. Allies use this to
+   *  avoid double-targeting the same enemy in updateDefending. */
+  get claimedIntruder(): Character | null { return this.defendTargetIntruder; }
 
   /** "<behavior-icon> <name>", shown above the HP bar. */
   private labelText(): string {
@@ -1260,7 +1285,11 @@ export class Character {
 
     const sideDir = this.side === 'player' ? 1 : -1;
     if (sideDir * (this.x - homeTowerFrontX) < 120) return;  // too close to home
-    if (Math.random() < 0.20) this.jump(this.lastMoveDir, dt);
+    // Defenders rarely break formation — random jumps make them drift off the
+    // rally point and out of position. Heavily dampen the chance while on
+    // defend duty.
+    const chance = this._behavior === 'defend' ? 0.02 : 0.20;
+    if (Math.random() < chance) this.jump(this.lastMoveDir, dt);
   }
 
   private tickLegs(dt: number) {
@@ -1367,6 +1396,11 @@ export class Character {
     this.container.y = this.y - this.config.height;
   }
 
+  /** Refresh the PIXI container from (x, y). Public so external tick paths
+   *  (e.g. the post-game-over physics-only loop) can update the visual after
+   *  a syncFromBody-driven landing without going through update(). */
+  syncVisual(): void { this.syncPosition(); }
+
   // ── Coin carry visual ────────────────────────────────────────────────────────
 
   private showCoinCarry() {
@@ -1411,6 +1445,32 @@ export class Character {
 
   // ── Public API ───────────────────────────────────────────────────────────────
 
+  /**
+   * Called by Game.end() when the match finishes. Stops all motion drivers,
+   * cancels pending actions, and forces both animation layers to 'idle'.
+   * The Game tick loop keeps running (so the sprites continue to render and
+   * pan with the camera) but skips game logic, so freezing here is the only
+   * chance to settle the character's visual state.
+   */
+  freezeForGameOver(): void {
+    if (this.isDead) return;
+    this.state              = 'marching';   // matches anim layers' idle fallback
+    this.jumpVx             = 0;
+    this.knockbackVx        = 0;
+    this.attackTimer        = 0;
+    this.attackFacingTimer  = 0;
+    this.pendingMeleeSwing  = null;
+    this.pendingHitJump     = false;
+    this.path               = [];
+    this.pathIdx            = 0;
+    // Zero horizontal velocity but preserve vertical so a character mid-jump
+    // or mid-fall continues their arc and lands naturally during the
+    // post-game physics loop instead of restarting gravity from rest.
+    Matter.Body.setVelocity(this.body, { x: 0, y: this.body.velocity.y });
+    if (this.bodySprite) this.switchBodyAnimation('idle');
+    if (this.legsSprite) this.switchLegsAnimation('idle');
+  }
+
   takeDamage(dmg: number, killer?: Character) {
     // Always queue a label event (amount=0 → "Miss" in Game.ts)
     this.pendingDamages.push({ amount: dmg, x: this.x, y: this.y - this.config.height - 6 });
@@ -1419,7 +1479,10 @@ export class Character {
     this.hp = Math.max(0, this.hp - dmg);
     this.drawBar();
     if (this.carryingCoin) this.dropCarriedCoin();
-    if (!this.isAirborne && Math.random() < HIT_JUMP_CHANCE) this.pendingHitJump = true;
+    // Defenders stay planted under fire — jumping mid-defence drags them off
+    // the rally point and out of the defence zone.
+    const hitJumpChance = this._behavior === 'defend' ? HIT_JUMP_CHANCE * 0.15 : HIT_JUMP_CHANCE;
+    if (!this.isAirborne && Math.random() < hitJumpChance) this.pendingHitJump = true;
     if (this.hp <= 0) {
       this.state = 'dead';
       this.removeCoinCarry();
@@ -2215,22 +2278,52 @@ export class Character {
 
     const dir = this.side === 'player' ? 1 : -1;
 
-    // Defending area: from the home tower's front face out to the tower's
-    // attack range. Any enemy inside this zone is something we should engage.
-    const zoneNearX = Math.min(homeTowerFrontX, homeTowerFrontX + dir * TOWER_ATTACK_RANGE);
-    const zoneFarX  = Math.max(homeTowerFrontX, homeTowerFrontX + dir * TOWER_ATTACK_RANGE);
+    // Two zones around the home tower:
+    //   • Defence zone  — narrow slab matching the tower's auto-fire range; this
+    //     is where defenders idle when no threat is present.
+    //   • Attack zone   — wider slab (DEFEND_PURSUIT_RANGE) used for *detection*
+    //     and *pursuit clamp*. Any enemy here is a threat; the defender may step
+    //     out of the defence zone to chase, but never beyond the attack zone.
+    // The attack zone catches ranged enemies firing in from just outside the
+    // defence zone — without it, defenders take chip damage they can't return.
+    const defNearX = Math.min(homeTowerFrontX, homeTowerFrontX + dir * TOWER_ATTACK_RANGE);
+    const defFarX  = Math.max(homeTowerFrontX, homeTowerFrontX + dir * TOWER_ATTACK_RANGE);
+    const atkNearX = Math.min(homeTowerFrontX, homeTowerFrontX + dir * DEFEND_PURSUIT_RANGE);
+    const atkFarX  = Math.max(homeTowerFrontX, homeTowerFrontX + dir * DEFEND_PURSUIT_RANGE);
 
-    // Find the nearest intruder (any enemy whose x sits inside the defending area).
-    let intruder: Character | null = null;
-    let minDist = Infinity;
+    // Collect intruders already being pursued by other defenders so we don't
+    // dog-pile on the same enemy. Each defender exposes its pursuit target
+    // via claimedIntruder; we filter those out when picking our own target.
+    const claimed = new Set<Character>();
     for (const c of allChars) {
-      if (c.isDead || c.side === this.side) continue;
-      if (c.x < zoneNearX || c.x > zoneFarX) continue;
-      const d = Math.abs(c.x - this.x);
-      if (d < minDist) { minDist = d; intruder = c; }
+      if (c === this || c.side !== this.side || c.isDead) continue;
+      if (c.behavior !== 'defend') continue;
+      const t = c.claimedIntruder;
+      if (t) claimed.add(t);
+    }
+
+    // Find the nearest *unclaimed* intruder in the attack zone. If we're
+    // already pursuing one, keep it (so the rest of the defending group can
+    // continue to ignore it).
+    let intruder: Character | null = null;
+    if (this.defendTargetIntruder && !this.defendTargetIntruder.isDead &&
+        this.defendTargetIntruder.x >= atkNearX && this.defendTargetIntruder.x <= atkFarX) {
+      intruder = this.defendTargetIntruder;
+    } else {
+      let minDist = Infinity;
+      for (const c of allChars) {
+        if (c.isDead || c.side === this.side) continue;
+        if (c.x < atkNearX || c.x > atkFarX) continue;
+        if (claimed.has(c)) continue;   // already covered by another defender
+        const d = Math.abs(c.x - this.x);
+        if (d < minDist) { minDist = d; intruder = c; }
+      }
     }
 
     if (intruder) {
+      this.defendTargetIntruder = intruder;
+      this.defendWasPursuing    = true;
+
       // Within personal attack range — fire (uses nearestEnemy so LOS / canSnapHit
       // gating still applies; falls through to pursuit if the geometry blocks the shot).
       const target = this.nearestEnemy(allChars, this.config.attackRange, blocks);
@@ -2249,24 +2342,36 @@ export class Character {
         return;
       }
 
-      // Intruder is in our zone but not yet in our attack range (or out of LOS).
-      // Pursue at the intruder's elevation; clamp so we don't leave the defending
-      // area chasing them out of our zone.
-      const pursueX = Math.max(zoneNearX, Math.min(zoneFarX, intruder.x));
+      // Intruder in attack zone but no clean shot — pursue at the intruder's
+      // elevation. Clamp to the *attack* zone so the defender can leave the
+      // defence zone to engage, but never wanders past the pursuit boundary.
+      const pursueX = Math.max(atkNearX, Math.min(atkFarX, intruder.x));
       this.state = 'marching';
       this.requestPath(pursueX, intruder.floorY, navGraph, dt);
       this.followPath(dt, ctx.platforms);
       return;
     }
 
-    // No intruders in zone — hold at a rally point just in front of own tower
-    // (~30 % into the defending area). Idle/walk hysteresis handles the visuals
-    // once we arrive.
-    const restX = homeTowerFrontX + dir * TOWER_ATTACK_RANGE * 0.3;
+    // No intruders → release our pursuit claim, regenerate the rally point if
+    // we just got back from chasing, then return to it.
+    this.defendTargetIntruder = null;
+    if (this.defendWasPursuing || this.defendRallyX === null) {
+      // Random spot inside the defence zone — keeps a group of defenders
+      // spread out rather than stacked on a single rally x.
+      this.defendRallyX      = defNearX + Math.random() * (defFarX - defNearX);
+      this.defendWasPursuing = false;
+    }
+    const restX = this.defendRallyX;
     const delta = restX - this.x;
     if (Math.abs(delta) > 20) {
       this.state = 'marching';
-      this.requestPath(restX, this.floorY, navGraph, dt);
+      // Destination is always ground level — the home tower sits on GROUND_Y,
+      // so the defence zone slab is on the ground regardless of what the
+      // defender is currently standing on. Using this.floorY here would ask
+      // the pathfinder for a surface at the destination x that doesn't exist
+      // (e.g. character on a block top, rally point off the block) and the
+      // returned path would be empty, freezing the defender in place.
+      this.requestPath(restX, GROUND_Y, navGraph, dt);
       this.followPath(dt, ctx.platforms);
     } else {
       this.state = 'marching';

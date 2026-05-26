@@ -1,7 +1,7 @@
 import * as PIXI from 'pixi.js';
 import {
   GAME_HEIGHT, GROUND_Y,
-  TOWER_WIDTH, TOWER_ATTACK_RANGE,
+  TOWER_WIDTH, TOWER_ATTACK_RANGE, DEFEND_PURSUIT_RANGE,
   PLAYER_COLOR, ENEMY_COLOR,
 } from './constants';
 import type { CoinBoxDef } from './maps';
@@ -61,58 +61,82 @@ export function buildTowerRangeMarkers(
   playerTowerX: number,
   enemyTowerX: number,
 ): PIXI.Container {
-  const playerFrontX = playerTowerX + TOWER_WIDTH / 2;
-  const enemyFrontX  = enemyTowerX  - TOWER_WIDTH / 2;
-  const playerRangeX = playerFrontX + TOWER_ATTACK_RANGE;
-  const enemyRangeX  = enemyFrontX  - TOWER_ATTACK_RANGE;
+  const playerFrontX  = playerTowerX + TOWER_WIDTH / 2;
+  const enemyFrontX   = enemyTowerX  - TOWER_WIDTH / 2;
+  // Defence-zone outer boundary (== tower's auto-fire range).
+  const playerDefX    = playerFrontX + TOWER_ATTACK_RANGE;
+  const enemyDefX     = enemyFrontX  - TOWER_ATTACK_RANGE;
+  // Attack-zone outer boundary (how far Defend units will pursue).
+  const playerAtkX    = playerFrontX + DEFEND_PURSUIT_RANGE;
+  const enemyAtkX     = enemyFrontX  - DEFEND_PURSUIT_RANGE;
   const lineH = 30;
 
   const container = new PIXI.Container();
-
   const g = new PIXI.Graphics();
 
-  // Player (blue) ground strip
+  // ── Player (blue) ────────────────────────────────────────────────────────
+  // Defence-zone strip (solid)
   g.beginFill(PLAYER_COLOR, 0.35);
   g.drawRect(playerFrontX, GROUND_Y, TOWER_ATTACK_RANGE, 6);
   g.endFill();
-
-  // Player boundary line + tick
-  g.lineStyle(2, PLAYER_COLOR, 0.90);
-  g.moveTo(playerRangeX, GROUND_Y + 6);
-  g.lineTo(playerRangeX, GROUND_Y - lineH);
-  g.moveTo(playerRangeX - 5, GROUND_Y - lineH);
-  g.lineTo(playerRangeX + 5, GROUND_Y - lineH);
-
-  // Enemy (red) ground strip
-  g.lineStyle(0);
-  g.beginFill(ENEMY_COLOR, 0.35);
-  g.drawRect(enemyRangeX, GROUND_Y, TOWER_ATTACK_RANGE, 6);
+  // Attack-zone extension (lighter — extends past the defence zone)
+  g.beginFill(PLAYER_COLOR, 0.15);
+  g.drawRect(playerDefX, GROUND_Y, DEFEND_PURSUIT_RANGE - TOWER_ATTACK_RANGE, 6);
   g.endFill();
 
-  // Enemy boundary line + tick
+  // Defence-zone tick (full height)
+  g.lineStyle(2, PLAYER_COLOR, 0.90);
+  g.moveTo(playerDefX, GROUND_Y + 6);
+  g.lineTo(playerDefX, GROUND_Y - lineH);
+  g.moveTo(playerDefX - 5, GROUND_Y - lineH);
+  g.lineTo(playerDefX + 5, GROUND_Y - lineH);
+  // Attack-zone tick (shorter, fainter)
+  g.lineStyle(1.5, PLAYER_COLOR, 0.55);
+  g.moveTo(playerAtkX, GROUND_Y + 6);
+  g.lineTo(playerAtkX, GROUND_Y - lineH * 0.7);
+  g.moveTo(playerAtkX - 4, GROUND_Y - lineH * 0.7);
+  g.lineTo(playerAtkX + 4, GROUND_Y - lineH * 0.7);
+
+  // ── Enemy (red) ──────────────────────────────────────────────────────────
+  g.lineStyle(0);
+  g.beginFill(ENEMY_COLOR, 0.35);
+  g.drawRect(enemyDefX, GROUND_Y, TOWER_ATTACK_RANGE, 6);
+  g.endFill();
+  g.beginFill(ENEMY_COLOR, 0.15);
+  g.drawRect(enemyAtkX, GROUND_Y, DEFEND_PURSUIT_RANGE - TOWER_ATTACK_RANGE, 6);
+  g.endFill();
+
   g.lineStyle(2, ENEMY_COLOR, 0.90);
-  g.moveTo(enemyRangeX, GROUND_Y + 6);
-  g.lineTo(enemyRangeX, GROUND_Y - lineH);
-  g.moveTo(enemyRangeX - 5, GROUND_Y - lineH);
-  g.lineTo(enemyRangeX + 5, GROUND_Y - lineH);
+  g.moveTo(enemyDefX, GROUND_Y + 6);
+  g.lineTo(enemyDefX, GROUND_Y - lineH);
+  g.moveTo(enemyDefX - 5, GROUND_Y - lineH);
+  g.lineTo(enemyDefX + 5, GROUND_Y - lineH);
+  g.lineStyle(1.5, ENEMY_COLOR, 0.55);
+  g.moveTo(enemyAtkX, GROUND_Y + 6);
+  g.lineTo(enemyAtkX, GROUND_Y - lineH * 0.7);
+  g.moveTo(enemyAtkX - 4, GROUND_Y - lineH * 0.7);
+  g.lineTo(enemyAtkX + 4, GROUND_Y - lineH * 0.7);
 
   container.addChild(g);
 
-  const labelStyle = (color: number): Partial<PIXI.ITextStyle> => ({
-    fontSize: 8, fill: color, fontWeight: 'bold',
+  // ── Labels ───────────────────────────────────────────────────────────────
+  const labelStyle = (color: number, sz: number, alpha = 1): Partial<PIXI.ITextStyle> => ({
+    fontSize: sz, fill: color, fontWeight: 'bold', fillGradientStops: [alpha],
   });
+  const addLabel = (text: string, x: number, y: number, color: number, sz: number, alpha = 1) => {
+    const t = new PIXI.Text(text, labelStyle(color, sz));
+    t.anchor.set(0.5, 1);
+    t.x = x; t.y = y;
+    t.alpha = alpha;
+    container.addChild(t);
+  };
 
-  const pLabel = new PIXI.Text('RANGE', labelStyle(PLAYER_COLOR));
-  pLabel.anchor.set(0.5, 1);
-  pLabel.x = playerRangeX;
-  pLabel.y = GROUND_Y - lineH - 3;
-  container.addChild(pLabel);
-
-  const eLabel = new PIXI.Text('RANGE', labelStyle(ENEMY_COLOR));
-  eLabel.anchor.set(0.5, 1);
-  eLabel.x = enemyRangeX;
-  eLabel.y = GROUND_Y - lineH - 3;
-  container.addChild(eLabel);
+  // Player: "DEFEND" at defence-zone tick, "ATTACK" at attack-zone tick.
+  addLabel('DEFEND', playerDefX, GROUND_Y - lineH - 3,         PLAYER_COLOR, 8);
+  addLabel('ATTACK', playerAtkX, GROUND_Y - lineH * 0.7 - 3,   PLAYER_COLOR, 7, 0.75);
+  // Enemy: same.
+  addLabel('DEFEND', enemyDefX,  GROUND_Y - lineH - 3,         ENEMY_COLOR,  8);
+  addLabel('ATTACK', enemyAtkX,  GROUND_Y - lineH * 0.7 - 3,   ENEMY_COLOR,  7, 0.75);
 
   stage.addChild(container);
   return container;

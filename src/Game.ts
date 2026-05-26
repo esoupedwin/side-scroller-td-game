@@ -184,6 +184,41 @@ export class Game {
   };
   private readonly onKeyUp = (e: KeyboardEvent) => { this.keysDown.delete(e.key); };
 
+  // ── Mouse-drag camera pan ──────────────────────────────────────────────
+  // Click-and-drag the canvas to move the map. Active during play and after
+  // game over (tick keeps running so camera updates apply). Works alongside
+  // ArrowLeft / ArrowRight which adjust cameraX directly each frame.
+  private isDragging          = false;
+  private dragStartClientX    = 0;
+  private dragStartCameraX    = 0;
+
+  private readonly onPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0) return;   // primary button only — don't fight right-click menus
+    this.isDragging       = true;
+    this.dragStartClientX = e.clientX;
+    this.dragStartCameraX = this.cameraX;
+    const c = this.app.view as HTMLCanvasElement;
+    c.style.cursor = 'grabbing';
+    c.setPointerCapture?.(e.pointerId);
+  };
+
+  private readonly onPointerMove = (e: PointerEvent) => {
+    if (!this.isDragging) return;
+    // Inverse drag: dragging the map right (positive dx) should shift the
+    // camera *left* so the user feels they're sliding the world under the
+    // viewport. Divide by GAME_ZOOM so 1 client px == 1 world px regardless
+    // of zoom level.
+    const dx = e.clientX - this.dragStartClientX;
+    this.cameraX = this.dragStartCameraX - dx / GAME_ZOOM;
+    // tick() runs the clamp on every frame, so we don't need to clamp here.
+  };
+
+  private readonly onPointerUp = () => {
+    if (!this.isDragging) return;
+    this.isDragging = false;
+    (this.app.view as HTMLCanvasElement).style.cursor = 'grab';
+  };
+
   private nextCharId  = 1;
   private freeCharIds: number[] = [];
 
@@ -275,6 +310,17 @@ export class Game {
     this.build();
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup',   this.onKeyUp);
+
+    // Mouse-drag camera pan — listen on the canvas for the down event so a
+    // drag that starts outside the canvas (e.g. on a HUD button) doesn't
+    // accidentally pan; listen on window for move/up so a drag that leaves
+    // the canvas still tracks until release.
+    const canvasEl = this.app.view as HTMLCanvasElement;
+    canvasEl.style.cursor = 'grab';
+    canvasEl.addEventListener('pointerdown', this.onPointerDown);
+    window.addEventListener('pointermove',   this.onPointerMove);
+    window.addEventListener('pointerup',     this.onPointerUp);
+    window.addEventListener('pointercancel', this.onPointerUp);
     this.resetSpawnTimerFirst('enemy');
     if (this.cpuVsCpu) this.resetSpawnTimerFirst('player');
     this.resetCoinDropTimer();
@@ -804,6 +850,60 @@ export class Game {
     this.silverDropTimer    = 0;
   }
 
+  /**
+   * Lightweight tick that runs once the match is over. Skips AI, combat,
+   * spawning, income, power-ups, and tower fire — keeps only:
+   *   • Coin-box drop timers + visuals (so the field stays alive while the
+   *     player pans around to review the match)
+   *   • Character physics step + landing (so any character that was airborne
+   *     when the game ended falls and lands on the nearest surface instead of
+   *     hovering mid-air)
+   *   • Coin culling so finished coins disappear normally
+   */
+  private tickGameOver(dt: number, deltaMS: number): void {
+    // Coin drops keep firing.
+    this.coinDropTimer += deltaMS;
+    if (this.coinDropTimer >= this.coinDropInterval) {
+      this.spawnCoin(COIN_VALUE, 'gold');
+      this.resetCoinDropTimer();
+    }
+    this.silverDropTimer += deltaMS;
+    if (this.silverDropTimer >= this.silverDropInterval) {
+      this.spawnCoin(SILVER_COIN_VALUE, 'silver');
+      this.resetSilverDropTimer();
+    }
+
+    // Coin physics + visuals
+    for (const coin of this.coins) coin.update(dt, this.platformData, this.blockData);
+    for (const coin of this.coins) {
+      if (!coin.isDead && !coin.isPickedUp) this.physics.updatePlatformPassthrough(coin.body);
+    }
+
+    // Step the physics world so airborne characters fall and land. Characters
+    // were already frozen in end() (motion zeroed, anims to idle), so this is
+    // just gravity completing their descent — no AI, no horizontal movement.
+    this.liveChars.length = 0;
+    for (const c of this.characters) if (!c.isDead) this.liveChars.push(c);
+    for (const c of this.liveChars) c.syncToBody(dt);
+    this.physics.step(dt);
+    for (const c of this.liveChars) {
+      c.syncFromBody(this.platformData, this.blockData);
+      c.syncVisual();
+    }
+
+    // Cull dead coins so the layer doesn't grow indefinitely while the
+    // game-over screen is up.
+    let wi = 0;
+    for (let ri = 0; ri < this.coins.length; ri++) {
+      const coin = this.coins[ri];
+      if (coin.isDead) { this.coinLayer.removeChild(coin.container); coin.destroy(); }
+      else             { this.coins[wi++] = coin; }
+    }
+    this.coins.length = wi;
+
+    this.updateCulling();
+  }
+
   // ── Tick ─────────────────────────────────────────────────────────────────────
 
   private tick() {
@@ -819,7 +919,7 @@ export class Game {
     this.parallaxGfx.x  = -this.cameraX * PARALLAX_FACTOR;
     setViewport(this.cameraX, this.cameraX + VIEWPORT_WIDTH / GAME_ZOOM);
 
-    if (this.isOver)   { this.updateCulling(); return; }
+    if (this.isOver)   { this.tickGameOver(dt, ticker.deltaMS); return; }
     if (this.isPaused) { this.updateCulling(); return; }
 
     const playerRate = this.coinBalance    < LOW_BALANCE_THRESHOLD ? PASSIVE_INCOME_RATE * LOW_BALANCE_INCOME_MULT : PASSIVE_INCOME_RATE;
@@ -1561,7 +1661,11 @@ export class Game {
 
   private end(winner: 'player' | 'enemy', reason: 'tower' | 'timeout') {
     this.isOver = true;
-    this.app.ticker.remove(this.tickFn);
+    // Leave the ticker attached: tick() early-exits at `if (this.isOver)` so
+    // game logic doesn't run, but camera pan + sprite playback + culling all
+    // need to keep ticking so the player can move the map around after the
+    // match ends.
+    for (const c of this.characters) c.freezeForGameOver();
     this.onGameOver(winner, reason);
   }
 
