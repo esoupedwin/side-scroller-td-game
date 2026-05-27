@@ -17,6 +17,8 @@ export type Side = 'player' | 'enemy';
 export class Tower {
   readonly side: Side;
   readonly x: number;
+  /** Bottom y of the tower body (defaults to GROUND_Y). */
+  readonly baseY: number;
   readonly container: PIXI.Container;
 
   hp: number = TOWER_HP;
@@ -31,9 +33,10 @@ export class Tower {
   private static readonly BAR_H = Math.round(10 * 1.4);                   // 14 px
   private static readonly BAR_W = Math.round((TOWER_WIDTH + 8) * 1.8);    // ~158 px
 
-  constructor(side: Side, x: number, skinUrl?: string, skinW?: number, skinH?: number) {
+  constructor(side: Side, x: number, skinUrl?: string, skinW?: number, skinH?: number, baseY = GROUND_Y) {
     this.side  = side;
     this.x     = x;
+    this.baseY = baseY;
     this.container = new PIXI.Container();
 
     const color = side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
@@ -53,7 +56,7 @@ export class Tower {
     this.body.endFill();
 
     this.body.x = cx;
-    this.body.y = GROUND_Y - TOWER_HEIGHT;
+    this.body.y = baseY - TOWER_HEIGHT;
     this.container.addChild(this.body);
 
     if (skinUrl) {
@@ -64,7 +67,7 @@ export class Tower {
           this.body.visible = false;
           const sprite = new PIXI.Sprite(tex);
           sprite.x      = x - sw / 2;
-          sprite.y      = GROUND_Y - sh;
+          sprite.y      = baseY - sh;
           sprite.width  = sw;
           sprite.height = sh;
           this.container.addChildAt(sprite, 0);
@@ -76,7 +79,7 @@ export class Tower {
     const BAR_OFFSET = 262;
     const barBg = new PIXI.Graphics();
     barBg.beginFill(0x333333);
-    barBg.drawRoundedRect(x - Tower.BAR_W / 2, GROUND_Y - TOWER_HEIGHT - BAR_OFFSET, Tower.BAR_W, Tower.BAR_H, Tower.BAR_H / 2);
+    barBg.drawRoundedRect(x - Tower.BAR_W / 2, baseY - TOWER_HEIGHT - BAR_OFFSET, Tower.BAR_W, Tower.BAR_H, Tower.BAR_H / 2);
     barBg.endFill();
     this.container.addChild(barBg);
 
@@ -102,7 +105,7 @@ export class Tower {
       fontWeight: 'bold',
     });
     this.label.x = x - this.label.width / 2;
-    this.label.y = GROUND_Y - TOWER_HEIGHT - BAR_OFFSET - 18;
+    this.label.y = baseY - TOWER_HEIGHT - BAR_OFFSET - 18;
     this.container.addChild(this.label);
   }
 
@@ -112,7 +115,7 @@ export class Tower {
     if (Math.abs(ratio - this.lastDrawnTowerRatio) < 0.005) return;
     this.lastDrawnTowerRatio = ratio;
     const barX   = this.x - Tower.BAR_W / 2;
-    const barY   = GROUND_Y - TOWER_HEIGHT - 262;
+    const barY   = this.baseY - TOWER_HEIGHT - 262;
 
     this.bar.clear();
     this.bar.beginFill(color);
@@ -145,7 +148,7 @@ export class Tower {
     this.attackTimer = TOWER_FIRE_RATE;
 
     // Fire from the tower's battlement level (near top of tower body)
-    const fireY = GROUND_Y - TOWER_HEIGHT + 8;
+    const fireY = this.baseY - TOWER_HEIGHT + 8;
     return {
       sx: this.frontX, sy: fireY,
       tx: target.x,   ty: target.y - target.config.height * 0.5,

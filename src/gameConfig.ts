@@ -101,7 +101,7 @@ export const GameConfig = {
     },
     viking: {
       type:        'viking'   as const,
-      hp:          280,
+      hp:          350,        // berserker constitution — highest HP of the melee roster
       speed:       100,
       attackRange: 44,
       attackPower: 20,
@@ -109,6 +109,17 @@ export const GameConfig = {
       cost:        120,
       critical:    0.12,
       knockback:   400,  // staggers melee victims back a clear ~100 px before decay zeroes vx
+    },
+    knight: {
+      type:        'knight'   as const,
+      hp:          280,        // plate armour but leaner build than the viking
+      speed:       80,         // slower than viking due to armour weight
+      attackRange: 44,
+      attackPower: 28,         // longer sword, harder hits than the viking
+      fireRate:    1.1,        // slightly slower swing than viking
+      cost:        150,
+      critical:    0.08,       // trained warrior, few misses
+      knockback:   250,        // armoured momentum, less than viking
     },
     heavy: {
       type:        'heavy'    as const,

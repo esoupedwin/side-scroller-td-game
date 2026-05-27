@@ -15,12 +15,16 @@ type DragKind =
   | { kind: 'platform-move';   idx: number; ox: number; oy: number }
   | { kind: 'platform-left';   idx: number; origX: number; origW: number }
   | { kind: 'platform-right';  idx: number; origW: number }
+  | { kind: 'platform-top';    idx: number; origY: number; origH: number }
+  | { kind: 'platform-bottom'; idx: number }
   | { kind: 'block-move';      idx: number; ox: number; oy: number }
   | { kind: 'block-left';      idx: number; origX: number; origW: number }
   | { kind: 'block-right';     idx: number; origW: number }
+  | { kind: 'block-top';       idx: number; origY: number; origH: number }
+  | { kind: 'block-bottom';    idx: number }
   | { kind: 'coinbox';         ox: number; oy: number }
-  | { kind: 'tower-player' }
-  | { kind: 'tower-enemy' };
+  | { kind: 'tower-player';   ox: number; oy: number }
+  | { kind: 'tower-enemy';    ox: number; oy: number };
 
 // ── MapBuilder class ─────────────────────────────────────────────────────────
 
@@ -284,26 +288,29 @@ class MapBuilder {
 
     this.drawGrid();
 
-    const drawTower = (cx: number, color: string, stroke: string, skinUrl?: string, tW: number = TOWER_W, tH: number = TOWER_H) => {
+    const drawTower = (cx: number, baseY: number, color: string, stroke: string, sel: boolean, skinUrl?: string, tW: number = TOWER_W, tH: number = TOWER_H) => {
       const tx = this.wx(cx - tW / 2);
-      const ty = this.wy(GROUND_Y - tH);
+      const ty = this.wy(baseY - tH);
       const tw = this.sw(tW);
       const th = this.sh(tH);
       if (skinUrl) {
         const img = this.getSkinImage(skinUrl);
         if (img.complete && img.naturalWidth > 0) {
           ctx.drawImage(img, tx, ty, tw, th);
+          if (sel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(tx, ty, tw, th); }
           return;
         }
       }
       ctx.fillStyle   = color;
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth   = 1;
+      ctx.strokeStyle = sel ? '#ffffff' : stroke;
+      ctx.lineWidth   = sel ? 2 : 1;
       ctx.fillRect(tx, ty, tw, th);
       ctx.strokeRect(tx, ty, tw, th);
     };
-    drawTower(m.playerTowerX, '#00b4d8', '#007fa3', m.playerTowerSkin, m.playerTowerSkinW, m.playerTowerSkinH);
-    drawTower(m.enemyTowerX,  '#e63946', '#a02830', m.enemyTowerSkin,  m.enemyTowerSkinW,  m.enemyTowerSkinH);
+    const pBaseY = m.playerTowerY ?? GROUND_Y;
+    const eBaseY = m.enemyTowerY  ?? GROUND_Y;
+    drawTower(m.playerTowerX, pBaseY, '#00b4d8', '#007fa3', this.selectedTower === 'player', m.playerTowerSkin, m.playerTowerSkinW, m.playerTowerSkinH);
+    drawTower(m.enemyTowerX,  eBaseY, '#e63946', '#a02830', this.selectedTower === 'enemy',  m.enemyTowerSkin,  m.enemyTowerSkinW,  m.enemyTowerSkinH);
 
     // Blocks — draw in ascending zIndex order so higher-z blocks render on top.
     const blockDrawOrder = m.blocks
@@ -338,10 +345,15 @@ class MapBuilder {
         ctx.strokeStyle = '#6366f1';
         ctx.lineWidth   = 2;
         ctx.strokeRect(bx, by, bw, bh);
-        const hw = 6, hh = 10;
         ctx.fillStyle = '#ffffff';
+        // left / right handles (vertical pill)
+        const hw = 6, hh = 10;
         ctx.fillRect(bx - hw / 2,      by + bh / 2 - hh / 2, hw, hh);
         ctx.fillRect(bx + bw - hw / 2, by + bh / 2 - hh / 2, hw, hh);
+        // top / bottom handles (horizontal pill)
+        const hw2 = 10, hh2 = 6;
+        ctx.fillRect(bx + bw / 2 - hw2 / 2, by - hh2 / 2,      hw2, hh2);
+        ctx.fillRect(bx + bw / 2 - hw2 / 2, by + bh - hh2 / 2, hw2, hh2);
       }
 
       // Animation ghost: dashed outline at end position + connector + S/E labels.
@@ -388,10 +400,15 @@ class MapBuilder {
         ctx.strokeStyle = '#e0a500';
         ctx.lineWidth   = 2;
         ctx.strokeRect(px, py, pw, ph);
-        const hw = 6, hh = 10;
         ctx.fillStyle = '#ffffff';
+        // left / right handles (vertical pill)
+        const hw = 6, hh = 10;
         ctx.fillRect(px - hw / 2,      py + ph / 2 - hh / 2, hw, hh);
         ctx.fillRect(px + pw - hw / 2, py + ph / 2 - hh / 2, hw, hh);
+        // top / bottom handles (horizontal pill)
+        const hw2 = 10, hh2 = 6;
+        ctx.fillRect(px + pw / 2 - hw2 / 2, py - hh2 / 2,      hw2, hh2);
+        ctx.fillRect(px + pw / 2 - hw2 / 2, py + ph - hh2 / 2, hw2, hh2);
       }
 
       // Animation ghost — dashed outline at end position + arrow + S/E labels
@@ -683,7 +700,7 @@ class MapBuilder {
     const m  = this.map;
 
     if (!this.drag) {
-      this.canvas.style.cursor = this.hoverCursor(cx, wx, wy, m);
+      this.canvas.style.cursor = this.hoverCursor(cx, cy, wx, wy, m);
       return;
     }
 
@@ -702,6 +719,16 @@ class MapBuilder {
       const p = m.platforms[this.drag.idx];
       p.width = Math.max(40, Math.round(wx - p.x));
       this.syncInputsFromMap();
+    } else if (this.drag.kind === 'platform-top') {
+      const p      = m.platforms[this.drag.idx];
+      const bottom = this.drag.origY + this.drag.origH;
+      p.y          = Math.round(Math.min(wy, bottom - 20));
+      p.height     = bottom - p.y;
+      this.syncInputsFromMap();
+    } else if (this.drag.kind === 'platform-bottom') {
+      const p  = m.platforms[this.drag.idx];
+      p.height = Math.max(20, Math.round(Math.min(wy, GROUND_Y) - p.y));
+      this.syncInputsFromMap();
     } else if (this.drag.kind === 'block-move') {
       const b = m.blocks[this.drag.idx];
       b.x = Math.round(wx - this.drag.ox);
@@ -717,39 +744,59 @@ class MapBuilder {
       const b = m.blocks[this.drag.idx];
       b.width = Math.max(40, Math.round(wx - b.x));
       this.syncInputsFromMap();
+    } else if (this.drag.kind === 'block-top') {
+      const b      = m.blocks[this.drag.idx];
+      const bottom = this.drag.origY + this.drag.origH;
+      b.y          = Math.round(Math.min(wy, bottom - 20));
+      b.height     = bottom - b.y;
+      this.syncInputsFromMap();
+    } else if (this.drag.kind === 'block-bottom') {
+      const b  = m.blocks[this.drag.idx];
+      b.height = Math.max(20, Math.round(Math.min(wy, GROUND_Y) - b.y));
+      this.syncInputsFromMap();
     } else if (this.drag.kind === 'coinbox') {
       m.coinBox.x = Math.round(wx - this.drag.ox);
       m.coinBox.y = Math.min(GROUND_Y - m.coinBox.height, Math.round(wy - this.drag.oy));
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'tower-player') {
-      m.playerTowerX = Math.max(TOWER_W / 2 + 5, Math.round(wx));
+      m.playerTowerX = Math.max(TOWER_W / 2 + 5, Math.round(wx - this.drag.ox));
+      const newY = Math.round(wy - this.drag.oy);
+      m.playerTowerY = newY >= GROUND_Y ? undefined : Math.max(TOWER_H + 20, newY);
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'tower-enemy') {
-      m.enemyTowerX = Math.min(m.worldWidth - TOWER_W / 2 - 5, Math.round(wx));
+      m.enemyTowerX = Math.min(m.worldWidth - TOWER_W / 2 - 5, Math.round(wx - this.drag.ox));
+      const newY = Math.round(wy - this.drag.oy);
+      m.enemyTowerY = newY >= GROUND_Y ? undefined : Math.max(TOWER_H + 20, newY);
       this.syncInputsFromMap();
     }
     this.canvas.style.cursor = 'grabbing';
   }
 
-  private hoverCursor(cx: number, wx: number, wy: number, m: typeof this.map): string {
+  private hoverCursor(cx: number, cy: number, wx: number, wy: number, m: typeof this.map): string {
     const HANDLE_ZONE = 5;
 
-    // Resize handles on platforms and blocks (left/right edges)
+    // Resize handles on platforms and blocks (edges) + body (grab)
     for (const p of m.platforms) {
-      if (wy >= p.y && wy <= p.y + p.height) {
-        if (Math.abs(cx - this.wx(p.x)) <= HANDLE_ZONE ||
-            Math.abs(cx - this.wx(p.x + p.width)) <= HANDLE_ZONE)
-          return 'ew-resize';
-        if (wx >= p.x && wx <= p.x + p.width) return 'grab';
-      }
+      const inX = wx >= p.x && wx <= p.x + p.width;
+      const inY = wy >= p.y && wy <= p.y + p.height;
+      if (inY && (Math.abs(cx - this.wx(p.x)) <= HANDLE_ZONE ||
+                  Math.abs(cx - this.wx(p.x + p.width)) <= HANDLE_ZONE))
+        return 'ew-resize';
+      if (inX && (Math.abs(cy - this.wy(p.y)) <= HANDLE_ZONE ||
+                  Math.abs(cy - this.wy(p.y + p.height)) <= HANDLE_ZONE))
+        return 'ns-resize';
+      if (inX && inY) return 'grab';
     }
     for (const b of m.blocks) {
-      if (wy >= b.y && wy <= b.y + b.height) {
-        if (Math.abs(cx - this.wx(b.x)) <= HANDLE_ZONE ||
-            Math.abs(cx - this.wx(b.x + b.width)) <= HANDLE_ZONE)
-          return 'ew-resize';
-        if (wx >= b.x && wx <= b.x + b.width) return 'grab';
-      }
+      const inX = wx >= b.x && wx <= b.x + b.width;
+      const inY = wy >= b.y && wy <= b.y + b.height;
+      if (inY && (Math.abs(cx - this.wx(b.x)) <= HANDLE_ZONE ||
+                  Math.abs(cx - this.wx(b.x + b.width)) <= HANDLE_ZONE))
+        return 'ew-resize';
+      if (inX && (Math.abs(cy - this.wy(b.y)) <= HANDLE_ZONE ||
+                  Math.abs(cy - this.wy(b.y + b.height)) <= HANDLE_ZONE))
+        return 'ns-resize';
+      if (inX && inY) return 'grab';
     }
 
     // Coin box
@@ -759,11 +806,13 @@ class MapBuilder {
       return 'grab';
 
     // Towers
+    const pBaseY = m.playerTowerY ?? GROUND_Y;
+    const eBaseY = m.enemyTowerY  ?? GROUND_Y;
     if (wx >= m.playerTowerX - TOWER_W / 2 && wx <= m.playerTowerX + TOWER_W / 2 &&
-        wy >= GROUND_Y - TOWER_H && wy <= GROUND_Y)
+        wy >= pBaseY - TOWER_H && wy <= pBaseY)
       return 'grab';
     if (wx >= m.enemyTowerX - TOWER_W / 2 && wx <= m.enemyTowerX + TOWER_W / 2 &&
-        wy >= GROUND_Y - TOWER_H && wy <= GROUND_Y)
+        wy >= eBaseY - TOWER_H && wy <= eBaseY)
       return 'grab';
 
     return 'crosshair';
@@ -800,9 +849,16 @@ class MapBuilder {
 
     const m  = this.map;
 
-    // Platforms (drawn on top of blocks, so checked first)
+    // Hit-test in reverse draw order so the visually topmost element wins the click.
+    // Draw order: blocks ascending z → platforms ascending z.
+    // Hit-test order: platforms descending z → blocks descending z.
     const HANDLE_ZONE = 5;
-    for (let i = 0; i < m.platforms.length; i++) {
+
+    const platHitOrder = m.platforms
+      .map((_, i) => i)
+      .sort((a, b) => (m.platforms[b].zIndex ?? 0) - (m.platforms[a].zIndex ?? 0));
+
+    for (const i of platHitOrder) {
       const p = m.platforms[i];
       if (Math.abs(cx - this.wx(p.x)) <= HANDLE_ZONE &&
           wy >= p.y && wy <= p.y + p.height) {
@@ -820,6 +876,22 @@ class MapBuilder {
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
+      if (Math.abs(cy - this.wy(p.y)) <= HANDLE_ZONE &&
+          wx >= p.x && wx <= p.x + p.width) {
+        this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
+        this.pushUndo();
+        this.drag = { kind: 'platform-top', idx: i, origY: p.y, origH: p.height };
+        this.syncInputsFromMap(); this.scrollSelectionIntoView();
+        return;
+      }
+      if (Math.abs(cy - this.wy(p.y + p.height)) <= HANDLE_ZONE &&
+          wx >= p.x && wx <= p.x + p.width) {
+        this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
+        this.pushUndo();
+        this.drag = { kind: 'platform-bottom', idx: i };
+        this.syncInputsFromMap(); this.scrollSelectionIntoView();
+        return;
+      }
       if (wx >= p.x && wx <= p.x + p.width && wy >= p.y && wy <= p.y + p.height) {
         this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
         this.pushUndo();
@@ -829,8 +901,12 @@ class MapBuilder {
       }
     }
 
-    // Blocks
-    for (let i = 0; i < m.blocks.length; i++) {
+    // Blocks (hit-tested after platforms since platforms render on top)
+    const blockHitOrder = m.blocks
+      .map((_, i) => i)
+      .sort((a, b) => (m.blocks[b].zIndex ?? 0) - (m.blocks[a].zIndex ?? 0));
+
+    for (const i of blockHitOrder) {
       const b = m.blocks[i];
       if (Math.abs(cx - this.wx(b.x)) <= HANDLE_ZONE &&
           wy >= b.y && wy <= b.y + b.height) {
@@ -845,6 +921,22 @@ class MapBuilder {
         this.clearSelection(); this.selected = i; this.selectedKind = 'block';
         this.pushUndo();
         this.drag = { kind: 'block-right', idx: i, origW: b.width };
+        this.syncInputsFromMap(); this.scrollSelectionIntoView();
+        return;
+      }
+      if (Math.abs(cy - this.wy(b.y)) <= HANDLE_ZONE &&
+          wx >= b.x && wx <= b.x + b.width) {
+        this.clearSelection(); this.selected = i; this.selectedKind = 'block';
+        this.pushUndo();
+        this.drag = { kind: 'block-top', idx: i, origY: b.y, origH: b.height };
+        this.syncInputsFromMap(); this.scrollSelectionIntoView();
+        return;
+      }
+      if (Math.abs(cy - this.wy(b.y + b.height)) <= HANDLE_ZONE &&
+          wx >= b.x && wx <= b.x + b.width) {
+        this.clearSelection(); this.selected = i; this.selectedKind = 'block';
+        this.pushUndo();
+        this.drag = { kind: 'block-bottom', idx: i };
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
         return;
       }
@@ -870,25 +962,31 @@ class MapBuilder {
     }
 
     // Player tower
-    if (wx >= m.playerTowerX - TOWER_W / 2 && wx <= m.playerTowerX + TOWER_W / 2 &&
-        wy >= GROUND_Y - TOWER_H && wy <= GROUND_Y) {
-      this.clearSelection(); this.selectedTower = 'player';
-      this.pushUndo();
-      this.drag = { kind: 'tower-player' };
-      this.syncInputsFromMap();
-      document.getElementById('section-player-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      return;
+    {
+      const pBaseY = m.playerTowerY ?? GROUND_Y;
+      if (wx >= m.playerTowerX - TOWER_W / 2 && wx <= m.playerTowerX + TOWER_W / 2 &&
+          wy >= pBaseY - TOWER_H && wy <= pBaseY) {
+        this.clearSelection(); this.selectedTower = 'player';
+        this.pushUndo();
+        this.drag = { kind: 'tower-player', ox: wx - m.playerTowerX, oy: wy - pBaseY };
+        this.syncInputsFromMap();
+        document.getElementById('section-player-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return;
+      }
     }
 
     // Enemy tower
-    if (wx >= m.enemyTowerX - TOWER_W / 2 && wx <= m.enemyTowerX + TOWER_W / 2 &&
-        wy >= GROUND_Y - TOWER_H && wy <= GROUND_Y) {
-      this.clearSelection(); this.selectedTower = 'enemy';
-      this.pushUndo();
-      this.drag = { kind: 'tower-enemy' };
-      this.syncInputsFromMap();
-      document.getElementById('section-enemy-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      return;
+    {
+      const eBaseY = m.enemyTowerY ?? GROUND_Y;
+      if (wx >= m.enemyTowerX - TOWER_W / 2 && wx <= m.enemyTowerX + TOWER_W / 2 &&
+          wy >= eBaseY - TOWER_H && wy <= eBaseY) {
+        this.clearSelection(); this.selectedTower = 'enemy';
+        this.pushUndo();
+        this.drag = { kind: 'tower-enemy', ox: wx - m.enemyTowerX, oy: wy - (m.enemyTowerY ?? GROUND_Y) };
+        this.syncInputsFromMap();
+        document.getElementById('section-enemy-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return;
+      }
     }
 
     // Ground strip — not draggable, just selectable
@@ -1000,14 +1098,16 @@ class MapBuilder {
     });
     document.querySelectorAll('button.size-option[data-w]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const w      = parseInt((btn as HTMLElement).dataset.w ?? '300', 10);
+        const el     = btn as HTMLElement;
+        const w      = parseInt(el.dataset.w ?? '300', 10);
+        const h      = parseInt(el.dataset.h ?? '120', 10);
         const m      = this.map;
         const id     = `p${Date.now()}`;
         // Auto z-index: one above the current highest so the new platform renders on top
         const maxZ   = MapBuilder.maxZOf(m.platforms);
         const zIndex = maxZ + 1;
         this.pushUndo();
-        m.platforms.push({ id, x: Math.round(m.worldWidth / 2 - w / 2), y: GROUND_Y - 260, width: w, height: 120, zIndex });
+        m.platforms.push({ id, x: Math.round(m.worldWidth / 2 - w / 2), y: GROUND_Y - 260, width: w, height: h, zIndex });
         this.clearSelection();
         this.selected     = m.platforms.length - 1;
         this.selectedKind = 'platform';
@@ -1268,9 +1368,19 @@ class MapBuilder {
       this.pushUndo();
       this.map.playerTowerX = parseInt((document.getElementById('input-player-x') as HTMLInputElement).value, 10);
     });
+    document.getElementById('input-player-y')!.addEventListener('change', () => {
+      this.pushUndo();
+      const val = parseInt((document.getElementById('input-player-y') as HTMLInputElement).value, 10);
+      this.map.playerTowerY = isNaN(val) || val >= GROUND_Y ? undefined : Math.max(TOWER_H + 20, val);
+    });
     document.getElementById('input-enemy-x')!.addEventListener('change', () => {
       this.pushUndo();
       this.map.enemyTowerX = parseInt((document.getElementById('input-enemy-x') as HTMLInputElement).value, 10);
+    });
+    document.getElementById('input-enemy-y')!.addEventListener('change', () => {
+      this.pushUndo();
+      const val = parseInt((document.getElementById('input-enemy-y') as HTMLInputElement).value, 10);
+      this.map.enemyTowerY = isNaN(val) || val >= GROUND_Y ? undefined : Math.max(TOWER_H + 20, val);
     });
 
     // Tower skin pickers
@@ -1515,11 +1625,13 @@ class MapBuilder {
 
     if (playerSel) {
       (document.getElementById('input-player-x')      as HTMLInputElement).value = String(m.playerTowerX);
+      (document.getElementById('input-player-y')      as HTMLInputElement).value = String(m.playerTowerY ?? GROUND_Y);
       (document.getElementById('input-player-skin-w') as HTMLInputElement).value = String(m.playerTowerSkinW ?? TOWER_W);
       (document.getElementById('input-player-skin-h') as HTMLInputElement).value = String(m.playerTowerSkinH ?? TOWER_H);
     }
     if (enemySel) {
       (document.getElementById('input-enemy-x')      as HTMLInputElement).value = String(m.enemyTowerX);
+      (document.getElementById('input-enemy-y')      as HTMLInputElement).value = String(m.enemyTowerY  ?? GROUND_Y);
       (document.getElementById('input-enemy-skin-w') as HTMLInputElement).value = String(m.enemyTowerSkinW  ?? TOWER_W);
       (document.getElementById('input-enemy-skin-h') as HTMLInputElement).value = String(m.enemyTowerSkinH  ?? TOWER_H);
     }

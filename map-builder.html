@@ -99,7 +99,7 @@
       }
 
       select {
-        background: transparent;
+        background: var(--card);
         border: 1px solid var(--border);
         color: var(--fg);
         padding: 0 10px;
@@ -112,6 +112,16 @@
         transition: border-color 0.15s;
       }
       select:focus { border-color: var(--ring); }
+      /* Keep the native dropdown popup readable on all platforms */
+      select option {
+        background: hsl(224, 50%, 8%);
+        color: hsl(210, 20%, 90%);
+      }
+      select optgroup {
+        background: hsl(224, 71%, 4%);
+        color: hsl(213, 27%, 55%);
+        font-weight: 600;
+      }
 
       button {
         display: inline-flex;
@@ -556,6 +566,8 @@
             <div class="section-title">Player's Tower</div>
             <label>X:</label>
             <input type="number" id="input-player-x" value="60" />
+            <label>Y:</label>
+            <input type="number" id="input-player-y" value="480" style="width:80px;" />
             <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:2px;">
               <span class="skin-label">Skin</span>
               <input type="file" id="input-player-skin" accept="image/*" />
@@ -571,6 +583,8 @@
             <div class="section-title">Enemy's Tower</div>
             <label>X:</label>
             <input type="number" id="input-enemy-x" value="2748" />
+            <label>Y:</label>
+            <input type="number" id="input-enemy-y" value="480" style="width:80px;" />
             <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:2px;">
               <span class="skin-label">Skin</span>
               <input type="file" id="input-enemy-skin" accept="image/*" />
@@ -731,21 +745,28 @@
           <span class="dialog-subtitle">Choose a size</span>
         </div>
         <div class="size-options">
-          <button class="size-option" data-w="300">
+          <button class="size-option" data-w="100" data-h="70">
+            <div class="size-preview-wrap">
+              <div class="size-bar" style="width:11%; height:14px;"></div>
+            </div>
+            <div class="size-tag">XS</div>
+            <div class="size-dims">100 × 70</div>
+          </button>
+          <button class="size-option" data-w="300" data-h="120">
             <div class="size-preview-wrap">
               <div class="size-bar" style="width:33%;"></div>
             </div>
             <div class="size-tag">S</div>
             <div class="size-dims">300 × 120</div>
           </button>
-          <button class="size-option" data-w="600">
+          <button class="size-option" data-w="600" data-h="120">
             <div class="size-preview-wrap">
               <div class="size-bar" style="width:66%;"></div>
             </div>
             <div class="size-tag">M</div>
             <div class="size-dims">600 × 120</div>
           </button>
-          <button class="size-option" data-w="900">
+          <button class="size-option" data-w="900" data-h="120">
             <div class="size-preview-wrap">
               <div class="size-bar" style="width:100%;"></div>
             </div>

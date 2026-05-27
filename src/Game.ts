@@ -38,7 +38,7 @@ import {
   VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, SNIPER, VIKING, HEAVY, TANKER, GRENADIER, ROCKETEER,
+  CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, SNIPER, VIKING, KNIGHT, HEAVY, TANKER, GRENADIER, ROCKETEER,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
   GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY,
   ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX, ROCKET_SPLASH_MIN_FRAC,
@@ -81,6 +81,7 @@ const CHAR_CONFIGS = {
   rifleman:  RIFLEMAN,
   sniper:    SNIPER,
   viking:    VIKING,
+  knight:    KNIGHT,
   heavy:     HEAVY,
   tanker:    TANKER,
   grenadier: GRENADIER,
@@ -399,8 +400,8 @@ export class Game {
     this.world.addChild(this.labelLayer);
     initVfx(this.vfxLayer);
 
-    this.playerTower = new Tower('player', m.playerTowerX, m.playerTowerSkin, m.playerTowerSkinW, m.playerTowerSkinH);
-    this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerSkin,  m.enemyTowerSkinW,  m.enemyTowerSkinH);
+    this.playerTower = new Tower('player', m.playerTowerX, m.playerTowerSkin, m.playerTowerSkinW, m.playerTowerSkinH, m.playerTowerY ?? GROUND_Y);
+    this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerSkin,  m.enemyTowerSkinW,  m.enemyTowerSkinH, m.enemyTowerY  ?? GROUND_Y);
     this.world.addChild(this.playerTower.container);
     this.world.addChild(this.enemyTower.container);
 
@@ -415,12 +416,12 @@ export class Game {
     // Register static collision boxes for the debug overlay.
     this.staticCollisionBoxes = [
       {
-        x: m.playerTowerX - TOWER_WIDTH / 2, y: GROUND_Y - TOWER_HEIGHT,
+        x: m.playerTowerX - TOWER_WIDTH / 2, y: (m.playerTowerY ?? GROUND_Y) - TOWER_HEIGHT,
         width: TOWER_WIDTH, height: TOWER_HEIGHT,
         type: 'solid', label: 'Player Tower',
       },
       {
-        x: m.enemyTowerX - TOWER_WIDTH / 2, y: GROUND_Y - TOWER_HEIGHT,
+        x: m.enemyTowerX - TOWER_WIDTH / 2, y: (m.enemyTowerY ?? GROUND_Y) - TOWER_HEIGHT,
         width: TOWER_WIDTH, height: TOWER_HEIGHT,
         type: 'solid', label: 'Enemy Tower',
       },
@@ -499,14 +500,13 @@ export class Game {
     this.world.addChild(this.powerUpIndicatorContainer);  // world space — scrolls with camera
 
     // Pre-build one UpdateContext per side. Stable fields are set here; dt and
-    // tower frontX values are patched each tick — no per-character allocation needed.
-    const towerY = GROUND_Y - TOWER_HEIGHT * 0.5;
+    // tower frontX/Y values are patched each tick — no per-character allocation needed.
     this.playerCtx = {
       dt: 0,
       enemies:          this.enemyLive,
       allies:           this.playerLive,
       enemyTowerFrontX: this.enemyTower.frontX,
-      enemyTowerY:      towerY,
+      enemyTowerY:      this.enemyTower.baseY - TOWER_HEIGHT * 0.5,
       homeTowerFrontX:  this.playerTower.frontX,
       worldWidth:       this.mapDef.worldWidth,
       coins:            this.liveCoins,
@@ -532,7 +532,7 @@ export class Game {
       enemies:          this.playerLive,
       allies:           this.enemyLive,
       enemyTowerFrontX: this.playerTower.frontX,
-      enemyTowerY:      towerY,
+      enemyTowerY:      this.playerTower.baseY - TOWER_HEIGHT * 0.5,
       homeTowerFrontX:  this.enemyTower.frontX,
       worldWidth:       this.mapDef.worldWidth,
       coins:            this.liveCoins,
@@ -628,7 +628,7 @@ export class Game {
     this.notifyCoins();
 
     const config = withSpawnBoosts(CHAR_CONFIGS[type]);
-    const c = new Character('player', this.playerTower.frontX, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type));
+    const c = new Character('player', this.playerTower.frontX, this.playerTower.baseY - TOWER_HEIGHT, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type));
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
@@ -714,11 +714,12 @@ export class Game {
     const stance    = self === 'enemy' ? this.cpuStance : this.playerStance;
     const pressure  = oppChars.length - selfChars.length;
     const balance   = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
-    const spawnX    = self === 'enemy' ? this.enemyTower.frontX : this.playerTower.frontX;
+    const spawnX    = self === 'enemy' ? this.enemyTower.frontX  : this.playerTower.frontX;
+    const spawnY    = self === 'enemy' ? this.enemyTower.baseY - TOWER_HEIGHT : this.playerTower.baseY - TOWER_HEIGHT;
 
     // Tanker is intentionally excluded from every order array — it's hidden
     // from both the player UI and the CPU until further notice.
-    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'heavy' | 'rocketeer' | 'grenadier';
+    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'knight' | 'heavy' | 'rocketeer' | 'grenadier';
     let order: UnitType[];
 
     // Opponent cluster detection: if 3+ opponents sit within CLUSTER_RADIUS
@@ -739,25 +740,27 @@ export class Game {
     if (stance === 'push') {
       if (opponentsClustered && balance >= CHAR_COST.rocketeer) {
         // Splash-heavy: opponents are bunched up, prefer rockets/grenades
-        order = ['rocketeer', 'grenadier', 'rifleman', 'heavy', 'warrior', 'archer'];
+        order = ['rocketeer', 'grenadier', 'rifleman', 'knight', 'heavy', 'warrior', 'archer'];
       } else if (opponentsClustered && balance >= CHAR_COST.grenadier) {
-        order = ['grenadier', 'rifleman', 'heavy', 'warrior', 'archer'];
+        order = ['grenadier', 'rifleman', 'knight', 'heavy', 'warrior', 'archer'];
       } else {
-        // Aggressive push: flood high-damage units
-        order = ['rifleman', 'heavy', 'warrior', 'archer'];
+        // Aggressive push: flood high-damage units; knight leads the melee wedge
+        order = ['knight', 'rifleman', 'heavy', 'warrior', 'archer'];
       }
     } else if (stance === 'defend') {
       if (pressure >= 3) {
-        // Severely outnumbered — flood cheap units to plug the gap immediately
-        order = ['warrior', 'heavy', 'archer', 'sniper'];
+        // Severely outnumbered — knight tanks while warriors plug the gap
+        order = ['knight', 'warrior', 'heavy', 'archer', 'sniper'];
       } else {
-        // Steady defence: archers for harassment, warriors as frontline wall
-        order = ['archer', 'warrior', 'sniper'];
+        // Steady defence: archers for harassment, knight as frontline wall
+        order = ['archer', 'knight', 'warrior', 'sniper'];
       }
     } else {
       // Economy: invest in better units
       if (balance >= CHAR_COST.sniper && selfChars.length >= 3) {
-        order = ['sniper', 'rifleman', 'archer', 'heavy', 'warrior'];
+        order = ['sniper', 'rifleman', 'knight', 'archer', 'heavy', 'warrior'];
+      } else if (balance >= CHAR_COST.knight) {
+        order = ['knight', 'rifleman', 'archer', 'heavy', 'warrior'];
       } else if (balance >= CHAR_COST.rifleman) {
         order = ['rifleman', 'archer', 'heavy', 'warrior'];
       } else {
@@ -774,7 +777,7 @@ export class Game {
         this.coinBalance -= cost;
         this.notifyCoins();
       }
-      const c = new Character(self, spawnX, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type));
+      const c = new Character(self, spawnX, spawnY, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type));
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
       if (self === 'player') this.hud.add(c);
@@ -1142,16 +1145,15 @@ export class Game {
 
     // Update characters — reuse pre-allocated ctx objects; patch only the fields
     // that change each tick to eliminate per-character object + closure allocation.
-    const towerY = GROUND_Y - TOWER_HEIGHT * 0.5;
     this.playerCtx.dt               = dt;
     this.playerCtx.enemyTowerFrontX = this.enemyTower.frontX;
-    this.playerCtx.enemyTowerY      = towerY;
+    this.playerCtx.enemyTowerY      = this.enemyTower.baseY - TOWER_HEIGHT * 0.5;
     this.playerCtx.homeTowerFrontX  = this.playerTower.frontX;
     this.playerCtx.worldWidth       = this.mapDef.worldWidth;
 
     this.enemyCtx.dt               = dt;
     this.enemyCtx.enemyTowerFrontX = this.playerTower.frontX;
-    this.enemyCtx.enemyTowerY      = towerY;
+    this.enemyCtx.enemyTowerY      = this.playerTower.baseY - TOWER_HEIGHT * 0.5;
     this.enemyCtx.homeTowerFrontX  = this.enemyTower.frontX;
     this.enemyCtx.worldWidth       = this.mapDef.worldWidth;
 
@@ -1509,6 +1511,31 @@ export class Game {
         }
       }
     }
+
+    // ── Spawn-point markers ──────────────────────────────────────────────────
+    // Draw a cross + circle at each tower's spawn point so map-builder
+    // placement issues are immediately visible when B is pressed.
+    const drawSpawnMarker = (sx: number, sy: number, color: number, label: string) => {
+      const R = 8, ARM = 14;
+      // Filled circle
+      g.lineStyle(2, color, 1.0);
+      g.beginFill(color, 0.25);
+      g.drawCircle(sx, sy, R);
+      g.endFill();
+      // Cross arms
+      g.lineStyle(2, color, 1.0);
+      g.moveTo(sx - ARM, sy); g.lineTo(sx + ARM, sy);
+      g.moveTo(sx, sy - ARM); g.lineTo(sx, sy + ARM);
+      // Label
+      const style = new PIXI.TextStyle({ fontSize: 11, fill: color, fontWeight: 'bold', stroke: 0x000000, strokeThickness: 3 });
+      const text  = new PIXI.Text(`SPAWN ${label}`, style);
+      text.x = sx + R + 3;
+      text.y = sy - 8;
+      g.addChild(text);
+    };
+
+    drawSpawnMarker(this.playerTower.frontX, this.playerTower.baseY - TOWER_HEIGHT, PLAYER_COLOR, 'P');
+    drawSpawnMarker(this.enemyTower.frontX,  this.enemyTower.baseY  - TOWER_HEIGHT, ENEMY_COLOR,  'E');
   }
 
   /**
@@ -1676,7 +1703,7 @@ export class Game {
     const stance    = self === 'enemy' ? this.cpuStance : this.playerStance;
     const noteDecision = (msg: string) => { if (self === 'enemy') this.cpuStrategyInfo.decision = msg; };
 
-    const isMelee = (type: string) => type === 'warrior' || type === 'heavy' || type === 'tanker';
+    const isMelee = (type: string) => type === 'warrior' || type === 'knight' || type === 'heavy' || type === 'tanker';
     const isRangedUnit = (type: string) => type === 'archer' || type === 'rifleman' || type === 'sniper';
 
     if (stance === 'defend') {

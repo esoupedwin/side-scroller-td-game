@@ -159,6 +159,7 @@ export const CHAR_COST = {
   rifleman:  ch.rifleman.cost,
   sniper:    ch.sniper.cost,
   viking:    ch.viking.cost,
+  knight:    ch.knight.cost,
   heavy:     ch.heavy.cost,
   tanker:    ch.tanker.cost,
   grenadier: ch.grenadier.cost,
@@ -244,6 +245,19 @@ export const VIKING = {
   width:       ch.width,
   height:      ch.height,
   knockback:   ch.viking.knockback,
+};
+
+export const KNIGHT = {
+  type:        ch.knight.type,
+  hp:          ch.knight.hp,
+  speed:       ch.knight.speed,
+  attackRange: ch.knight.attackRange,
+  attackPower: ch.knight.attackPower,
+  fireRate:    ch.knight.fireRate,
+  critical:    ch.knight.critical,
+  width:       ch.width,
+  height:      ch.height,
+  knockback:   ch.knight.knockback,
 };
 
 export const HEAVY = {

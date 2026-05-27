@@ -20,7 +20,9 @@ export interface MapDefinition {
   worldWidth:   number;
   worldHeight?: number;  // canvas height in px (default: GameConfig.canvas.height)
   playerTowerX: number;  // centre x of the player tower
+  playerTowerY?: number; // base y (bottom) of the player tower (default: GROUND_Y)
   enemyTowerX:  number;  // centre x of the enemy tower
+  enemyTowerY?: number;  // base y (bottom) of the enemy tower (default: GROUND_Y)
   platforms:       PlatformData[];
   blocks:          BlockData[];
   coinBox:         CoinBoxDef;
