@@ -148,6 +148,7 @@ export class Game {
 
   private get mapDurationSec(): number { return this.mapDef.durationSec ?? GAME_DURATION_SEC; }
 
+  get currentMapId(): string   { return this.mapDef.id; }
   get elapsedSeconds(): number { return this.mapDurationSec - this.timeRemaining; }
 
   // Collision-box debug overlay (toggled with 'B')

@@ -3,6 +3,7 @@ import { CHAR_COST } from './constants';
 import { TYPE_ICON } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
+import { WORLDS, ALL_MAPS, loadMapWithOverride, mapCoords } from './maps';
 
 const loadingScreen = document.getElementById('loading-screen')!;
 
@@ -173,6 +174,44 @@ diagnoseExportBtn.addEventListener('click', () => {
 
 setInterval(refreshDiagnoseUi, 500);
 refreshDiagnoseUi();
+
+// ── Dev panel: map selector ────────────────────────────────────────────────
+{
+  const mapSelect   = document.getElementById('dev-map-select')   as HTMLSelectElement;
+  const loadMapBtn  = document.getElementById('dev-load-map-btn') as HTMLButtonElement;
+
+  // Populate grouped options — World 1 / World 2 / …
+  for (const world of WORLDS) {
+    const group   = document.createElement('optgroup');
+    group.label   = `World ${world.id} — ${world.name}`;
+    for (let mi = 0; mi < world.maps.length; mi++) {
+      const map = world.maps[mi];
+      const opt      = document.createElement('option');
+      opt.value      = map.id;
+      opt.textContent = `W${world.id}M${mi + 1} — ${map.name}`;
+      group.appendChild(opt);
+    }
+    mapSelect.appendChild(group);
+  }
+
+  // Keep the selector in sync with the current map after any reset
+  function syncMapSelect() {
+    const coords = mapCoords(game.currentMapId);
+    if (coords) mapSelect.value = game.currentMapId;
+  }
+  syncMapSelect();
+
+  loadMapBtn.addEventListener('click', () => {
+    const found = ALL_MAPS.find(m => m.id === mapSelect.value);
+    if (!found) return;
+    gameOver = false;
+    gameOverEl.style.display    = 'none';
+    pauseOverlay.style.display  = 'none';
+    uiOverlay.style.visibility  = 'visible';
+    hudEl.style.visibility      = 'visible';
+    game.reset(loadMapWithOverride(found));
+  });
+}
 
 // ── CPU vs CPU dev toggle ──────────────────────────────────────────────────
 const cpuVsCpuBtn = document.getElementById('cpu-vs-cpu-btn') as HTMLButtonElement;

@@ -1,4 +1,4 @@
-import { DEFAULT_MAP, ALL_MAPS, saveMapToStorage, loadMapWithOverride, type MapDefinition } from './maps';
+import { DEFAULT_MAP, WORLDS, saveMapToStorage, loadMapWithOverride, type MapDefinition } from './maps';
 import { GameConfig } from './gameConfig';
 
 // ── Layout constants ─────────────────────────────────────────────────────────
@@ -90,6 +90,9 @@ class MapBuilder {
   }
 
   // ── World ↔ Canvas transforms ─────────────────────────────────────────────
+
+  /** Effective world height — per-map override or the global canvas height. */
+  private get worldH(): number { return this.map.worldHeight ?? WORLD_H; }
 
   // Position transforms (include pan offset)
   private wx(worldX: number): number { return worldX * this.scale + this.panX; }
@@ -183,7 +186,7 @@ class MapBuilder {
     const h = this.canvas.height;
     this.scale = w / this.map.worldWidth;
     this.panX  = 0;
-    this.panY  = (h - WORLD_H * this.scale) / 2;
+    this.panY  = (h - this.worldH * this.scale) / 2;
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -205,7 +208,7 @@ class MapBuilder {
     ctx.fillRect(0, 0, W, H);
 
     const ww = this.sw(m.worldWidth);
-    const wh = this.sh(WORLD_H);
+    const wh = this.sh(this.worldH);
     const wx0 = this.wx(0);
     const wy0 = this.wy(0);
 
@@ -235,7 +238,7 @@ class MapBuilder {
     }
 
     // Ground (world x-span only)
-    const groundH = this.sh(WORLD_H - GROUND_Y);
+    const groundH = this.sh(this.worldH - GROUND_Y);
     ctx.fillStyle = '#4a7c59';
     ctx.fillRect(wx0, this.wy(GROUND_Y), ww, groundH);
     ctx.fillStyle = '#3d6b4a';
@@ -261,7 +264,7 @@ class MapBuilder {
           ctx.translate(this.panX, this.wy(GROUND_Y));
           ctx.scale(this.scale, this.scale);
           ctx.fillStyle = pat;
-          ctx.fillRect(0, 0, m.worldWidth, WORLD_H - GROUND_Y);
+          ctx.fillRect(0, 0, m.worldWidth, this.worldH - GROUND_Y);
           ctx.restore();
         }
       }
@@ -498,7 +501,7 @@ class MapBuilder {
     const vLeft   = Math.max(0,            this.cw(0));
     const vRight  = Math.min(m.worldWidth, this.cw(W));
     const vTop    = Math.max(0,            this.ch(0));
-    const vBottom = Math.min(WORLD_H,      this.ch(H));
+    const vBottom = Math.min(this.worldH,  this.ch(H));
     if (vRight <= vLeft || vBottom <= vTop) return;
 
     const startX = Math.floor(vLeft / iv) * iv;
@@ -507,7 +510,7 @@ class MapBuilder {
     // Grid lines clipped to world rect
     ctx.save();
     ctx.beginPath();
-    ctx.rect(this.wx(0), this.wy(0), this.sw(m.worldWidth), this.sh(WORLD_H));
+    ctx.rect(this.wx(0), this.wy(0), this.sw(m.worldWidth), this.sh(this.worldH));
     ctx.clip();
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth   = 1;
@@ -516,7 +519,7 @@ class MapBuilder {
       const cx = this.wx(x);
       ctx.beginPath();
       ctx.moveTo(cx, Math.max(0,  this.wy(0)));
-      ctx.lineTo(cx, Math.min(H,  this.wy(WORLD_H)));
+      ctx.lineTo(cx, Math.min(H,  this.wy(this.worldH)));
       ctx.stroke();
     }
     for (let y = startY; y <= vBottom; y += iv) {
@@ -1058,6 +1061,32 @@ class MapBuilder {
       document.getElementById('section-map-settings')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
 
+    // World width input
+    document.getElementById('input-world-width')!.addEventListener('change', () => {
+      const val = parseInt((document.getElementById('input-world-width') as HTMLInputElement).value, 10);
+      if (isNaN(val) || val < 800) return;
+      this.pushUndo();
+      this.map.worldWidth = val;
+      // Keep towers within the new bounds
+      const margin = TOWER_W / 2 + 5;
+      this.map.playerTowerX = Math.max(margin, Math.min(this.map.playerTowerX, val - margin));
+      this.map.enemyTowerX  = Math.max(margin, Math.min(this.map.enemyTowerX,  val - margin));
+      this.fitView();
+      this.syncInputsFromMap();
+    });
+
+    // World height input — ground Y is fixed; extra height extends the sky above it
+    document.getElementById('input-world-height')!.addEventListener('change', () => {
+      const val    = parseInt((document.getElementById('input-world-height') as HTMLInputElement).value, 10);
+      const minH   = GROUND_Y + 80;   // must keep at least 80 px of ground strip visible
+      if (isNaN(val) || val < minH) return;
+      this.pushUndo();
+      // Store undefined when matching the default so exported JSON stays clean
+      this.map.worldHeight = val === WORLD_H ? undefined : val;
+      this.fitView();
+      this.syncInputsFromMap();
+    });
+
     // Map duration inputs (minutes + seconds → durationSec)
     const readDuration = () => {
       const minStr = (document.getElementById('input-map-duration-min') as HTMLInputElement).value;
@@ -1352,17 +1381,35 @@ class MapBuilder {
 
   private populatePresets() {
     const sel = document.getElementById('preset-select') as HTMLSelectElement;
-    for (const m of ALL_MAPS) {
-      const opt   = document.createElement('option');
-      opt.value   = m.id;
-      opt.text    = m.name;
-      sel.appendChild(opt);
+
+    // Group maps by world using <optgroup> so the selector shows the hierarchy.
+    for (const world of WORLDS) {
+      const group   = document.createElement('optgroup');
+      group.label   = `World ${world.id} — ${world.name}`;
+      for (let mi = 0; mi < world.maps.length; mi++) {
+        const m    = world.maps[mi];
+        const opt  = document.createElement('option');
+        opt.value  = m.id;
+        opt.text   = `W${world.id}M${mi + 1} — ${m.name}`;
+        group.appendChild(opt);
+      }
+      sel.appendChild(group);
     }
+
     sel.value = this.map.id;   // reflect the currently loaded map
     sel.addEventListener('change', () => {
-      const found = ALL_MAPS.find(m => m.id === sel.value);
-      // Load the saved version of the preset if one exists, so edits aren't lost on switch.
-      if (found) { this.pushUndo(); this.map = structuredClone(loadMapWithOverride(found)); this.clearSelection(); this.syncInputsFromMap(); }
+      // Flatten all maps to find by id
+      for (const world of WORLDS) {
+        const found = world.maps.find(m => m.id === sel.value);
+        if (found) {
+          // Load the saved version of the preset if one exists, so edits aren't lost on switch.
+          this.pushUndo();
+          this.map = structuredClone(loadMapWithOverride(found));
+          this.clearSelection();
+          this.syncInputsFromMap();
+          return;
+        }
+      }
     });
   }
 
@@ -1512,7 +1559,7 @@ class MapBuilder {
     }
     if (groundSel) {
       (document.getElementById('display-ground-w') as HTMLInputElement).value = String(m.worldWidth);
-      (document.getElementById('display-ground-h') as HTMLInputElement).value = String(WORLD_H - GROUND_Y);
+      (document.getElementById('display-ground-h') as HTMLInputElement).value = String(this.worldH - GROUND_Y);
       (document.getElementById('input-ground-tile-w') as HTMLInputElement).value = m.groundSkinTileW !== undefined ? String(m.groundSkinTileW) : '';
       (document.getElementById('input-ground-tile-h') as HTMLInputElement).value = m.groundSkinTileH !== undefined ? String(m.groundSkinTileH) : '';
       this.syncGroundSkinPreview();
@@ -1521,6 +1568,8 @@ class MapBuilder {
       this.syncBackgroundSkinPreview();
     }
     if (settingsSel) {
+      (document.getElementById('input-world-width')  as HTMLInputElement).value = String(m.worldWidth);
+      (document.getElementById('input-world-height') as HTMLInputElement).value = String(m.worldHeight ?? WORLD_H);
       const total       = m.durationSec ?? GameConfig.canvas.durationSec;
       const isOverride  = m.durationSec !== undefined;
       const mins        = Math.floor(total / 60);

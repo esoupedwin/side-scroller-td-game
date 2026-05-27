@@ -18,6 +18,7 @@ export interface MapDefinition {
   id:           string;
   name:         string;
   worldWidth:   number;
+  worldHeight?: number;  // canvas height in px (default: GameConfig.canvas.height)
   playerTowerX: number;  // centre x of the player tower
   enemyTowerX:  number;  // centre x of the enemy tower
   platforms:       PlatformData[];
@@ -37,8 +38,17 @@ export interface MapDefinition {
   durationSec?:      number;  // match countdown in seconds (default: GAME_DURATION_SEC from gameConfig)
 }
 
-export const DEFAULT_MAP: MapDefinition = {
-  id:           'default',
+/** One world in the campaign — contains an ordered list of maps. */
+export interface WorldDef {
+  readonly id:   number;    // 1-indexed
+  readonly name: string;
+  readonly maps: readonly MapDefinition[];
+}
+
+// ── World 1: Grasslands ───────────────────────────────────────────────────────
+
+const W1M1: MapDefinition = {
+  id:           'w1m1',
   name:         'Classic Battlefield',
   worldWidth:   2808,
   playerTowerX: 60,
@@ -51,17 +61,32 @@ export const DEFAULT_MAP: MapDefinition = {
     { x:  540, y: 360, width: 200, height: 40 },
     { x: 2112, y: 360, width: 200, height: 40 },
   ],
-  coinBox: {
-    x:         1404,
-    y:         30,
-    width:     48,
-    height:    48,
-    spreadDeg: 25,
-  },
+  coinBox: { x: 1404, y: 30, width: 48, height: 48, spreadDeg: 25 },
 };
 
-export const HIGHLANDS_MAP: MapDefinition = {
-  id:           'highlands',
+const W1M2: MapDefinition = {
+  id:           'w1m2',
+  name:         'Divided Plains',
+  worldWidth:   3200,
+  playerTowerX: 70,
+  enemyTowerX:  3130,
+  platforms: [
+    { id: 'p1', x:  780, y: GY - 130, width: 280, height: 18 },
+    { id: 'p2', x: 1460, y: GY - 240, width: 380, height: 18 },
+    { id: 'p3', x: 2140, y: GY - 130, width: 280, height: 18 },
+    { id: 'p4', x: 1540, y: GY - 360, width: 180, height: 14 },
+  ],
+  blocks: [
+    { x: 1240, y: GY - 70, width: 180, height: 40 },
+    { x: 1780, y: GY - 70, width: 180, height: 40 },
+  ],
+  coinBox: { x: 1600, y: 30, width: 48, height: 48, spreadDeg: 30 },
+};
+
+// ── World 2: Highlands ────────────────────────────────────────────────────────
+
+const W2M1: MapDefinition = {
+  id:           'w2m1',
   name:         'Highlands',
   worldWidth:   W,
   playerTowerX: 80,
@@ -72,16 +97,66 @@ export const HIGHLANDS_MAP: MapDefinition = {
     { id: 'p3', x: W / 2 -  80, y: GY - 240, width: 160, height: 14 },
   ],
   blocks: [],
-  coinBox: {
-    x:         W / 2,
-    y:         GY - 360,
-    width:     48,
-    height:    48,
-    spreadDeg: 30,
-  },
+  coinBox: { x: W / 2, y: GY - 360, width: 48, height: 48, spreadDeg: 30 },
 };
 
-export const ALL_MAPS: MapDefinition[] = [DEFAULT_MAP, HIGHLANDS_MAP];
+const W2M2: MapDefinition = {
+  id:           'w2m2',
+  name:         'Mountain Pass',
+  worldWidth:   3600,
+  playerTowerX: 80,
+  enemyTowerX:  3520,
+  platforms: [
+    { id: 'p1', x:  560, y: GY - 130, width: 240, height: 18 },
+    { id: 'p2', x: 1120, y: GY - 250, width: 200, height: 14 },
+    { id: 'p3', x: 1680, y: GY - 150, width: 280, height: 18 },
+    { id: 'p4', x: 2200, y: GY - 280, width: 200, height: 14 },
+    { id: 'p5', x: 2800, y: GY - 130, width: 240, height: 18 },
+    { id: 'p6', x: 1760, y: GY - 310, width: 140, height: 14 },
+  ],
+  blocks: [
+    { x:  880, y: GY - 60, width: 200, height: 40 },
+    { x: 2520, y: GY - 60, width: 200, height: 40 },
+  ],
+  coinBox: { x: 1800, y: 30, width: 48, height: 48, spreadDeg: 35 },
+};
+
+// ── Campaign structure ────────────────────────────────────────────────────────
+
+export const WORLDS: WorldDef[] = [
+  { id: 1, name: 'Grasslands', maps: [W1M1, W1M2] },
+  { id: 2, name: 'Highlands',  maps: [W2M1, W2M2] },
+];
+
+/** Flat ordered list of all maps — World 1 Map 1 first. */
+export const ALL_MAPS: MapDefinition[] = WORLDS.flatMap(w => [...w.maps]);
+
+/**
+ * Canonical first map.  Game.ts and the map builder default to this.
+ * Always resolves to World 1 Map 1.
+ */
+export const DEFAULT_MAP: MapDefinition = W1M1;
+
+/**
+ * Returns the map that follows `current` in campaign order, or `null` if
+ * `current` is the last map of the last world.
+ */
+export function nextMap(current: MapDefinition): MapDefinition | null {
+  const idx = ALL_MAPS.findIndex(m => m.id === current.id);
+  return idx >= 0 && idx < ALL_MAPS.length - 1 ? ALL_MAPS[idx + 1] : null;
+}
+
+/**
+ * Returns `{ world, mapIndex }` (both 1-indexed) for a given map id,
+ * or `null` if not found.
+ */
+export function mapCoords(id: string): { worldIndex: number; mapIndex: number } | null {
+  for (const world of WORLDS) {
+    const mi = world.maps.findIndex(m => m.id === id);
+    if (mi >= 0) return { worldIndex: world.id, mapIndex: mi + 1 };
+  }
+  return null;
+}
 
 // ── localStorage persistence ──────────────────────────────────────────────────
 

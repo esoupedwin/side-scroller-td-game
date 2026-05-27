@@ -664,6 +664,17 @@
           <div id="section-map-settings" class="section" style="display:none;">
             <div class="section-title">Map Settings</div>
             <div style="width:100%; display:flex; gap:8px; align-items:center;">
+              <label>Map Width:</label>
+              <input type="number" id="input-world-width" min="800" step="100" style="width:120px;" title="Total map width in pixels (min 800)" />
+              <span class="hint">px</span>
+            </div>
+            <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:6px;">
+              <label>Map Height:</label>
+              <input type="number" id="input-world-height" min="400" step="50" style="width:120px;" title="Total map height in pixels — extra height adds sky above the ground" />
+              <span class="hint">px</span>
+            </div>
+            <span class="hint" style="width:100%; margin-top:2px;">Resizes the world — towers are clamped to stay within bounds; extra height extends the sky</span>
+            <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:8px;">
               <label>Countdown:</label>
               <input type="number" id="input-map-duration-min" min="0" style="width:80px;" title="Match countdown — minutes" />
               <span class="hint">min</span>
