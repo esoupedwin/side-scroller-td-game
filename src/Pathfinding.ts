@@ -70,6 +70,10 @@ export class NavGraph {
   // when animated blocks change the graph mid-game.
   private _version = 0;
   get version(): number { return this._version; }
+  // Geometry signature: only increment _version when topology actually changes.
+  // Positions are rounded to 4 px so sub-pixel animation doesn't cause
+  // 60-rebuilds-per-second path thrash.
+  private _geoSig = '';
 
   /**
    * (Re)build the graph from the current platform list.
@@ -83,6 +87,18 @@ export class NavGraph {
     enemyTowerX:  number,
     blocks:       { x: number; y: number; width: number; height?: number }[] = [],
   ): void {
+    // Skip rebuild when geometry is effectively unchanged (4 px granularity).
+    // This prevents animated blocks from forcing path invalidation on every tick
+    // even when the navgraph topology hasn't meaningfully changed.
+    const R = (n: number) => Math.round(n / 4) * 4;
+    const sig = [
+      `${R(playerTowerX)},${R(enemyTowerX)}`,
+      ...platforms.map(p => `${R(p.x)},${R(p.y)},${R(p.width)}`),
+      ...blocks.map(b => `${R(b.x)},${R(b.y)},${R(b.width)},${R(b.height ?? 0)}`),
+    ].join('|');
+    if (sig === this._geoSig) return;
+    this._geoSig = sig;
+
     this.surfaces    = [];
     this.edges       = new Map();
     this.surfaceById = new Map();
@@ -148,7 +164,15 @@ export class NavGraph {
           const triggerX = triggerLeft <= triggerRight
             ? (triggerLeft + triggerRight) / 2          // jump from below middle of b
             : (b.x + b.width / 2);                      // b is off to the side
-          const landX = b.x + b.width / 2;              // aim for centre of b
+
+          // Aim for the centre of b, but cap to the reachable arc range.
+          // Without capping, wide surfaces (e.g. a 500 px block whose centre is
+          // 250 px away) are unreachable even though the near edge is easily jumpable.
+          const rawLandX = b.x + b.width / 2;
+          const jumpDir  = Math.sign(rawLandX - triggerX) || 1;
+          const landX    = Math.max(b.x, Math.min(b.x + b.width,
+            triggerX + jumpDir * Math.min(MAX_JUMP_H_RANGE, Math.abs(rawLandX - triggerX)),
+          ));
           const hDist = Math.abs(triggerX - landX);
 
           if (hDist <= MAX_JUMP_H_RANGE) {
@@ -160,10 +184,18 @@ export class NavGraph {
           }
         } else if (dy < 0) {
           // a (higher) → b (lower): fall
-          // Walk to the nearer edge of a, drop off, land roughly below
+          // Walk to the nearer edge of a, drop off, land roughly below.
           const edgeX = b.x + b.width / 2 < a.x + a.width / 2
             ? a.x                  // left edge of a is closer to b
             : a.x + a.width;       // right edge
+
+          // Reject fall edges where the drop-off point is nowhere near the target
+          // surface. If edgeX is outside b's x-span by more than MAX_FALL_DRIFT, the
+          // character falls to a different surface entirely (e.g. the ground) and the
+          // fall step can never complete, causing infinite path thrash.
+          const MAX_FALL_DRIFT = 80; // generous estimate of horizontal drift while falling
+          if (edgeX < b.x - MAX_FALL_DRIFT || edgeX > b.x + b.width + MAX_FALL_DRIFT) continue;
+
           const landX = Math.max(b.x, Math.min(b.x + b.width, edgeX));
           this.edges.get(a.id)!.push({
             toId: b.id, action: 'fall',
