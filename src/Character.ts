@@ -96,9 +96,11 @@ export interface UpdateContext {
   enemies:           Character[];
   /** Living characters on the SAME side (still includes self — callers must skip `c === this`). */
   allies:            Character[];
-  enemyTowerFrontX:  number;
-  enemyTowerY:       number;
-  homeTowerFrontX:   number;   // the collecting character's own tower
+  enemyTowerFrontX:      number;
+  enemyTowerY:           number;
+  /** Floor Y of the surface the enemy tower sits on (may differ from GROUND_Y on maps with an elevated tower block). */
+  enemyTowerBaseFloorY:  number;
+  homeTowerFrontX:       number;   // the collecting character's own tower
   worldWidth:        number;
   coins:             Coin[];
   platforms:         PlatformData[];
@@ -297,6 +299,10 @@ export class Character {
     this.physics   = physics;
     this.spriteSet = spriteSet ?? null;
     this.body      = physics.createCharBody(startX, startY, config.width, config.height * BODY_HEIGHT_MULT);
+    // If spawned above ground (e.g. on top of an elevated tower) mark as airborne
+    // so syncFromBody triggers a proper fall-and-land sequence instead of treating
+    // the character as already grounded at an inconsistent position.
+    if (startY < GROUND_Y) this.isAirborne = true;
 
     this.container = new PIXI.Container();
     this.buildSprite();
@@ -2145,8 +2151,9 @@ export class Character {
       this.attackTower(enemyTowerFrontX, enemyTowerY, onFire, ctx.onDamageTower);
     } else {
       this.state = 'marching';
-      // Use pathfinding so the character navigates down from platforms en route.
-      this.requestPath(enemyTowerFrontX, GROUND_Y, navGraph, dt);
+      // Use enemyTowerBaseFloorY so the destination floor matches the surface the
+      // enemy tower sits on (may be an elevated block, not GROUND_Y).
+      this.requestPath(enemyTowerFrontX, ctx.enemyTowerBaseFloorY, navGraph, dt);
       this.followPath(dt, ctx.platforms);
     }
   }
@@ -2189,7 +2196,7 @@ export class Character {
     }
 
     this.state = 'marching';
-    this.requestPath(enemyTowerFrontX, GROUND_Y, navGraph, dt);
+    this.requestPath(enemyTowerFrontX, ctx.enemyTowerBaseFloorY, navGraph, dt);
     this.followPath(dt, ctx.platforms);
   }
 

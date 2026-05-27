@@ -505,16 +505,17 @@ export class Game {
       dt: 0,
       enemies:          this.enemyLive,
       allies:           this.playerLive,
-      enemyTowerFrontX: this.enemyTower.frontX,
-      enemyTowerY:      this.enemyTower.baseY - TOWER_HEIGHT * 0.5,
-      homeTowerFrontX:  this.playerTower.frontX,
-      worldWidth:       this.mapDef.worldWidth,
-      coins:            this.liveCoins,
-      platforms:        this.platformData,
-      blocks:           this.blockData,
-      navGraph:         this.navGraph,
-      onFire:           (req) => this.fireProjectile(req),
-      onDamageTower:    (dmg) => this.enemyTower.takeDamage(dmg),
+      enemyTowerFrontX:     this.enemyTower.frontX,
+      enemyTowerY:          this.enemyTower.baseY - TOWER_HEIGHT * 0.5,
+      enemyTowerBaseFloorY: this.enemyTower.baseY,
+      homeTowerFrontX:      this.playerTower.frontX,
+      worldWidth:           this.mapDef.worldWidth,
+      coins:                this.liveCoins,
+      platforms:            this.platformData,
+      blocks:               this.blockData,
+      navGraph:             this.navGraph,
+      onFire:               (req) => this.fireProjectile(req),
+      onDamageTower:        (dmg) => this.enemyTower.takeDamage(dmg),
       onMeleeHit:       (unitType, x) => playSoundAt(unitType === 'conscript' ? 'punch' : 'sword_slash', x),
       onDepositCoin:    (value) => {
         this.coinBalance += value;
@@ -531,16 +532,17 @@ export class Game {
       dt: 0,
       enemies:          this.playerLive,
       allies:           this.enemyLive,
-      enemyTowerFrontX: this.playerTower.frontX,
-      enemyTowerY:      this.playerTower.baseY - TOWER_HEIGHT * 0.5,
-      homeTowerFrontX:  this.enemyTower.frontX,
-      worldWidth:       this.mapDef.worldWidth,
-      coins:            this.liveCoins,
-      platforms:        this.platformData,
-      blocks:           this.blockData,
-      navGraph:         this.navGraph,
-      onFire:           (req) => this.fireProjectile(req),
-      onDamageTower:    (dmg) => this.playerTower.takeDamage(dmg),
+      enemyTowerFrontX:     this.playerTower.frontX,
+      enemyTowerY:          this.playerTower.baseY - TOWER_HEIGHT * 0.5,
+      enemyTowerBaseFloorY: this.playerTower.baseY,
+      homeTowerFrontX:      this.enemyTower.frontX,
+      worldWidth:           this.mapDef.worldWidth,
+      coins:                this.liveCoins,
+      platforms:            this.platformData,
+      blocks:               this.blockData,
+      navGraph:             this.navGraph,
+      onFire:               (req) => this.fireProjectile(req),
+      onDamageTower:        (dmg) => this.playerTower.takeDamage(dmg),
       onMeleeHit:       (unitType, x) => playSoundAt(unitType === 'conscript' ? 'punch' : 'sword_slash', x),
       onDepositCoin:    (value) => {
         this.cpuCoinBalance += value;
@@ -627,8 +629,11 @@ export class Game {
     this.coinBalance -= cost;
     this.notifyCoins();
 
-    const config = withSpawnBoosts(CHAR_CONFIGS[type]);
-    const c = new Character('player', this.playerTower.frontX, this.playerTower.baseY - TOWER_HEIGHT, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type));
+    const config  = withSpawnBoosts(CHAR_CONFIGS[type]);
+    // Offset by half the character body width so the unit's edge (not centre) sits
+    // at the tower face — prevents the body from overlapping the tower physics body.
+    const spawnX  = this.playerTower.frontX + config.width / 2;
+    const c = new Character('player', spawnX, this.playerTower.baseY - TOWER_HEIGHT, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type));
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
@@ -714,7 +719,7 @@ export class Game {
     const stance    = self === 'enemy' ? this.cpuStance : this.playerStance;
     const pressure  = oppChars.length - selfChars.length;
     const balance   = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
-    const spawnX    = self === 'enemy' ? this.enemyTower.frontX  : this.playerTower.frontX;
+    // spawnX is computed per unit type (width varies) — see cpuSpawnX below
     const spawnY    = self === 'enemy' ? this.enemyTower.baseY - TOWER_HEIGHT : this.playerTower.baseY - TOWER_HEIGHT;
 
     // Tanker is intentionally excluded from every order array — it's hidden
@@ -777,7 +782,14 @@ export class Game {
         this.coinBalance -= cost;
         this.notifyCoins();
       }
-      const c = new Character(self, spawnX, spawnY, withSpawnBoosts(CHAR_CONFIGS[type]), this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type));
+      const cpuConfig = withSpawnBoosts(CHAR_CONFIGS[type]);
+      // Place the unit's body edge (not centre) at the tower face so it never
+      // overlaps the tower physics body on spawn.
+      const towerFrontX = self === 'enemy' ? this.enemyTower.frontX : this.playerTower.frontX;
+      const cpuSpawnX   = self === 'enemy'
+        ? towerFrontX - cpuConfig.width / 2
+        : towerFrontX + cpuConfig.width / 2;
+      const c = new Character(self, cpuSpawnX, spawnY, cpuConfig, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type));
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
       if (self === 'player') this.hud.add(c);
@@ -866,9 +878,9 @@ export class Game {
   private tickBlocks(dt: number): void {
     let anyMoved = false;
 
-    // Helper: carry any character whose feet were on a surface that just
-    // moved. We test against the PREVIOUS surface position (current minus
-    // delta) because the character's floorY hasn't been updated yet.
+    // Helper: carry any character or settled coin that sat on a surface which
+    // just moved.  We compare against the PRE-MOVE surface top so characters
+    // whose floorY hasn't been updated yet are still matched correctly.
     const carryStanders = (
       newX: number, newY: number, width: number, dx: number, dy: number,
     ) => {
@@ -880,6 +892,12 @@ export class Game {
         if (Math.abs(c.currentFloorY - oldTop) > 1) continue;
         if (c.x < oldLeft || c.x > right) continue;
         c.carryWith(dx, dy);
+      }
+      for (const coin of this.coins) {
+        if (coin.isDead || coin.isPickedUp || !coin.isOnGround) continue;
+        if (Math.abs(coin.floorY - oldTop) > 1) continue;
+        if (coin.x < oldLeft || coin.x > right) continue;
+        coin.carryWith(dx, dy);
       }
     };
 
@@ -1145,17 +1163,19 @@ export class Game {
 
     // Update characters — reuse pre-allocated ctx objects; patch only the fields
     // that change each tick to eliminate per-character object + closure allocation.
-    this.playerCtx.dt               = dt;
-    this.playerCtx.enemyTowerFrontX = this.enemyTower.frontX;
-    this.playerCtx.enemyTowerY      = this.enemyTower.baseY - TOWER_HEIGHT * 0.5;
-    this.playerCtx.homeTowerFrontX  = this.playerTower.frontX;
-    this.playerCtx.worldWidth       = this.mapDef.worldWidth;
+    this.playerCtx.dt                   = dt;
+    this.playerCtx.enemyTowerFrontX     = this.enemyTower.frontX;
+    this.playerCtx.enemyTowerY          = this.enemyTower.baseY - TOWER_HEIGHT * 0.5;
+    this.playerCtx.enemyTowerBaseFloorY = this.enemyTower.baseY;
+    this.playerCtx.homeTowerFrontX      = this.playerTower.frontX;
+    this.playerCtx.worldWidth           = this.mapDef.worldWidth;
 
-    this.enemyCtx.dt               = dt;
-    this.enemyCtx.enemyTowerFrontX = this.playerTower.frontX;
-    this.enemyCtx.enemyTowerY      = this.playerTower.baseY - TOWER_HEIGHT * 0.5;
-    this.enemyCtx.homeTowerFrontX  = this.enemyTower.frontX;
-    this.enemyCtx.worldWidth       = this.mapDef.worldWidth;
+    this.enemyCtx.dt                   = dt;
+    this.enemyCtx.enemyTowerFrontX     = this.playerTower.frontX;
+    this.enemyCtx.enemyTowerY          = this.playerTower.baseY - TOWER_HEIGHT * 0.5;
+    this.enemyCtx.enemyTowerBaseFloorY = this.playerTower.baseY;
+    this.enemyCtx.homeTowerFrontX      = this.enemyTower.frontX;
+    this.enemyCtx.worldWidth           = this.mapDef.worldWidth;
 
     for (const c of liveChars) {
       this.updateChar = c;
