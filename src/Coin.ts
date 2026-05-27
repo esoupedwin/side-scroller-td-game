@@ -152,6 +152,19 @@ export class Coin {
     this.gfx.rotation += dt * 1.8;
   }
 
+  /**
+   * Move a settled coin with a surface that just animated (dx, dy).
+   * Called by Game.tickBlocks so coins stay glued to moving platforms/blocks.
+   */
+  carryWith(dx: number, dy: number): void {
+    this.x      += dx;
+    this.y      += dy;
+    this.floorY += dy;
+    Matter.Body.setPosition(this.body, { x: this.x, y: this.y });
+    this.container.x = this.x;
+    this.container.y = this.y;
+  }
+
   pickup() {
     this.isPickedUp        = true;
     this.isDead            = true;
