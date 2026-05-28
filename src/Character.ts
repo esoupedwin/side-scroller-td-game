@@ -101,6 +101,10 @@ export interface UpdateContext {
   /** Floor Y of the surface the enemy tower sits on (may differ from GROUND_Y on maps with an elevated tower block). */
   enemyTowerBaseFloorY:  number;
   homeTowerFrontX:       number;   // the collecting character's own tower
+  /** Floor Y of the surface the home tower sits on. Used by collecting units so coin carry pathing
+   *  lands them on the tower's actual surface — not GROUND_Y, which would route them under an
+   *  elevated tower instead of onto it. */
+  homeTowerBaseFloorY:   number;
   worldWidth:        number;
   coins:             Coin[];
   platforms:         PlatformData[];
@@ -2203,7 +2207,7 @@ export class Character {
   // ── Collecting behaviour ─────────────────────────────────────────────────────
 
   private updateCollecting(ctx: UpdateContext) {
-    const { dt, enemies, allies, coins, homeTowerFrontX, onFire, onDepositCoin, navGraph, blocks } = ctx;
+    const { dt, enemies, allies, coins, homeTowerFrontX, homeTowerBaseFloorY, onFire, onDepositCoin, navGraph, blocks } = ctx;
 
     // Attack any enemy that wanders into range without stopping movement
     if (!this.isAirborne) {
@@ -2257,7 +2261,10 @@ export class Character {
       } else {
         this.coinThrowTimer = -1;  // moved close enough — cancel any pending windup
         this.state = 'returning';
-        this.requestPath(homeTowerFrontX, GROUND_Y, navGraph, dt);
+        // Route to the tower's actual surface, not GROUND_Y — otherwise an
+        // elevated tower causes carriers to path *under* it (to the ground)
+        // and stall there without ever reaching the deposit x-strip.
+        this.requestPath(homeTowerFrontX, homeTowerBaseFloorY, navGraph, dt);
         this.followPath(dt, ctx.platforms);
         return;
       }

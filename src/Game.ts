@@ -509,6 +509,7 @@ export class Game {
       enemyTowerY:          this.enemyTower.baseY - TOWER_HEIGHT * 0.5,
       enemyTowerBaseFloorY: this.enemyTower.baseY,
       homeTowerFrontX:      this.playerTower.frontX,
+      homeTowerBaseFloorY:  this.playerTower.baseY,
       worldWidth:           this.mapDef.worldWidth,
       coins:                this.liveCoins,
       platforms:            this.platformData,
@@ -536,6 +537,7 @@ export class Game {
       enemyTowerY:          this.playerTower.baseY - TOWER_HEIGHT * 0.5,
       enemyTowerBaseFloorY: this.playerTower.baseY,
       homeTowerFrontX:      this.enemyTower.frontX,
+      homeTowerBaseFloorY:  this.enemyTower.baseY,
       worldWidth:           this.mapDef.worldWidth,
       coins:                this.liveCoins,
       platforms:            this.platformData,
@@ -1168,6 +1170,7 @@ export class Game {
     this.playerCtx.enemyTowerY          = this.enemyTower.baseY - TOWER_HEIGHT * 0.5;
     this.playerCtx.enemyTowerBaseFloorY = this.enemyTower.baseY;
     this.playerCtx.homeTowerFrontX      = this.playerTower.frontX;
+    this.playerCtx.homeTowerBaseFloorY  = this.playerTower.baseY;
     this.playerCtx.worldWidth           = this.mapDef.worldWidth;
 
     this.enemyCtx.dt                   = dt;
@@ -1175,6 +1178,7 @@ export class Game {
     this.enemyCtx.enemyTowerY          = this.playerTower.baseY - TOWER_HEIGHT * 0.5;
     this.enemyCtx.enemyTowerBaseFloorY = this.playerTower.baseY;
     this.enemyCtx.homeTowerFrontX      = this.enemyTower.frontX;
+    this.enemyCtx.homeTowerBaseFloorY  = this.enemyTower.baseY;
     this.enemyCtx.worldWidth           = this.mapDef.worldWidth;
 
     for (const c of liveChars) {
