@@ -1,10 +1,12 @@
 import * as PIXI from 'pixi.js';
 import {
-  TOWER_WIDTH, TOWER_HEIGHT, TOWER_HP, GROUND_Y,
+  TOWER_WIDTH, TOWER_HEIGHT, TOWER_HP,
   TOWER_ATTACK_RANGE, TOWER_ATTACK_POWER, TOWER_FIRE_RATE,
   PLAYER_COLOR, ENEMY_COLOR,
 } from './constants';
 import type { Character } from './Character';
+import type { Tribe } from './Tribes';
+import { getTowerTemplate } from './TribeTowerTemplates';
 
 export interface TowerShot {
   sx: number; sy: number;
@@ -17,7 +19,7 @@ export type Side = 'player' | 'enemy';
 export class Tower {
   readonly side: Side;
   readonly x: number;
-  /** Bottom y of the tower body (defaults to GROUND_Y). */
+  /** Bottom y of the tower body. */
   readonly baseY: number;
   readonly container: PIXI.Container;
 
@@ -33,11 +35,29 @@ export class Tower {
   private static readonly BAR_H = Math.round(10 * 1.4);                   // 14 px
   private static readonly BAR_W = Math.round((TOWER_WIDTH + 8) * 1.8);    // ~158 px
 
-  constructor(side: Side, x: number, skinUrl?: string, skinW?: number, skinH?: number, baseY = GROUND_Y) {
+  /** Resolved rendered skin width (template w or TOWER_WIDTH fallback). */
+  private readonly skinW_resolved: number;
+  /** Resolved rendered skin height (template h or TOWER_HEIGHT fallback). */
+  private readonly skinH_resolved: number;
+  /** Resolved collision rect in skin-local pixels. */
+  private readonly tplCollision: { x: number; y: number; w: number; h: number };
+  /** Resolved spawn point in skin-local pixels (east-facing). */
+  private readonly tplSpawn: { x: number; y: number };
+
+  constructor(side: Side, x: number, baseY: number, tribe: Tribe) {
     this.side  = side;
     this.x     = x;
     this.baseY = baseY;
     this.container = new PIXI.Container();
+
+    const tpl     = getTowerTemplate(tribe);
+    const skinUrl = tpl.skin;
+    const skinW   = tpl.w;
+    const skinH   = tpl.h;
+    this.skinW_resolved = skinW ?? TOWER_WIDTH;
+    this.skinH_resolved = skinH ?? TOWER_HEIGHT;
+    this.tplCollision = tpl.collision ?? { x: 0, y: 0, w: this.skinW_resolved, h: this.skinH_resolved };
+    this.tplSpawn     = tpl.spawn     ?? { x: this.skinW_resolved, y: 0 };
 
     const color = side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const cx    = x - TOWER_WIDTH / 2;
@@ -60,16 +80,22 @@ export class Tower {
     this.container.addChild(this.body);
 
     if (skinUrl) {
-      const sw = skinW ?? TOWER_WIDTH;
-      const sh = skinH ?? TOWER_HEIGHT;
+      const sw   = skinW ?? TOWER_WIDTH;
+      const sh   = skinH ?? TOWER_HEIGHT;
+      // Source skins are authored facing east; the enemy tower mirrors so it
+      // faces west into the battlefield. Anchoring at top-centre keeps the
+      // sprite centred on the tower's x regardless of scale sign.
+      const flip = side === 'enemy';
       PIXI.Assets.load<PIXI.Texture>(skinUrl)
         .then(tex => {
           this.body.visible = false;
           const sprite = new PIXI.Sprite(tex);
-          sprite.x      = x - sw / 2;
+          sprite.anchor.set(0.5, 0);
+          sprite.x      = x;
           sprite.y      = baseY - sh;
           sprite.width  = sw;
           sprite.height = sh;
+          if (flip) sprite.scale.x = -sprite.scale.x;
           this.container.addChildAt(sprite, 0);
         })
         .catch(() => { /* keep Graphics body */ });
@@ -169,4 +195,43 @@ export class Tower {
       ? this.x + TOWER_WIDTH / 2
       : this.x - TOWER_WIDTH / 2;
   }
+
+  /**
+   * Skin-local x → world x. Player towers render skins un-flipped from
+   * `(x - W/2)` rightward; enemy towers mirror horizontally around `x`,
+   * so the template's east-facing convention reflects to face west.
+   */
+  private skinToWorldX(sx: number): number {
+    return this.side === 'player'
+      ? this.x - this.skinW_resolved / 2 + sx
+      : this.x + this.skinW_resolved / 2 - sx;
+  }
+  private skinToWorldY(sy: number): number {
+    return this.baseY - this.skinH_resolved + sy;
+  }
+
+  /** World x of the centre of the tower's collision rectangle. */
+  get collisionCenterX(): number {
+    const c    = this.tplCollision;
+    const left = this.skinToWorldX(c.x);
+    return this.side === 'player' ? left + c.w / 2 : left - c.w / 2;
+  }
+  /** Collision rectangle width (skin-local px == world px). */
+  get collisionWidth(): number { return this.tplCollision.w; }
+
+  /** Full collision rect in world space (used by the dev-mode overlay). */
+  get collisionRect(): { x: number; y: number; w: number; h: number } {
+    const c = this.tplCollision;
+    return {
+      x: this.collisionCenterX - c.w / 2,
+      y: this.skinToWorldY(c.y),
+      w: c.w,
+      h: c.h,
+    };
+  }
+
+  /** World x for the tribe's spawn point (tower-side edge of the unit). */
+  get spawnX(): number { return this.skinToWorldX(this.tplSpawn.x); }
+  /** World y for the tribe's spawn point. */
+  get spawnY(): number { return this.skinToWorldY(this.tplSpawn.y); }
 }

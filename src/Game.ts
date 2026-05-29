@@ -27,7 +27,7 @@ import { Platform } from './Platform';
 import { Block } from './Block';
 import { pickName } from './names';
 import { getSpriteSet } from './SpriteRegistry';
-import { tribeForSide } from './Tribes';
+import { tribeForSide, TRIBE_ROSTERS, heavyMeleeForTribe, getPlayerTribe, getEnemyTribe, setPlayerTribe, setEnemyTribe } from './Tribes';
 import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 import type { CollisionBoxData } from './CollisionBox';
@@ -313,6 +313,11 @@ export class Game {
       antialias: false,
     });
 
+    // Seed tribes from the initial map's defaults so build() reads the
+    // correct tribe for each side. Mirrors the same logic in reset().
+    setPlayerTribe(this.mapDef.playerTowerTribe ?? 'tomaro');
+    setEnemyTribe(this.mapDef.enemyTowerTribe   ?? 'meowee');
+
     this.build();
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup',   this.onKeyUp);
@@ -400,8 +405,8 @@ export class Game {
     this.world.addChild(this.labelLayer);
     initVfx(this.vfxLayer);
 
-    this.playerTower = new Tower('player', m.playerTowerX, m.playerTowerSkin, m.playerTowerSkinW, m.playerTowerSkinH, m.playerTowerY ?? GROUND_Y);
-    this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerSkin,  m.enemyTowerSkinW,  m.enemyTowerSkinH, m.enemyTowerY  ?? GROUND_Y);
+    this.playerTower = new Tower('player', m.playerTowerX, m.playerTowerY ?? GROUND_Y, getPlayerTribe());
+    this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerY  ?? GROUND_Y, getEnemyTribe());
     this.world.addChild(this.playerTower.container);
     this.world.addChild(this.enemyTower.container);
 
@@ -410,19 +415,23 @@ export class Game {
     this.navGraph.build(this.platformData, m.playerTowerX, m.enemyTowerX, this.blockData);
 
     // Tower physics bodies — solid, block character movement.
-    this.physics.createTowerBody(m.playerTowerX, TOWER_WIDTH);
-    this.physics.createTowerBody(m.enemyTowerX,  TOWER_WIDTH);
+    this.physics.createTowerBody(this.playerTower.collisionCenterX, this.playerTower.collisionWidth);
+    this.physics.createTowerBody(this.enemyTower.collisionCenterX,  this.enemyTower.collisionWidth);
 
-    // Register static collision boxes for the debug overlay.
+    // Register static collision boxes for the debug overlay. Towers read
+    // their rect from the active tribe template so the outline reflects
+    // whatever the user configured in the Tribe Tower Skins modal.
+    const pCol = this.playerTower.collisionRect;
+    const eCol = this.enemyTower.collisionRect;
     this.staticCollisionBoxes = [
       {
-        x: m.playerTowerX - TOWER_WIDTH / 2, y: (m.playerTowerY ?? GROUND_Y) - TOWER_HEIGHT,
-        width: TOWER_WIDTH, height: TOWER_HEIGHT,
+        x: pCol.x, y: pCol.y,
+        width: pCol.w, height: pCol.h,
         type: 'solid', label: 'Player Tower',
       },
       {
-        x: m.enemyTowerX - TOWER_WIDTH / 2, y: (m.enemyTowerY ?? GROUND_Y) - TOWER_HEIGHT,
-        width: TOWER_WIDTH, height: TOWER_HEIGHT,
+        x: eCol.x, y: eCol.y,
+        width: eCol.w, height: eCol.h,
         type: 'solid', label: 'Enemy Tower',
       },
       // Platforms and blocks intentionally excluded — they're drawn live in
@@ -632,10 +641,11 @@ export class Game {
     this.notifyCoins();
 
     const config  = withSpawnBoosts(CHAR_CONFIGS[type]);
-    // Offset by half the character body width so the unit's edge (not centre) sits
-    // at the tower face — prevents the body from overlapping the tower physics body.
-    const spawnX  = this.playerTower.frontX + config.width / 2;
-    const c = new Character('player', spawnX, this.playerTower.baseY - TOWER_HEIGHT, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type));
+    // Offset by half the character body width so the unit's tower-side edge
+    // (not centre) sits at the tribe's configured spawn point — keeps the
+    // body from overlapping the tower physics box.
+    const spawnX  = this.playerTower.spawnX + config.width / 2;
+    const c = new Character('player', spawnX, this.playerTower.spawnY, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type));
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
@@ -722,11 +732,11 @@ export class Game {
     const pressure  = oppChars.length - selfChars.length;
     const balance   = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
     // spawnX is computed per unit type (width varies) — see cpuSpawnX below
-    const spawnY    = self === 'enemy' ? this.enemyTower.baseY - TOWER_HEIGHT : this.playerTower.baseY - TOWER_HEIGHT;
+    const spawnY    = self === 'enemy' ? this.enemyTower.spawnY : this.playerTower.spawnY;
 
     // Tanker is intentionally excluded from every order array — it's hidden
     // from both the player UI and the CPU until further notice.
-    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'knight' | 'heavy' | 'rocketeer' | 'grenadier';
+    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'viking' | 'knight' | 'heavy' | 'rocketeer' | 'grenadier';
     let order: UnitType[];
 
     // Opponent cluster detection: if 3+ opponents sit within CLUSTER_RADIUS
@@ -775,6 +785,17 @@ export class Game {
       }
     }
 
+    // Translate AI orders (which were authored around the Meowee roster with
+    // 'knight' as the heavy melee) into the actual CPU tribe's roster:
+    //   - 'knight' / 'viking' both resolve to the tribe's own heavy melee
+    //   - anything else not in the tribe's roster is dropped
+    const cpuTribe   = tribeForSide(self);
+    const roster     = TRIBE_ROSTERS[cpuTribe];
+    const heavyMelee = heavyMeleeForTribe(cpuTribe);
+    order = order
+      .map(t => (t === 'knight' || t === 'viking') ? heavyMelee as UnitType : t)
+      .filter(t => roster.includes(t));
+
     for (const type of order) {
       const cost = CHAR_COST[type];
       if (balance < cost) continue;
@@ -785,12 +806,12 @@ export class Game {
         this.notifyCoins();
       }
       const cpuConfig = withSpawnBoosts(CHAR_CONFIGS[type]);
-      // Place the unit's body edge (not centre) at the tower face so it never
-      // overlaps the tower physics body on spawn.
-      const towerFrontX = self === 'enemy' ? this.enemyTower.frontX : this.playerTower.frontX;
+      // Place the unit's tower-side body edge (not centre) at the tribe's
+      // configured spawn point so it never overlaps the tower physics body.
+      const towerSpawnX = self === 'enemy' ? this.enemyTower.spawnX : this.playerTower.spawnX;
       const cpuSpawnX   = self === 'enemy'
-        ? towerFrontX - cpuConfig.width / 2
-        : towerFrontX + cpuConfig.width / 2;
+        ? towerSpawnX - cpuConfig.width / 2
+        : towerSpawnX + cpuConfig.width / 2;
       const c = new Character(self, cpuSpawnX, spawnY, cpuConfig, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type));
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
@@ -1558,8 +1579,8 @@ export class Game {
       g.addChild(text);
     };
 
-    drawSpawnMarker(this.playerTower.frontX, this.playerTower.baseY - TOWER_HEIGHT, PLAYER_COLOR, 'P');
-    drawSpawnMarker(this.enemyTower.frontX,  this.enemyTower.baseY  - TOWER_HEIGHT, ENEMY_COLOR,  'E');
+    drawSpawnMarker(this.playerTower.spawnX, this.playerTower.spawnY, PLAYER_COLOR, 'P');
+    drawSpawnMarker(this.enemyTower.spawnX,  this.enemyTower.spawnY,  ENEMY_COLOR,  'E');
   }
 
   /**
@@ -1818,7 +1839,14 @@ export class Game {
   }
 
   reset(mapDef?: MapDefinition) {
-    if (mapDef) this.mapDef = mapDef;
+    if (mapDef) {
+      this.mapDef = mapDef;
+      // "Map drives both sides": loading a map seeds both tribes from its
+      // per-placeholder defaults. The dev panel may override the player tribe
+      // afterwards via its own setPlayerTribe + restart.
+      setPlayerTribe(mapDef.playerTowerTribe ?? 'tomaro');
+      setEnemyTribe(mapDef.enemyTowerTribe   ?? 'meowee');
+    }
     this.app.ticker.remove(this.tickFn);
 
     for (const c of this.characters)    { c.destroy(); }

@@ -1,5 +1,6 @@
 import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
+import type { Tribe } from './Tribes';
 import { GameConfig } from './gameConfig';
 
 const G  = GameConfig;
@@ -23,15 +24,17 @@ export interface MapDefinition {
   playerTowerY?: number; // base y (bottom) of the player tower (default: GROUND_Y)
   enemyTowerX:  number;  // centre x of the enemy tower
   enemyTowerY?: number;  // base y (bottom) of the enemy tower (default: GROUND_Y)
+  /**
+   * Default tribe for each placeholder. Drives the runtime tribe selection
+   * on map load (Game.reset() seeds both via setPlayerTribe / setEnemyTribe).
+   * Tower skin + W + H come from per-tribe templates in TribeTowerTemplates,
+   * NOT from this map.
+   */
+  playerTowerTribe?: Tribe;  // default 'tomaro'
+  enemyTowerTribe?:  Tribe;  // default 'meowee'
   platforms:       PlatformData[];
   blocks:          BlockData[];
   coinBox:         CoinBoxDef;
-  playerTowerSkin?:  string;  // data URL (data:image/...;base64,…)
-  playerTowerSkinW?: number;  // rendered width  (default: TOWER_WIDTH)
-  playerTowerSkinH?: number;  // rendered height (default: TOWER_HEIGHT)
-  enemyTowerSkin?:   string;
-  enemyTowerSkinW?:  number;
-  enemyTowerSkinH?:  number;
   groundSkin?:       string;  // data URL; tiled across the ground plane
   groundSkinTileW?:  number;  // tile width  in world px (default: image natural width)
   groundSkinTileH?:  number;  // tile height in world px (default: image natural height)
@@ -177,9 +180,27 @@ export function saveMapToStorage(map: MapDefinition): void {
 }
 
 /**
+ * Strip pre-refactor inline tower-skin fields from a stored map. Old saves
+ * embedded per-side data URLs and W/H here; those now live in
+ * TribeTowerTemplates. We silently drop the stale fields so the loader keeps
+ * working — the next saveMapToStorage() persists the clean shape.
+ */
+function migrateStoredMap(raw: unknown): MapDefinition {
+  const m = { ...(raw as Record<string, unknown>) };
+  delete m.playerTowerSkin;
+  delete m.playerTowerSkinW;
+  delete m.playerTowerSkinH;
+  delete m.enemyTowerSkin;
+  delete m.enemyTowerSkinW;
+  delete m.enemyTowerSkinH;
+  return m as unknown as MapDefinition;
+}
+
+/**
  * Return the stored version of the map if one exists, otherwise the original.
  * Called at game startup so saved edits are reflected immediately on refresh.
  */
 export function loadMapWithOverride(map: MapDefinition): MapDefinition {
-  return loadStoredMaps()[map.id] ?? map;
+  const stored = loadStoredMaps()[map.id];
+  return stored ? migrateStoredMap(stored) : map;
 }

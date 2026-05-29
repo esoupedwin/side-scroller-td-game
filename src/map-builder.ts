@@ -1,5 +1,15 @@
 import { DEFAULT_MAP, WORLDS, saveMapToStorage, loadMapWithOverride, type MapDefinition } from './maps';
 import { GameConfig } from './gameConfig';
+import { TRIBES, type Tribe } from './Tribes';
+import {
+  loadTemplates as loadTribeTowerTemplates,
+  getTowerTemplate,
+  setTowerTemplate,
+  exportTemplatesJson,
+  importTemplatesJson,
+} from './TribeTowerTemplates';
+
+loadTribeTowerTemplates();
 
 // ── Layout constants ─────────────────────────────────────────────────────────
 
@@ -288,7 +298,7 @@ class MapBuilder {
 
     this.drawGrid();
 
-    const drawTower = (cx: number, baseY: number, color: string, stroke: string, sel: boolean, skinUrl?: string, tW: number = TOWER_W, tH: number = TOWER_H) => {
+    const drawTower = (cx: number, baseY: number, color: string, stroke: string, sel: boolean, flipX: boolean, skinUrl?: string, tW: number = TOWER_W, tH: number = TOWER_H) => {
       const tx = this.wx(cx - tW / 2);
       const ty = this.wy(baseY - tH);
       const tw = this.sw(tW);
@@ -296,7 +306,16 @@ class MapBuilder {
       if (skinUrl) {
         const img = this.getSkinImage(skinUrl);
         if (img.complete && img.naturalWidth > 0) {
-          ctx.drawImage(img, tx, ty, tw, th);
+          if (flipX) {
+            // Skins are authored facing east; mirror for west-facing placeholders.
+            ctx.save();
+            ctx.translate(tx + tw, ty);
+            ctx.scale(-1, 1);
+            ctx.drawImage(img, 0, 0, tw, th);
+            ctx.restore();
+          } else {
+            ctx.drawImage(img, tx, ty, tw, th);
+          }
           if (sel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(tx, ty, tw, th); }
           return;
         }
@@ -309,8 +328,10 @@ class MapBuilder {
     };
     const pBaseY = m.playerTowerY ?? GROUND_Y;
     const eBaseY = m.enemyTowerY  ?? GROUND_Y;
-    drawTower(m.playerTowerX, pBaseY, '#00b4d8', '#007fa3', this.selectedTower === 'player', m.playerTowerSkin, m.playerTowerSkinW, m.playerTowerSkinH);
-    drawTower(m.enemyTowerX,  eBaseY, '#e63946', '#a02830', this.selectedTower === 'enemy',  m.enemyTowerSkin,  m.enemyTowerSkinW,  m.enemyTowerSkinH);
+    const pTpl   = getTowerTemplate(m.playerTowerTribe ?? 'tomaro');
+    const eTpl   = getTowerTemplate(m.enemyTowerTribe  ?? 'meowee');
+    drawTower(m.playerTowerX, pBaseY, '#00b4d8', '#007fa3', this.selectedTower === 'player', false, pTpl.skin, pTpl.w, pTpl.h);
+    drawTower(m.enemyTowerX,  eBaseY, '#e63946', '#a02830', this.selectedTower === 'enemy',  true,  eTpl.skin, eTpl.w, eTpl.h);
 
     // Blocks — draw in ascending zIndex order so higher-z blocks render on top.
     const blockDrawOrder = m.blocks
@@ -616,13 +637,6 @@ class MapBuilder {
     const skin = this.selected !== null && this.selectedKind === 'platform'
       ? this.map.platforms[this.selected]?.skin : undefined;
     this.syncSkinPreview('preview-plat-skin', 'btn-clear-plat-skin', skin, 'input-plat-skin');
-  }
-
-  private syncSkinPreviews() {
-    (['player', 'enemy'] as const).forEach(side => {
-      const url = side === 'player' ? this.map.playerTowerSkin : this.map.enemyTowerSkin;
-      this.syncSkinPreview(`preview-${side}-skin`, `btn-clear-${side}-skin`, url, `input-${side}-skin`);
-    });
   }
 
   private syncBlockSkinPreview() {
@@ -1383,40 +1397,26 @@ class MapBuilder {
       this.map.enemyTowerY = isNaN(val) || val >= GROUND_Y ? undefined : Math.max(TOWER_H + 20, val);
     });
 
-    // Tower skin pickers
+    // Tower default-tribe dropdowns — populate options and wire change handlers.
+    // Skin/W/H are no longer per-map; they're stored per-tribe in
+    // TribeTowerTemplates and edited via the "Tribe Tower Skins" modal.
     (['player', 'enemy'] as const).forEach(side => {
-      document.getElementById(`input-${side}-skin`)!.addEventListener('change', e => {
-        const file = (e.target as HTMLInputElement).files?.[0];
-        if (!file) return;
+      const sel = document.getElementById(`input-${side}-tribe`) as HTMLSelectElement;
+      for (const tribe of Object.values(TRIBES)) {
+        const opt = document.createElement('option');
+        opt.value       = tribe.id;
+        opt.textContent = tribe.displayName;
+        sel.appendChild(opt);
+      }
+      sel.addEventListener('change', () => {
         this.pushUndo();
-        const reader = new FileReader();
-        reader.onload = () => {
-          const url = reader.result as string;
-          if (side === 'player') this.map.playerTowerSkin = url;
-          else                   this.map.enemyTowerSkin  = url;
-          this.syncSkinPreviews();
-        };
-        reader.readAsDataURL(file);
-      });
-
-      document.getElementById(`btn-clear-${side}-skin`)!.addEventListener('click', () => {
-        this.pushUndo();
-        if (side === 'player') delete this.map.playerTowerSkin;
-        else                   delete this.map.enemyTowerSkin;
-        (document.getElementById(`input-${side}-skin`) as HTMLInputElement).value = '';
-        this.syncSkinPreviews();
-      });
-
-      (['w', 'h'] as const).forEach(dim => {
-        document.getElementById(`input-${side}-skin-${dim}`)!.addEventListener('change', () => {
-          const val = parseInt((document.getElementById(`input-${side}-skin-${dim}`) as HTMLInputElement).value, 10);
-          const def = dim === 'w' ? TOWER_W : TOWER_H;
-          const key = `${side}TowerSkin${dim.toUpperCase()}` as 'playerTowerSkinW' | 'playerTowerSkinH' | 'enemyTowerSkinW' | 'enemyTowerSkinH';
-          if (isNaN(val) || val === def) delete this.map[key];
-          else                           this.map[key] = val;
-        });
+        const t = sel.value as Tribe;
+        if (side === 'player') this.map.playerTowerTribe = t;
+        else                   this.map.enemyTowerTribe  = t;
       });
     });
+
+    this.bindTribeSkinsModal();
 
     // Fit View button
     document.getElementById('btn-fit-view')!.addEventListener('click', () => this.fitView());
@@ -1624,16 +1624,14 @@ class MapBuilder {
     document.getElementById('section-blocks')!      .style.display = blockSel  ? 'flex' : 'none';
 
     if (playerSel) {
-      (document.getElementById('input-player-x')      as HTMLInputElement).value = String(m.playerTowerX);
-      (document.getElementById('input-player-y')      as HTMLInputElement).value = String(m.playerTowerY ?? GROUND_Y);
-      (document.getElementById('input-player-skin-w') as HTMLInputElement).value = String(m.playerTowerSkinW ?? TOWER_W);
-      (document.getElementById('input-player-skin-h') as HTMLInputElement).value = String(m.playerTowerSkinH ?? TOWER_H);
+      (document.getElementById('input-player-x')      as HTMLInputElement).value  = String(m.playerTowerX);
+      (document.getElementById('input-player-y')      as HTMLInputElement).value  = String(m.playerTowerY ?? GROUND_Y);
+      (document.getElementById('input-player-tribe')  as HTMLSelectElement).value = m.playerTowerTribe ?? 'tomaro';
     }
     if (enemySel) {
-      (document.getElementById('input-enemy-x')      as HTMLInputElement).value = String(m.enemyTowerX);
-      (document.getElementById('input-enemy-y')      as HTMLInputElement).value = String(m.enemyTowerY  ?? GROUND_Y);
-      (document.getElementById('input-enemy-skin-w') as HTMLInputElement).value = String(m.enemyTowerSkinW  ?? TOWER_W);
-      (document.getElementById('input-enemy-skin-h') as HTMLInputElement).value = String(m.enemyTowerSkinH  ?? TOWER_H);
+      (document.getElementById('input-enemy-x')      as HTMLInputElement).value  = String(m.enemyTowerX);
+      (document.getElementById('input-enemy-y')      as HTMLInputElement).value  = String(m.enemyTowerY  ?? GROUND_Y);
+      (document.getElementById('input-enemy-tribe')  as HTMLSelectElement).value = m.enemyTowerTribe ?? 'meowee';
     }
     if (coinSel) {
       const cb = m.coinBox;
@@ -1696,6 +1694,8 @@ class MapBuilder {
 
     document.getElementById('plat-count')!.textContent  = `${m.platforms.length} platform(s)`;
     document.getElementById('block-count')!.textContent = `${m.blocks.length} block(s)`;
+    // Note: previously also called syncSkinPreviews() for tower skins; that
+    // now lives in the per-tribe modal and is wired separately.
 
     // Selection status indicator
     const dot   = document.getElementById('selection-dot')   as HTMLElement;
@@ -1730,7 +1730,223 @@ class MapBuilder {
       label.textContent = 'Nothing selected — click an object on the map';
     }
 
-    this.syncSkinPreviews();
+  }
+
+  // ── Tribe Tower Skins modal ──────────────────────────────────────────
+  // Edits the per-tribe template store (TribeTowerTemplates). Changes are
+  // staged in-memory until the user clicks Save; Close cancels.
+
+  private tribeSkinDraft: Record<Tribe, {
+    skin?: string;
+    w?: number;
+    h?: number;
+    collision?: { x: number; y: number; w: number; h: number };
+    spawn?: { x: number; y: number };
+  }> = {} as Record<Tribe, {
+    skin?: string;
+    w?: number;
+    h?: number;
+    collision?: { x: number; y: number; w: number; h: number };
+    spawn?: { x: number; y: number };
+  }>;
+  /** Tribe currently being edited in the modal. Persists across re-opens. */
+  private tribeSkinSelected: Tribe = (Object.values(TRIBES)[0] as { id: Tribe }).id;
+
+  private bindTribeSkinsModal(): void {
+    const modal     = document.getElementById('tribe-skins-modal')!;
+    const grid      = document.getElementById('tribe-skins-grid')!;
+    const select    = document.getElementById('tribe-skins-select') as HTMLSelectElement;
+    const openBtn   = document.getElementById('btn-tribe-skins')!;
+    const saveBtn   = document.getElementById('btn-tribe-skins-save')!;
+    const closeBtn  = document.getElementById('btn-tribe-skins-close')!;
+    const exportBtn = document.getElementById('btn-tribe-skins-export')!;
+    const importBtn = document.getElementById('btn-tribe-skins-import')!;
+
+    // Populate the tribe dropdown once.
+    for (const info of Object.values(TRIBES)) {
+      const opt = document.createElement('option');
+      opt.value       = info.id;
+      opt.textContent = info.displayName;
+      select.appendChild(opt);
+    }
+    select.value = this.tribeSkinSelected;
+    select.addEventListener('change', () => {
+      this.tribeSkinSelected = select.value as Tribe;
+      buildGrid();
+    });
+
+    const buildGrid = () => {
+      grid.innerHTML = '';
+      const tribe = this.tribeSkinSelected;
+      const info  = TRIBES[tribe];
+      const draft = this.tribeSkinDraft[tribe];
+
+      // Default the editable boxes to the rendered skin size so the user has
+      // something visible to drag/edit even before saving.
+      const skinW    = draft.w ?? TOWER_W;
+      const skinH    = draft.h ?? TOWER_H;
+      const col      = draft.collision ?? { x: 0, y: 0, w: skinW, h: skinH };
+      const sp       = draft.spawn     ?? { x: skinW, y: 0 };
+
+      const block = document.createElement('div');
+      block.className = 'tribe-skin-block';
+      block.innerHTML = `
+        <div class="tribe-skin-preview">
+          <div class="tribe-skin-preview-wrap" id="tribe-skin-wrap-${tribe}">
+            <div class="tribe-skin-preview-stage" id="tribe-skin-stage-${tribe}"
+                 style="width:${skinW}px; height:${skinH}px;">
+              ${draft.skin
+                ? `<img id="tribe-skin-img-${tribe}" src="${draft.skin}" alt="${info.displayName} tower" style="width:${skinW}px; height:${skinH}px;" />`
+                : `<span class="tribe-skin-preview-empty" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center;">no skin</span>`}
+              <div class="tribe-skin-collision" id="tribe-skin-collision-${tribe}"
+                   style="left:${col.x}px; top:${col.y}px; width:${col.w}px; height:${col.h}px;"></div>
+              <div class="tribe-skin-spawn" id="tribe-skin-spawn-${tribe}"
+                   style="left:${sp.x}px; top:${sp.y}px;"></div>
+            </div>
+          </div>
+        </div>
+        <div class="tribe-skin-fields">
+          <input type="file" id="tribe-skin-file-${tribe}" accept="image/*" />
+          <button id="tribe-skin-clear-${tribe}" class="danger" style="padding:3px 8px;">&#x2715;</button>
+          <label>W:</label>
+          <input type="number" id="tribe-skin-w-${tribe}" value="${skinW}" style="width:80px;" />
+          <label>H:</label>
+          <input type="number" id="tribe-skin-h-${tribe}" value="${skinH}" style="width:80px;" />
+        </div>
+        <fieldset class="tribe-skin-fieldset">
+          <legend>Collision box</legend>
+          <label>X:</label><input type="number" id="tribe-skin-col-x-${tribe}" value="${col.x}" />
+          <label>Y:</label><input type="number" id="tribe-skin-col-y-${tribe}" value="${col.y}" />
+          <label>W:</label><input type="number" id="tribe-skin-col-w-${tribe}" value="${col.w}" />
+          <label>H:</label><input type="number" id="tribe-skin-col-h-${tribe}" value="${col.h}" />
+        </fieldset>
+        <fieldset class="tribe-skin-fieldset">
+          <legend>Spawn point</legend>
+          <label>X:</label><input type="number" id="tribe-skin-sp-x-${tribe}" value="${sp.x}" />
+          <label>Y:</label><input type="number" id="tribe-skin-sp-y-${tribe}" value="${sp.y}" />
+        </fieldset>
+      `;
+      grid.appendChild(block);
+
+      // Scale the stage so the whole skin fits in the preview area. The
+      // stage keeps skin-pixel dimensions internally (so the collision
+      // rectangle's x/y/w/h continue to map 1:1 to the user's inputs); we
+      // shrink it visually via CSS transform and resize the layout wrapper
+      // to the rendered size so flex-centering still works.
+      const stageEl   = document.getElementById(`tribe-skin-stage-${tribe}`)!;
+      const wrapEl    = document.getElementById(`tribe-skin-wrap-${tribe}`)!;
+      const previewEl = stageEl.closest('.tribe-skin-preview') as HTMLElement;
+      if (previewEl && skinW > 0 && skinH > 0) {
+        // Subtract the preview's 8px padding on each side.
+        const availW = Math.max(0, previewEl.clientWidth  - 16);
+        const availH = Math.max(0, previewEl.clientHeight - 16);
+        const scale  = Math.min(1, availW / skinW, availH / skinH);
+        stageEl.style.transform = `scale(${scale})`;
+        wrapEl.style.width  = `${skinW * scale}px`;
+        wrapEl.style.height = `${skinH * scale}px`;
+      }
+
+      document.getElementById(`tribe-skin-file-${tribe}`)!.addEventListener('change', e => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          this.tribeSkinDraft[tribe].skin = reader.result as string;
+          buildGrid();
+        };
+        reader.readAsDataURL(file);
+      });
+      document.getElementById(`tribe-skin-clear-${tribe}`)!.addEventListener('click', () => {
+        delete this.tribeSkinDraft[tribe].skin;
+        buildGrid();
+      });
+      document.getElementById(`tribe-skin-w-${tribe}`)!.addEventListener('change', e => {
+        const val = parseInt((e.target as HTMLInputElement).value, 10);
+        this.tribeSkinDraft[tribe].w = isNaN(val) ? undefined : val;
+        buildGrid();
+      });
+      document.getElementById(`tribe-skin-h-${tribe}`)!.addEventListener('change', e => {
+        const val = parseInt((e.target as HTMLInputElement).value, 10);
+        this.tribeSkinDraft[tribe].h = isNaN(val) ? undefined : val;
+        buildGrid();
+      });
+
+      // Collision + spawn editors. Every change repaints the preview overlay.
+      const updateCol = () => {
+        const x = parseInt((document.getElementById(`tribe-skin-col-x-${tribe}`) as HTMLInputElement).value, 10);
+        const y = parseInt((document.getElementById(`tribe-skin-col-y-${tribe}`) as HTMLInputElement).value, 10);
+        const w = parseInt((document.getElementById(`tribe-skin-col-w-${tribe}`) as HTMLInputElement).value, 10);
+        const h = parseInt((document.getElementById(`tribe-skin-col-h-${tribe}`) as HTMLInputElement).value, 10);
+        if ([x, y, w, h].some(v => isNaN(v))) return;
+        this.tribeSkinDraft[tribe].collision = { x, y, w, h };
+        const el = document.getElementById(`tribe-skin-collision-${tribe}`)!;
+        el.style.left = `${x}px`; el.style.top = `${y}px`;
+        el.style.width = `${w}px`; el.style.height = `${h}px`;
+      };
+      const updateSp = () => {
+        const x = parseInt((document.getElementById(`tribe-skin-sp-x-${tribe}`) as HTMLInputElement).value, 10);
+        const y = parseInt((document.getElementById(`tribe-skin-sp-y-${tribe}`) as HTMLInputElement).value, 10);
+        if (isNaN(x) || isNaN(y)) return;
+        this.tribeSkinDraft[tribe].spawn = { x, y };
+        const el = document.getElementById(`tribe-skin-spawn-${tribe}`)!;
+        el.style.left = `${x}px`; el.style.top = `${y}px`;
+      };
+      ['col-x', 'col-y', 'col-w', 'col-h'].forEach(k =>
+        document.getElementById(`tribe-skin-${k}-${tribe}`)!.addEventListener('input', updateCol));
+      ['sp-x', 'sp-y'].forEach(k =>
+        document.getElementById(`tribe-skin-${k}-${tribe}`)!.addEventListener('input', updateSp));
+    };
+
+    const openModal = () => {
+      // Snapshot the current templates into the draft so edits can be cancelled.
+      this.tribeSkinDraft = {} as Record<Tribe, { skin?: string; w?: number; h?: number }>;
+      for (const info of Object.values(TRIBES)) {
+        this.tribeSkinDraft[info.id] = { ...getTowerTemplate(info.id) };
+      }
+      select.value = this.tribeSkinSelected;
+      // Show the modal BEFORE buildGrid so the preview container reports a
+      // non-zero clientWidth/Height when the stage scale is computed. (When
+      // display is still none, the measurement returns 0 and the stage gets
+      // transform: scale(0) and disappears.)
+      modal.style.display = 'flex';
+      buildGrid();
+    };
+    const closeModal = () => { modal.style.display = 'none'; };
+
+    openBtn.addEventListener('click', openModal);
+    closeBtn.addEventListener('click', closeModal);
+    saveBtn.addEventListener('click', () => {
+      for (const info of Object.values(TRIBES)) {
+        // Replace the stored template wholesale so a cleared skin actually clears.
+        setTowerTemplate(info.id, this.tribeSkinDraft[info.id]);
+      }
+      // Clear the data-URL image cache so the new skin re-loads on the next
+      // render-loop tick.
+      this.skinImages.clear();
+      closeModal();
+    });
+
+    exportBtn.addEventListener('click', async () => {
+      const json = exportTemplatesJson();
+      try {
+        await navigator.clipboard.writeText(json);
+        alert('Tribe tower templates copied to clipboard.');
+      } catch {
+        // Clipboard blocked — fall back to a prompt the user can copy from.
+        prompt('Copy this JSON:', json);
+      }
+    });
+    importBtn.addEventListener('click', () => {
+      const raw = prompt('Paste tribe tower templates JSON:');
+      if (!raw) return;
+      try {
+        importTemplatesJson(raw);
+        this.skinImages.clear();
+        openModal(); // re-snapshot from the freshly-imported store
+      } catch {
+        alert('Could not parse JSON.');
+      }
+    });
   }
 }
 

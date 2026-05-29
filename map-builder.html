@@ -483,6 +483,125 @@
         text-transform: uppercase;
         margin-bottom: 4px;
       }
+
+      /* ── Tribe Tower Skins modal ──────────────────────────────────── */
+      .modal-backdrop {
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.55);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 100;
+      }
+      .modal-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 22px;
+        min-width: 640px; max-width: 90vw;
+        max-height: 88vh; overflow: auto;
+        color: var(--fg);
+      }
+      .modal-card h2 {
+        margin: 0 0 14px 0;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      .tribe-skins-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .tribe-skins-picker {
+        display: flex; align-items: center; gap: 10px;
+        margin-bottom: 14px;
+      }
+      .tribe-skins-picker label {
+        font-size: 17px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        color: var(--muted-fg);
+      }
+      .tribe-skins-picker select { min-width: 180px; }
+      .tribe-skin-block {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 14px;
+        background: rgba(255,255,255,0.02);
+        display: flex; flex-direction: column; gap: 10px;
+      }
+      .tribe-skin-block h3 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .tribe-skin-preview {
+        position: relative;
+        width: 100%;
+        height: 500px;
+        background: rgba(0,0,0,0.25);
+        border: 1px dashed var(--border);
+        border-radius: 4px;
+        display: flex; align-items: center; justify-content: center;
+        padding: 8px;
+        overflow: hidden;
+      }
+      /* Layout wrapper sized to the SCALED dimensions; the stage inside is
+         transformed to fit but keeps skin-pixel coords for its children
+         (img + collision rect + spawn dot all stay in skin pixels). */
+      .tribe-skin-preview-wrap {
+        position: relative;
+      }
+      .tribe-skin-preview-stage {
+        position: relative;
+        transform-origin: top left;
+      }
+      .tribe-skin-preview img {
+        display: block;
+        max-width: 100%;
+        max-height: 100%;
+      }
+      .tribe-skin-preview-empty {
+        color: var(--muted-fg);
+        font-size: 14px;
+        font-style: italic;
+      }
+      .tribe-skin-collision {
+        position: absolute;
+        border: 2px solid #00b4d8;
+        background: rgba(0,180,216,0.15);
+        pointer-events: none;
+      }
+      .tribe-skin-spawn {
+        position: absolute;
+        width: 12px; height: 12px;
+        margin-left: -6px; margin-top: -6px;
+        border-radius: 50%;
+        background: #f5c542;
+        border: 2px solid #1a1a1f;
+        pointer-events: none;
+      }
+      .tribe-skin-fields {
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      }
+      .tribe-skin-fieldset {
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 8px 10px;
+        margin: 0;
+        display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+      }
+      .tribe-skin-fieldset legend {
+        padding: 0 6px;
+        font-size: 13px; font-weight: 600;
+        letter-spacing: 0.06em; text-transform: uppercase;
+        color: var(--muted-fg);
+      }
+      .tribe-skin-fieldset input { width: 64px; }
+      .modal-actions {
+        margin-top: 18px;
+        display: flex; gap: 8px; align-items: center;
+      }
     </style>
   </head>
   <body>
@@ -539,6 +658,14 @@
         </svg>
         Map Settings
       </button>
+      <button id="btn-tribe-skins" class="tool-btn" title="Edit per-tribe tower skin templates (shared across all maps)">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 21 L4 9 L7 9 L7 6 L9 6 L9 9 L11 9 L11 6 L13 6 L13 9 L15 9 L15 6 L17 6 L17 9 L20 9 L20 21 Z"/>
+          <line x1="4" y1="13" x2="20" y2="13"/>
+          <rect x="10" y="15" width="4" height="6"/>
+        </svg>
+        Tribe Tower Skins
+      </button>
     </div>
 
     <!-- ── Workspace ────────────────────────────────────────────────────── -->
@@ -568,14 +695,8 @@
             <input type="number" id="input-player-x" value="60" />
             <label>Y:</label>
             <input type="number" id="input-player-y" value="480" style="width:80px;" />
-            <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:2px;">
-              <span class="skin-label">Skin</span>
-              <input type="file" id="input-player-skin" accept="image/*" />
-              <img id="preview-player-skin" style="display:none; height:22px; border:1px solid var(--border); border-radius:2px;" />
-              <button id="btn-clear-player-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
-              <label>W:</label><input type="number" id="input-player-skin-w" value="48" style="width:80px;" />
-              <label>H:</label><input type="number" id="input-player-skin-h" value="120" style="width:80px;" />
-            </div>
+            <label>Default tribe:</label>
+            <select id="input-player-tribe"></select>
           </div>
 
           <!-- Enemy's Tower (only when selected) -->
@@ -585,14 +706,8 @@
             <input type="number" id="input-enemy-x" value="2748" />
             <label>Y:</label>
             <input type="number" id="input-enemy-y" value="480" style="width:80px;" />
-            <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:2px;">
-              <span class="skin-label">Skin</span>
-              <input type="file" id="input-enemy-skin" accept="image/*" />
-              <img id="preview-enemy-skin" style="display:none; height:22px; border:1px solid var(--border); border-radius:2px;" />
-              <button id="btn-clear-enemy-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
-              <label>W:</label><input type="number" id="input-enemy-skin-w" value="48" style="width:80px;" />
-              <label>H:</label><input type="number" id="input-enemy-skin-h" value="120" style="width:80px;" />
-            </div>
+            <label>Default tribe:</label>
+            <select id="input-enemy-tribe"></select>
           </div>
 
           <!-- Coin Box (only when selected) -->
@@ -807,6 +922,27 @@
             <span class="hint">paste below, then click Import</span>
           </div>
           <textarea id="json-input" placeholder="Paste map JSON here…"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tribe Tower Skins modal ────────────────────────────────────── -->
+    <div id="tribe-skins-modal" class="modal-backdrop" style="display:none;">
+      <div class="modal-card">
+        <h2>Tribe Tower Skins</h2>
+        <div class="tribe-skins-picker">
+          <label>Tribe:</label>
+          <select id="tribe-skins-select"></select>
+        </div>
+        <div id="tribe-skins-grid" class="tribe-skins-grid">
+          <!-- Active-tribe block generated by map-builder.ts -->
+        </div>
+        <div class="modal-actions">
+          <button id="btn-tribe-skins-export">Export</button>
+          <button id="btn-tribe-skins-import">Import</button>
+          <span style="flex:1"></span>
+          <button id="btn-tribe-skins-save" class="primary">Save</button>
+          <button id="btn-tribe-skins-close">Close</button>
         </div>
       </div>
     </div>

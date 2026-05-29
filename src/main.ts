@@ -4,9 +4,12 @@ import { TYPE_ICON } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
 import { WORLDS, ALL_MAPS, loadMapWithOverride, mapCoords } from './maps';
+import { TRIBES, TRIBE_ROSTERS, type Tribe, getPlayerTribe, setPlayerTribe } from './Tribes';
+import { loadTemplates as loadTribeTowerTemplates } from './TribeTowerTemplates';
 
 const loadingScreen = document.getElementById('loading-screen')!;
 
+loadTribeTowerTemplates(); // sync localStorage read — must run before `new Game()` so Tower can read skins
 await preloadAllSprites();
 initAudio(); // fire-and-forget — loads in background, never delays game start
 
@@ -22,12 +25,14 @@ const cpuCoinAmountEl = document.getElementById('cpu-coin-amount')!;
 const cpuCharsListEl  = document.getElementById('cpu-chars-list')!;
 const enemyTowerHpEl  = document.getElementById('enemy-tower-hp')!;
 
-// All spawnable unit types, in display order.
-// Tanker is intentionally omitted — type still exists for CPU AI use, but
-// the player can no longer manually spawn it.
+// Every unit type the player UI has a button for (display order). The active
+// tribe's TRIBE_ROSTERS entry determines which of these are *visible* — the
+// rest are hidden via syncSpawnButtonVisibility(). Tanker is omitted entirely
+// (CPU-only) and Heavy is present in the HTML but not in either tribe's
+// roster, so it stays hidden until a tribe lists it.
 const UNIT_TYPES = [
   'conscript', 'warrior', 'archer', 'rifleman', 'sniper',
-  'viking', 'heavy', 'grenadier', 'rocketeer',
+  'viking', 'knight', 'heavy', 'grenadier', 'rocketeer',
 ] as const;
 type UnitType = typeof UNIT_TYPES[number];
 
@@ -58,14 +63,19 @@ for (const t of UNIT_TYPES) {
   spawnBtns.get(t)!.addEventListener('click', () => game.spawnPlayer(t));
 }
 
-restartBtn.addEventListener('click', () => {
+// Shared restart routine — used by Play Again, Load Map, and the tribe
+// selector. Optional mapDef forwards a new map to game.reset(); omit it to
+// restart the current map.
+function restartCurrentGame(mapDef?: ReturnType<typeof loadMapWithOverride>) {
   gameOver = false;
-  gameOverEl.style.display = 'none';
-  pauseOverlay.style.display = 'none';
-  uiOverlay.style.visibility = 'visible';
-  hudEl.style.visibility     = 'visible';
-  game.reset();  // reset() calls onCoinsChanged which re-evaluates button states
-});
+  gameOverEl.style.display    = 'none';
+  pauseOverlay.style.display  = 'none';
+  uiOverlay.style.visibility  = 'visible';
+  hudEl.style.visibility      = 'visible';
+  game.reset(mapDef);  // reset() calls onCoinsChanged which re-evaluates button states
+}
+
+restartBtn.addEventListener('click', () => restartCurrentGame());
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'p' || e.key === 'P') {
@@ -204,12 +214,44 @@ refreshDiagnoseUi();
   loadMapBtn.addEventListener('click', () => {
     const found = ALL_MAPS.find(m => m.id === mapSelect.value);
     if (!found) return;
-    gameOver = false;
-    gameOverEl.style.display    = 'none';
-    pauseOverlay.style.display  = 'none';
-    uiOverlay.style.visibility  = 'visible';
-    hudEl.style.visibility      = 'visible';
-    game.reset(loadMapWithOverride(found));
+    restartCurrentGame(loadMapWithOverride(found));
+  });
+}
+
+// ── Dev panel: tribe selector ──────────────────────────────────────────────
+// Toggles the player tribe at runtime. Spawn buttons not in the active
+// tribe's roster are hidden; new player units pick up the new tribe's
+// sprites automatically (existing units keep theirs — sprite is bound at
+// construction).
+{
+  const tribeSelect = document.getElementById('dev-tribe-select') as HTMLSelectElement;
+
+  // Populate options from the TRIBES registry — order is insertion order
+  for (const tribe of Object.values(TRIBES)) {
+    const opt = document.createElement('option');
+    opt.value       = tribe.id;
+    opt.textContent = tribe.displayName;
+    tribeSelect.appendChild(opt);
+  }
+  tribeSelect.value = getPlayerTribe();
+
+  function syncSpawnButtonVisibility() {
+    const roster = TRIBE_ROSTERS[getPlayerTribe()];
+    for (const t of UNIT_TYPES) {
+      const btn = spawnBtns.get(t);
+      if (!btn) continue;
+      btn.style.display = roster.includes(t) ? '' : 'none';
+    }
+  }
+  syncSpawnButtonVisibility();
+
+  // Switching tribes mid-game would leave a mix of old-tribe units still
+  // alive on the field; force a fresh match so the new tribe's roster takes
+  // over cleanly.
+  tribeSelect.addEventListener('change', () => {
+    setPlayerTribe(tribeSelect.value as Tribe);
+    syncSpawnButtonVisibility();
+    restartCurrentGame();
   });
 }
 
