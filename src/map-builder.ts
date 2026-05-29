@@ -1267,6 +1267,28 @@ class MapBuilder {
       }
     });
 
+    document.getElementById('btn-save-to-file')!.addEventListener('click', () => this.exportToFile());
+    document.getElementById('btn-load-from-file')!.addEventListener('click', () => {
+      (document.getElementById('input-load-map-file') as HTMLInputElement).click();
+    });
+    document.getElementById('input-load-map-file')!.addEventListener('change', e => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      (e.target as HTMLInputElement).value = '';
+      this.importFromFile(file);
+    });
+
+    document.getElementById('btn-save-all-to-file')!.addEventListener('click', () => this.exportAllToFile());
+    document.getElementById('btn-load-all-from-file')!.addEventListener('click', () => {
+      (document.getElementById('input-load-all-map-file') as HTMLInputElement).click();
+    });
+    document.getElementById('input-load-all-map-file')!.addEventListener('change', e => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      (e.target as HTMLInputElement).value = '';
+      this.importAllFromFile(file);
+    });
+
     // JSON dialog
     const jsonOverlay = document.getElementById('json-overlay')!;
     const openJson  = () => jsonOverlay.classList.add('open');
@@ -1947,6 +1969,98 @@ class MapBuilder {
         alert('Could not parse JSON.');
       }
     });
+  }
+
+  // ── File save / load ─────────────────────────────────────────────────────
+
+  private exportToFile(): void {
+    const pkg = {
+      version:        1,
+      type:           'coin_map_package',
+      map:            this.map,
+      towerTemplates: JSON.parse(exportTemplatesJson()) as Record<string, unknown>,
+    };
+    const json = JSON.stringify(pkg, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${this.map.id || 'map'}.coinmap.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private importFromFile(file: File): void {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const pkg = JSON.parse(reader.result as string) as {
+          type:           string;
+          map:            MapDefinition;
+          towerTemplates?: Record<string, unknown>;
+        };
+        if (pkg.type !== 'coin_map_package') throw new Error('Not a coin map package');
+        this.pushUndo();
+        this.map = pkg.map;
+        if (pkg.towerTemplates) {
+          importTemplatesJson(JSON.stringify(pkg.towerTemplates));
+          this.skinImages.clear();
+        }
+        this.clearSelection();
+        this.syncInputsFromMap();
+      } catch {
+        alert('Could not load file — make sure it is a valid COIN map package.');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  private exportAllToFile(): void {
+    const allMaps = WORLDS.flatMap(w => [...w.maps]).map(m => loadMapWithOverride(m));
+    const pkg = {
+      version:        1,
+      type:           'coin_map_collection',
+      maps:           allMaps,
+      towerTemplates: JSON.parse(exportTemplatesJson()) as Record<string, unknown>,
+    };
+    const json = JSON.stringify(pkg, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'all-maps.coinmap.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private importAllFromFile(file: File): void {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const pkg = JSON.parse(reader.result as string) as {
+          type:           string;
+          maps:           MapDefinition[];
+          towerTemplates?: Record<string, unknown>;
+        };
+        if (pkg.type !== 'coin_map_collection') throw new Error('Not a coin map collection');
+        for (const map of pkg.maps) saveMapToStorage(map);
+        if (pkg.towerTemplates) {
+          importTemplatesJson(JSON.stringify(pkg.towerTemplates));
+          this.skinImages.clear();
+        }
+        // Refresh the builder if the current map is among the imported ones
+        const match = pkg.maps.find(m => m.id === this.map.id);
+        if (match) {
+          this.pushUndo();
+          this.map = match;
+          this.clearSelection();
+          this.syncInputsFromMap();
+        }
+      } catch {
+        alert('Could not load file — make sure it is a valid COIN map collection.');
+      }
+    };
+    reader.readAsText(file);
   }
 }
 
