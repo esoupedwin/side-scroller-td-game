@@ -148,6 +148,7 @@ export const DEFEND_PURSUIT_RANGE   = ch.defendPursuitRange;
 export const RANGED_KITE_THRESHOLD  = ch.rangedKiteThreshold;
 export const COIN_THROW_SCAN_RANGE  = ch.coinThrowScanRange;
 export const COIN_THROW_HOLD_SEC    = ch.coinThrowHoldSec;
+export const COIN_THROW_MAX_Y_GAP   = ch.coinThrowMaxYGap;
 export const COIN_THROW_VX          = GameConfig.economy.coinThrowVx;
 export const COIN_THROW_VY          = GameConfig.economy.coinThrowVy;
 export const COIN_THROW_MIN_DIST    = GameConfig.towers.attackRange + 50;

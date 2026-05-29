@@ -39,6 +39,7 @@ export const GameConfig = {
     rangedKiteThreshold: 80, // px — ranged units back away when a melee enemy closes within this distance
     coinThrowScanRange:  80,  // px — scan radius for a new coin after throwing one toward tower
     coinThrowHoldSec:   0.5, // seconds the character holds the coin before releasing the throw
+    coinThrowMaxYGap:   100, // px — if the carrier's standing surface sits at least this much below the home tower's base, skip throwing and keep carrying (prevents arcing coins into a wall when the tower is on an elevated block ~120 px tall — the threshold is set a few px below the block height to be robust to small tower-placement offsets in the map builder)
     safeZoneHealRate:    5,  // HP/s passively healed while within own tower's attack range
     hitJumpChance:    0.75,  // probability of jumping when struck by a projectile
     attackKnockbackVy:    80,  // px/s — small upward impulse applied with every per-character knockback
@@ -92,9 +93,9 @@ export const GameConfig = {
       type:        'sniper' as const,
       hp:          70,
       speed:       50,
-      attackRange: 320,
+      attackRange: 380,
       attackPower: 35,
-      fireRate:    2.8,
+      fireRate:    3.1,
       cost:        100,
       critical:    0.05, // 5 % miss chance — trained marksman
       knockback:   0,

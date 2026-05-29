@@ -8,7 +8,7 @@ import {
   SAFE_ZONE_HEAL_RATE, HIT_JUMP_CHANCE,
   ATTACK_KNOCKBACK_VY, ATTACK_KNOCKBACK_DECAY,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
-  COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST,
+  COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST, COIN_THROW_MAX_Y_GAP,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
   POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
@@ -2237,6 +2237,17 @@ export class Character {
     if (this.carryingCoin) {
       if (this.isAirborne) return;   // wait until landed
       const distToTower = Math.abs(this.x - homeTowerFrontX);
+      // Vertical gap between the carrier's STANDING SURFACE and the home
+      // tower's base surface. If the carrier is on a surface that sits
+      // COIN_THROW_MAX_Y_GAP or more below the tower's base (e.g. on the
+      // ground while the tower is elevated on a block), throwing would arc
+      // the coin into the side of that block — keep carrying until they
+      // reach a surface within range of the tower.
+      // Using `this.floorY` (the snapped surface y) instead of `this.y`
+      // avoids sub-pixel physics bounce making the gap fall just under
+      // the threshold on grounded characters.
+      const yGapBelowTower = this.floorY - homeTowerBaseFloorY;
+      const tooLowToThrow  = yGapBelowTower >= COIN_THROW_MAX_Y_GAP;
       if (distToTower <= CHAR_DEPOSIT_DIST) {
         this.carryingCoin = false;
         this.removeCoinCarry();
@@ -2244,7 +2255,7 @@ export class Character {
         onDepositCoin(this.coinCarryValue);
         this.earnAP(PROMO_COIN_AP);
         return;
-      } else if (distToTower > COIN_THROW_MIN_DIST) {
+      } else if (distToTower > COIN_THROW_MIN_DIST && !tooLowToThrow) {
         // Hold coin for COIN_THROW_HOLD_SEC before releasing the 45° throw
         if (this.coinThrowTimer < 0) {
           this.coinThrowTimer  = COIN_THROW_HOLD_SEC;
