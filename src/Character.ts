@@ -2621,7 +2621,8 @@ export class Character {
     } else if (type === 'attack') {
       this.powerUpAtkMult = POWERUP_ATK_MULT;
     } else {
-      // Promote: advance one rank, restore HP, play the promotion animation
+      // Promote: advance one rank, restore HP, play the promotion animation.
+      // At max rank (Captain), convert to a full heal so the power-up is never wasted.
       if (this.rank < 3) {
         this.ap   = PROMO_THRESHOLDS[this.rank];  // jump AP to current threshold so earnAP triggers correctly
         this.rank = (this.rank + 1) as 0 | 1 | 2 | 3;
@@ -2630,6 +2631,9 @@ export class Character {
         this.drawRankBadge();
         this.drawBar();
         this.startPromoAnim();
+      } else {
+        this.hp = this.maxHp;
+        this.drawBar();
       }
     }
   }

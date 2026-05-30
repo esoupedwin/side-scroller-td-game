@@ -160,12 +160,18 @@ export class PowerUp {
 
   tryPickup(chars: { x: number; y: number; isDead: boolean }[]): number {
     if (!(this.isOnGround || this.y >= this.groundY - 35) || this.isDead || this.isPickedUp) return -1;
+    // Return the CLOSEST character within range, not just the first in array order.
+    // Without this, a character that spawned earlier could steal the power-up from
+    // a player character that reached it first.
+    let bestIdx  = -1;
+    let bestDist: number = POWERUP_PICKUP_DIST;
     for (let i = 0; i < chars.length; i++) {
       const c = chars[i];
       if (c.isDead) continue;
-      if (Math.hypot(c.x - this.x, c.y - this.y) <= POWERUP_PICKUP_DIST) return i;
+      const d = Math.hypot(c.x - this.x, c.y - this.y);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
     }
-    return -1;
+    return bestIdx;
   }
 
   collect() {
