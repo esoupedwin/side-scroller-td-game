@@ -2595,7 +2595,8 @@ export class Character {
   }
 
   private tickSpeedStreaks(dt: number): void {
-    if (this.powerUpSpeedMult <= 1) { this.speedStreakTimer = 0; return; }
+    const isMoving = this.currentLegsAnim === 'walk' ? this.stillTimer < 0.15 : this.movingTimer > 0.05;
+    if (this.powerUpSpeedMult <= 1 || !isMoving) { this.speedStreakTimer = 0; return; }
     this.speedStreakTimer -= dt;
     if (this.speedStreakTimer <= 0) {
       this.speedStreakTimer = 0.05;
