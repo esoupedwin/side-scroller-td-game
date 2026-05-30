@@ -1,4 +1,4 @@
-import * as PIXI from 'pixi.js';
+﻿import * as PIXI from 'pixi.js';
 import Matter from 'matter-js';
 import {
   GROUND_Y, PLAYER_COLOR, ENEMY_COLOR,
@@ -41,7 +41,7 @@ const BEHAVIOR_ICON: Record<'attacking' | 'collecting' | 'harass' | 'defend' | '
 const BODY_HEIGHT_MULT = 1.9;
 
 // Liang-Barsky segment-AABB intersection test.
-// Returns true if the segment (x0,y0)→(x1,y1) intersects the rectangle.
+// Returns true if the segment (x0,y0)â†'(x1,y1) intersects the rectangle.
 function segmentIntersectsAABB(
   x0: number, y0: number,
   x1: number, y1: number,
@@ -74,7 +74,7 @@ export interface CharacterConfig {
   attackRange: number;
   attackPower: number;
   fireRate:    number;
-  critical:    number;   // miss probability [0, 1] — roll each attack
+  critical:    number;   // miss probability [0, 1] â€” roll each attack
   width:       number;
   height:      number;
   knockback:   number;   // px/s horizontal impulse applied to the victim on a successful hit (melee or ranged)
@@ -94,15 +94,15 @@ export interface UpdateContext {
   dt:                number;
   /** Living characters on the OPPOSITE side from the one being updated. */
   enemies:           Character[];
-  /** Living characters on the SAME side (still includes self — callers must skip `c === this`). */
+  /** Living characters on the SAME side (still includes self â€” callers must skip `c === this`). */
   allies:            Character[];
   enemyTowerFrontX:      number;
   enemyTowerY:           number;
-  /** Floor Y of the surface the enemy tower sits on (may differ from GROUND_Y on maps with an elevated tower block). */
+  /** Floor Y of the surface the enemy tower sits on (may differ from this.groundY on maps with an elevated tower block). */
   enemyTowerBaseFloorY:  number;
   homeTowerFrontX:       number;   // the collecting character's own tower
   /** Floor Y of the surface the home tower sits on. Used by collecting units so coin carry pathing
-   *  lands them on the tower's actual surface — not GROUND_Y, which would route them under an
+   *  lands them on the tower's actual surface â€” not this.groundY, which would route them under an
    *  elevated tower instead of onto it. */
   homeTowerBaseFloorY:   number;
   worldWidth:        number;
@@ -140,15 +140,16 @@ export class Character {
   private knockbackVx      = 0;
   private knockbackDecayFactor = 1;  // precomputed per frame by caller: Math.exp(-decay * dt)
   private isAirborne  = false;
-  private floorY     = GROUND_Y;
+  private floorY:    number;
+  private readonly groundY: number;
   // When non-null, syncFromBody ignores the platform at this y while resolving
-  // landing — used for "drop in place" through the platform the character is
+  // landing â€” used for "drop in place" through the platform the character is
   // currently standing on. Cleared automatically on any landing.
   private dropFromY:   number | null = null;
-  // World bounds between tower faces — set each tick from UpdateContext, used in syncToBody.
+  // World bounds between tower faces â€” set each tick from UpdateContext, used in syncToBody.
   private boundL     = 0;
   private boundR     = 0;
-  get isOnPlatform(): boolean { return this.floorY < GROUND_Y; }
+  get isOnPlatform(): boolean { return this.floorY < this.groundY; }
   /** Actual height of the physics collision body (taller than config.height by BODY_HEIGHT_MULT). */
   get collisionHeight(): number { return this.config.height * BODY_HEIGHT_MULT; }
   /** Visual/identity tribe (derived from side; future: pickable per game). */
@@ -158,7 +159,7 @@ export class Character {
   /** Damage events emitted this tick; Game.ts reads and clears each frame. */
   readonly pendingDamages: { amount: number; x: number; y: number }[] = [];
   /** Set when the character drops or throws a carried coin; Game.ts spawns the coin.
-   *  vx/vy present → deliberate throw (directed velocity, no recovery chase). */
+   *  vx/vy present â†' deliberate throw (directed velocity, no recovery chase). */
   pendingCoinDrop: { x: number; y: number; value: number; kind: CoinKind; vx?: number; vy?: number } | null = null;
 
   rank:              0 | 1 | 2 | 3 = 0;
@@ -175,7 +176,7 @@ export class Character {
   private randomJumpTimer    = Math.random() * 3;  // stagger across characters
   private evasiveJumpTimer   = 0;
   private lastMoveDir:         1 | -1 = 1;
-  // Direction of the most recent attack target — used to flip the sprite while
+  // Direction of the most recent attack target â€” used to flip the sprite while
   // attacking, so a character moving forward but attacking a target behind
   // them faces the target (not their travel direction).
   private lastAttackDir:       1 | -1 = 1;
@@ -186,7 +187,7 @@ export class Character {
   // hold: while > 0, selectAnimations forces body to 'attack' so the swing
   // anim plays to completion before switching to walk/idle/carry.
   private attackFacingTimer    = 0;
-  // Pending melee swing — for conscript/warrior/heavy, damage is deferred
+  // Pending melee swing â€” for conscript/warrior/heavy, damage is deferred
   // until partway through the body attack animation so the swing visually
   // connects before the hit lands. Re-validated at land time (skip if a
   // character target died, moved out of reach, etc.).
@@ -201,7 +202,7 @@ export class Character {
   // character is effectively stationary (blocked, no target, etc.).
   private stillTimer            = 0;
   // Seconds of continuous motion (resets when x stops changing). Pairs with
-  // stillTimer to give asymmetric hysteresis on the idle↔walk animation
+  // stillTimer to give asymmetric hysteresis on the idleâ†”walk animation
   // switch, so jittery 1-px-per-tick movement doesn't thrash the sprite.
   private movingTimer           = 0;
   private legL:     PIXI.Container | null = null;
@@ -225,10 +226,10 @@ export class Character {
     life: number;
   }> = [];
   private _behavior:    'attacking' | 'collecting' | 'harass' | 'defend' | 'rush' = 'attacking';
-  // ── Defend behaviour state ──────────────────────────────────────────────
+  // â”€â”€ Defend behaviour state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // The intruder this defender is currently pursuing in the attack zone, if
   // any. Other defenders read this via `claimedIntruder` so two units never
-  // converge on the same target — leaving them to spread out and cover the
+  // converge on the same target â€” leaving them to spread out and cover the
   // tower against multiple threats.
   private defendTargetIntruder: Character | null = null;
   // Each defender returns to a different randomly-picked spot inside the
@@ -237,17 +238,17 @@ export class Character {
   // defender finishes pursuing (returns from intruder branch).
   private defendRallyX: number | null = null;
   // True last tick we were actively pursuing an intruder. Used to detect the
-  // pursuit→rally transition and refresh defendRallyX exactly once per cycle.
+  // pursuitâ†'rally transition and refresh defendRallyX exactly once per cycle.
   private defendWasPursuing = false;
 
-  // ── Pathfinding state ─────────────────────────────────────────────────────
+  // â”€â”€ Pathfinding state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   private path:        PathStep[] = [];
   private pathIdx      = 0;
-  // Key of the last requested target — avoids rebuilding the path every tick.
+  // Key of the last requested target â€” avoids rebuilding the path every tick.
   private pathTargetKey = '';
   // Seconds since path was built; stale paths are discarded and rebuilt.
   private pathAge      = 0;
-  private readonly PATH_TTL = 8;   // s — re-plan after this many seconds
+  private readonly PATH_TTL = 8;   // s â€” re-plan after this many seconds
   // NavGraph version when the current path was built. If the graph has been
   // rebuilt since (e.g. an animated block moved surfaces around), the cached
   // path is invalidated even if its target key hasn't changed.
@@ -255,7 +256,7 @@ export class Character {
   // Diagnostic counters (lifetime).
   clampedCount      = 0;
   pathRebuildCount  = 0;
-  // Pending jump intent — populated when followPath fires this.jump(), consumed on landing.
+  // Pending jump intent â€” populated when followPath fires this.jump(), consumed on landing.
   private pendingJumpLog: { startX: number; startFloorY: number; targetX: number; targetFloorY: number } | null = null;
   // Per-jump tick-level tracking for diagnostics.
   private jumpTickCount      = 0;       // ticks where syncToBody saw isAirborne
@@ -292,7 +293,9 @@ export class Character {
   private powerUpSpeedTimer = 0;
   private powerUpAtkMult    = 1.0;
 
-  constructor(side: Side, startX: number, startY: number, config: CharacterConfig, id: number, name: string, physics: Physics, spriteSet?: LoadedSpriteSet | null) {
+  constructor(side: Side, startX: number, startY: number, config: CharacterConfig, id: number, name: string, physics: Physics, spriteSet?: LoadedSpriteSet | null, groundY: number = GROUND_Y) {
+    this.groundY   = groundY;
+    this.floorY    = groundY;
     this.side      = side;
     this.id        = id;
     this.name      = name;
@@ -306,7 +309,7 @@ export class Character {
     // If spawned above ground (e.g. on top of an elevated tower) mark as airborne
     // so syncFromBody triggers a proper fall-and-land sequence instead of treating
     // the character as already grounded at an inconsistent position.
-    if (startY < GROUND_Y) this.isAirborne = true;
+    if (startY < this.groundY) this.isAirborne = true;
 
     this.container = new PIXI.Container();
     this.buildSprite();
@@ -340,7 +343,7 @@ export class Character {
     this.syncPosition();
   }
 
-  // ── Diagnostic introspection (read-only snapshot of internal state) ────────
+  // â”€â”€ Diagnostic introspection (read-only snapshot of internal state) â”€â”€â”€â”€â”€â”€â”€â”€
 
   get diagnosticInfo(): {
     isAirborne:        boolean;
@@ -371,7 +374,7 @@ export class Character {
     };
   }
 
-  // ── Behavior toggle ──────────────────────────────────────────────────────────
+  // â”€â”€ Behavior toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   get behavior(): 'attacking' | 'collecting' | 'harass' | 'defend' | 'rush' { return this._behavior; }
 
@@ -382,7 +385,7 @@ export class Character {
       if (this.carryingCoin) this.dropCarriedCoin();
     }
     if (this._behavior === 'defend') {
-      // Leaving defend — release any pursuit claim and rally cache so a future
+      // Leaving defend â€” release any pursuit claim and rally cache so a future
       // defender doesn't see stale state.
       this.defendTargetIntruder = null;
       this.defendRallyX         = null;
@@ -405,7 +408,7 @@ export class Character {
     if (this.idLabel) this.idLabel.text = this.labelText();
   }
 
-  // ── Sprite builders ──────────────────────────────────────────────────────────
+  // â”€â”€ Sprite builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private buildSprite() {
     if (this.spriteSet) { this.buildAnimSprite(); return; }
@@ -441,7 +444,7 @@ export class Character {
     this.legR = make(rx);
   }
 
-  /** Render scale that makes a frame `frameH` tall display at `config.height × spriteScale` on screen. */
+  /** Render scale that makes a frame `frameH` tall display at `config.height Ã— spriteScale` on screen. */
   private animScaleFor(layer: 'body' | 'legs', animName: BodyAnimName | LegsAnimName, frameH: number): number {
     const scale = layer === 'body'
       ? getBodySpriteScale(this.tribe, this.config.type, animName as BodyAnimName)
@@ -451,7 +454,7 @@ export class Character {
 
   private buildAnimSprite() {
     const set = this.spriteSet!;
-    // Pick a starting frame set for each layer — prefer walk, fall back as needed.
+    // Pick a starting frame set for each layer â€” prefer walk, fall back as needed.
     const startBodyName: BodyAnimName | null =
       set.body.walk   ? 'walk'   :
       set.body.idle   ? 'idle'   :
@@ -498,10 +501,10 @@ export class Character {
    * units firing while marching).
    */
   private selectAnimations(): { body: BodyAnimName; legs: LegsAnimName } {
-    // Asymmetric hysteresis on idle↔walk so single-tick movement noise doesn't
+    // Asymmetric hysteresis on idleâ†”walk so single-tick movement noise doesn't
     // thrash the animation:
-    //   - already in walk   → keep moving unless still for > 0.15 s
-    //   - already in idle   → only switch to walk after 0.05 s of motion
+    //   - already in walk   â†' keep moving unless still for > 0.15 s
+    //   - already in idle   â†' only switch to walk after 0.05 s of motion
     const wasMoving = this.currentLegsAnim === 'walk';
     const inMotion  = wasMoving ? this.stillTimer < 0.15 : this.movingTimer > 0.05;
     const legs: LegsAnimName = inMotion ? 'walk' : 'idle';
@@ -596,7 +599,7 @@ export class Character {
    * Scale the locomotion animation speed by the character's current effective
    * moveSpeed vs its config baseline, so promotions, carry slowdown, and speed
    * power-ups keep the stride visually in sync with the actual pace.
-   * Idle and attack are stationary — left at their baseline fps.
+   * Idle and attack are stationary â€” left at their baseline fps.
    */
   private updateLocomotionFps() {
     const ms = this.moveSpeed;
@@ -766,7 +769,7 @@ export class Character {
     g.beginFill(0x2a2a2a);
     g.drawRoundedRect(magX, ry + 6, 6, 9, 1);
     g.endFill();
-    // Barrel (14→26 px; sniper is 16→38)
+    // Barrel (14â†'26 px; sniper is 16â†'38)
     const barlL = Math.min(dir * 14, dir * 26);
     const barlW = Math.abs(dir * 14 - dir * 26);
     g.beginFill(0x2a2a2a);
@@ -850,7 +853,7 @@ export class Character {
 
     const g = new PIXI.Graphics();
 
-    // ── Shield (non-weapon side — left for player) ────────────────────────────
+    // â”€â”€ Shield (non-weapon side â€” left for player) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const sX = -dir * w * 0.52;
     const sW =  w  * 0.52;
     const sH =  h  * 0.55;
@@ -865,7 +868,7 @@ export class Character {
     g.drawCircle(sX, sY + sH * 0.46, sW * 0.17);
     g.endFill();
 
-    // ── Torso ─────────────────────────────────────────────────────────────────
+    // â”€â”€ Torso â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     g.beginFill(color);
     g.drawRoundedRect(-w * 0.46, h * 0.19, w * 0.92, h * 0.42, 5);
     g.endFill();
@@ -878,7 +881,7 @@ export class Character {
     g.drawRect(-w * 0.46, h * 0.54, w * 0.92, 4);
     g.endFill();
 
-    // ── Head ─────────────────────────────────────────────────────────────────
+    // â”€â”€ Head â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     g.beginFill(color, 0.9);
     g.drawCircle(0, h * 0.10, w * 0.40);
     g.endFill();
@@ -896,7 +899,7 @@ export class Character {
     g.drawRect(-1.5, h * 0.10, 3, 7);
     g.endFill();
 
-    // ── Axe (weapon side) ─────────────────────────────────────────────────────
+    // â”€â”€ Axe (weapon side) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const hx0 = dir * w * 0.44;
     const hx1 = hx0 + dir * w * 0.55;
     const axeY = h * 0.29;
@@ -904,7 +907,7 @@ export class Character {
     g.beginFill(0x7a4f2e);
     g.drawRect(Math.min(hx0, hx1), axeY, w * 0.55, 4);
     g.endFill();
-    // Axe head — swept crescent
+    // Axe head â€” swept crescent
     g.beginFill(0xb0b0b0);
     g.drawPolygon([
       hx1,              axeY - 2,
@@ -935,12 +938,12 @@ export class Character {
 
     const g = new PIXI.Graphics();
 
-    // ── Kite shield (non-weapon side) ────────────────────────────────────────
+    // â”€â”€ Kite shield (non-weapon side) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const shX = -dir * w * 0.54;
     const shW =  w  * 0.48;
     const shH =  h  * 0.62;
     const shY =  h  * 0.10;
-    // Shield body — tall kite shape
+    // Shield body â€” tall kite shape
     g.beginFill(color, 0.80);
     g.drawPolygon([
       shX - shW * 0.5, shY,
@@ -966,7 +969,7 @@ export class Character {
     g.drawRect(shX - shW * 0.28,  shY + shH * 0.30, shW * 0.56,   3);
     g.endFill();
 
-    // ── Plate armour torso ───────────────────────────────────────────────────
+    // â”€â”€ Plate armour torso â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     g.beginFill(0x888899, 0.30);
     g.drawRoundedRect(-w * 0.46, h * 0.19, w * 0.92, h * 0.42, 5);
     g.endFill();
@@ -983,7 +986,7 @@ export class Character {
     g.drawRect(-w * 0.46, h * 0.54, w * 0.92, 4);
     g.endFill();
 
-    // ── Great helm (full-face, closed visor) ────────────────────────────────
+    // â”€â”€ Great helm (full-face, closed visor) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Helm bowl
     g.beginFill(0x888899, 0.55);
     g.drawCircle(0, h * 0.10, w * 0.40);
@@ -1006,7 +1009,7 @@ export class Character {
     g.drawRoundedRect(-w * 0.38, h * 0.02 - 6, w * 0.76, 3, 1);
     g.endFill();
 
-    // ── Arming sword (weapon side) ──────────────────────────────────────────
+    // â”€â”€ Arming sword (weapon side) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const sx  = dir * w * 0.44;
     const sx1 = sx  + dir * w * 0.60;
     const syM = h * 0.28;  // mid height of grip
@@ -1019,7 +1022,7 @@ export class Character {
     g.beginFill(0xb0b0b0);
     g.drawRect(grdX - 2, syM - 5, 4, 14);
     g.endFill();
-    // Blade — long straight double-edged
+    // Blade â€” long straight double-edged
     const bladeX0 = sx1 + dir * 1;
     const bladeX1 = sx1 + dir * 16;
     g.beginFill(0xd0d0d8);
@@ -1108,8 +1111,8 @@ export class Character {
     const dir = this.side === 'player' ? 1 : -1;
 
     // All vertical positions are proportional so the sprite fills the full h.
-    // From bottom:  tracks (0–18%), lower hull (18–52%), upper hull (52–70%),
-    //               turret (52–88%), cupola (88–100%).
+    // From bottom:  tracks (0â€“18%), lower hull (18â€“52%), upper hull (52â€“70%),
+    //               turret (52â€“88%), cupola (88â€“100%).
     const trackTop    = h * 0.82;
     const hullLowTop  = h * 0.48;
     const hullHighTop = h * 0.30;
@@ -1118,7 +1121,7 @@ export class Character {
 
     const g = new PIXI.Graphics();
 
-    // ── Rubber track belt ─────────────────────────────────────────────────
+    // â”€â”€ Rubber track belt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     g.beginFill(0x1e1e1e);
     g.drawRoundedRect(-w / 2, trackTop, w, h - trackTop, 3);
     g.endFill();
@@ -1144,7 +1147,7 @@ export class Character {
     }
     g.endFill();
 
-    // ── Lower hull ────────────────────────────────────────────────────────
+    // â”€â”€ Lower hull â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     g.beginFill(color, 0.85);
     g.drawRoundedRect(-w / 2, hullLowTop, w, trackTop - hullLowTop, 3);
     g.endFill();
@@ -1154,7 +1157,7 @@ export class Character {
     g.drawRect(w / 2 - 6,  hullLowTop, 6, trackTop - hullLowTop);
     g.endFill();
 
-    // ── Upper hull ────────────────────────────────────────────────────────
+    // â”€â”€ Upper hull â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     g.beginFill(color);
     g.drawRoundedRect(-w / 2 + 6, hullHighTop, w - 12, hullLowTop - hullHighTop, 4);
     g.endFill();
@@ -1167,7 +1170,7 @@ export class Character {
     }
     g.lineStyle(0);
 
-    // ── Turret ────────────────────────────────────────────────────────────
+    // â”€â”€ Turret â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const turretCx = dir * w * 0.06;
     const turretH  = hullHighTop - turretTop;
     g.beginFill(color);
@@ -1183,7 +1186,7 @@ export class Character {
     g.lineTo(turretCx + w * 0.28, turretTop + turretH * 0.5);
     g.lineStyle(0);
 
-    // ── Commander's cupola ────────────────────────────────────────────────
+    // â”€â”€ Commander's cupola â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const cupolaCx = turretCx - dir * w * 0.06;
     const cupolaH  = turretTop - cupolaTop;
     g.beginFill(color);
@@ -1193,7 +1196,7 @@ export class Character {
     g.drawCircle(cupolaCx, cupolaTop + cupolaH * 0.5, w * 0.07);
     g.lineStyle(0);
 
-    // ── Gun barrel ────────────────────────────────────────────────────────
+    // â”€â”€ Gun barrel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const barrelCY   = turretTop + turretH * 0.55;
     const barrelFrom = turretCx + dir * w * 0.28;
     const barrelTo   = dir * w * 0.72;
@@ -1230,7 +1233,7 @@ export class Character {
 
     const g = new PIXI.Graphics();
 
-    // Body — olive drab jacket
+    // Body â€” olive drab jacket
     g.beginFill(0x4a5a2a, 0.92);
     g.drawRoundedRect(-w * 0.5, h * 0.18, w, h * 0.42, 3);
     g.endFill();
@@ -1248,7 +1251,7 @@ export class Character {
     g.drawEllipse(0, h * 0.04, w * 0.43, w * 0.28);
     g.endFill();
 
-    // Grenade launcher — thick tube at arm/shoulder height
+    // Grenade launcher â€” thick tube at arm/shoulder height
     const tubeY  = h * 0.26;
     const tubeLen = w * 0.90;
     const tubeH  = h * 0.11;
@@ -1279,7 +1282,7 @@ export class Character {
 
     const g = new PIXI.Graphics();
 
-    // Body — dark military jacket
+    // Body â€” dark military jacket
     g.beginFill(0x2e3b2e, 0.92);
     g.drawRoundedRect(-w * 0.50, h * 0.18, w, h * 0.42, 3);
     g.endFill();
@@ -1305,7 +1308,7 @@ export class Character {
     g.drawRoundedRect(-w * 0.26, h * 0.08, w * 0.22, h * 0.05, 2);
     g.endFill();
 
-    // Rocket launcher — shoulder-mounted tube, thicker than the grenadier's
+    // Rocket launcher â€” shoulder-mounted tube, thicker than the grenadier's
     const tubeY   = h * 0.20;
     const tubeLen = w * 1.10;
     const tubeH   = h * 0.14;
@@ -1332,7 +1335,7 @@ export class Character {
     this.container.addChild(g);
   }
 
-  // ── HP bar ───────────────────────────────────────────────────────────────────
+  // â”€â”€ HP bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   get maxHp() { return this.config.hp * (1 + this.rank * PROMO_HP_BOOST); }
 
@@ -1419,11 +1422,11 @@ export class Character {
     if (this.isOnPlatform) return;   // stay on platform; horizontal movement is the right action
     this.randomJumpTimer -= dt;
     if (this.randomJumpTimer > 0) return;
-    this.randomJumpTimer = 1.5 + Math.random() * 2;  // next check in 1.5–3.5 s
+    this.randomJumpTimer = 1.5 + Math.random() * 2;  // next check in 1.5â€“3.5 s
 
     const sideDir = this.side === 'player' ? 1 : -1;
     if (sideDir * (this.x - homeTowerFrontX) < 120) return;  // too close to home
-    // Defenders rarely break formation — random jumps make them drift off the
+    // Defenders rarely break formation â€” random jumps make them drift off the
     // rally point and out of position. Heavily dampen the chance while on
     // defend duty.
     const chance = this._behavior === 'defend' ? 0.02 : 0.20;
@@ -1433,11 +1436,11 @@ export class Character {
   private tickLegs(dt: number) {
     if (!this.legL || !this.legR) return;
 
-    const MAX_SWING = 0.42;   // radians ≈ 24°
+    const MAX_SWING = 0.42;   // radians â‰ˆ 24Â°
     const WALK_FREQ = 7.0;    // phase advance per second
 
     if (this.isAirborne) {
-      // Tuck back on ascent, extend forward on descent — direction-aware
+      // Tuck back on ascent, extend forward on descent â€” direction-aware
       const vy  = this.body.velocity.y;
       const dir = this.lastMoveDir;
       const tL  = vy < 0 ? -dir * 0.50 :  dir * 0.30;
@@ -1456,7 +1459,7 @@ export class Character {
       this.legL.rotation = Math.sin(this.legPhase)           * MAX_SWING;
       this.legR.rotation = Math.sin(this.legPhase + Math.PI) * MAX_SWING;
     } else {
-      // Idle: decay toward neutral — guard skips trig ops once legs are settled
+      // Idle: decay toward neutral â€” guard skips trig ops once legs are settled
       if (this.legL.rotation !== 0) {
         const nL = this.legL.rotation * 0.85;
         this.legL.rotation = Math.abs(nL) > 0.001 ? nL : 0;
@@ -1539,7 +1542,7 @@ export class Character {
    *  a syncFromBody-driven landing without going through update(). */
   syncVisual(): void { this.syncPosition(); }
 
-  /** Shift this character by (dx, dy) — used to carry units that are standing
+  /** Shift this character by (dx, dy) â€” used to carry units that are standing
    *  on an animated block. Updates x, y, floorY, and the Matter body together
    *  so subsequent syncToBody / syncFromBody calls see a consistent state.
    *  Also drops the cached path because its walk-steps' floorY was anchored
@@ -1557,7 +1560,7 @@ export class Character {
     this.clearPath();
   }
 
-  // ── Coin carry visual ────────────────────────────────────────────────────────
+  // â”€â”€ Coin carry visual â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private showCoinCarry() {
     if (this.coinCarryGfx) return;
@@ -1594,12 +1597,12 @@ export class Character {
     this.pendingCoinDrop = {
       x: this.x, y: this.y - this.config.height * 0.5,
       value: this.coinCarryValue, kind: this.coinCarryKind,
-      vx: dir * COIN_THROW_VX, vy: -COIN_THROW_VY,  // 60° — vy ≈ vx × √3
+      vx: dir * COIN_THROW_VX, vy: -COIN_THROW_VY,  // 60Â° â€” vy â‰ˆ vx Ã— âˆš3
     };
-    // No cooldown — character stays active in the field immediately
+    // No cooldown â€” character stays active in the field immediately
   }
 
-  // ── Public API ───────────────────────────────────────────────────────────────
+  // â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Called by Game.end() when the match finishes. Stops all motion drivers,
@@ -1628,14 +1631,14 @@ export class Character {
   }
 
   takeDamage(dmg: number, killer?: Character) {
-    // Always queue a label event (amount=0 → "Miss" in Game.ts)
+    // Always queue a label event (amount=0 â†' "Miss" in Game.ts)
     this.pendingDamages.push({ amount: dmg, x: this.x, y: this.y - this.config.height - 6 });
-    if (dmg <= 0) return;  // miss — no HP change, no coin drop, no kill
+    if (dmg <= 0) return;  // miss â€” no HP change, no coin drop, no kill
 
     this.hp = Math.max(0, this.hp - dmg);
     this.drawBar();
     if (this.carryingCoin) this.dropCarriedCoin();
-    // Defenders stay planted under fire — jumping mid-defence drags them off
+    // Defenders stay planted under fire â€” jumping mid-defence drags them off
     // the rally point and out of the defence zone.
     const hitJumpChance = this._behavior === 'defend' ? HIT_JUMP_CHANCE * 0.15 : HIT_JUMP_CHANCE;
     if (!this.isAirborne && Math.random() < hitJumpChance) this.pendingHitJump = true;
@@ -1659,9 +1662,9 @@ export class Character {
 
   get isDead()         { return this.state === 'dead'; }
   get isCarryingCoin() { return this.carryingCoin; }
-  /** Read-only — true while mid-jump or mid-fall. */
+  /** Read-only â€” true while mid-jump or mid-fall. */
   get airborne()       { return this.isAirborne; }
-  /** Read-only — y of the surface (ground / platform / block top) the character is standing on. */
+  /** Read-only â€” y of the surface (ground / platform / block top) the character is standing on. */
   get currentFloorY()  { return this.floorY; }
 
   pauseAnimations()  { this.bodySprite?.stop(); this.legsSprite?.stop(); this.container.alpha = 1; }
@@ -1675,7 +1678,7 @@ export class Character {
 
   get bowY() { return this.y - this.config.height * 0.62; }
 
-  /** Approximate horizontal velocity (px/s) — used by grenadier lead targeting. */
+  /** Approximate horizontal velocity (px/s) â€” used by grenadier lead targeting. */
   get approxVx(): number {
     if (this.state === 'dead' || this.state === 'fighting') return 0;
     return this.moveSpeed * this.lastMoveDir;
@@ -1761,7 +1764,7 @@ export class Character {
     if (this.x < this.boundL) { this.x = this.boundL; this.jumpVx = 0; }
     if (this.x > this.boundR) { this.x = this.boundR; this.jumpVx = 0; }
 
-    // Block horizontal wall collision — character X is teleported by AI so physics
+    // Block horizontal wall collision â€” character X is teleported by AI so physics
     // cannot stop side entry; clamp manually. Skip while airborne so jump arcs are
     // not interrupted (landing is handled by syncFromBody).
     if (!this.isAirborne) this.clampBlockWalls(ctx.blocks);
@@ -1770,12 +1773,12 @@ export class Character {
     this.syncPosition();
   }
 
-  // ── Physics ──────────────────────────────────────────────────────────────────
+  // â”€â”€ Physics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Drop straight through the platform we're currently standing on.
    * Sets isAirborne and records dropFromY so syncFromBody ignores this
-   * platform on the next landing pass — gravity then carries the character
+   * platform on the next landing pass â€” gravity then carries the character
    * down to the next surface (lower platform or ground).
    * No-op if the character is airborne, on the ground, or on a block (the
    * pathfinder only emits 'drop' steps for non-solid platforms, so a block
@@ -1783,7 +1786,7 @@ export class Character {
    */
   private dropFromPlatform(platforms: PlatformData[]): boolean {
     if (this.isAirborne) return false;
-    if (this.floorY >= GROUND_Y) return false;
+    if (this.floorY >= this.groundY) return false;
     // Verify we're actually on a platform (not a block at this y).
     const onPlat = platforms.some(p =>
       this.x >= p.x && this.x <= p.x + p.width && Math.abs(p.y - this.floorY) < 1,
@@ -1793,7 +1796,7 @@ export class Character {
     this.dropFromY  = this.floorY;
     this.isAirborne = true;
     this.jumpVx     = 0;
-    // No velocity boost — gravity does the work.
+    // No velocity boost â€” gravity does the work.
     Matter.Body.setVelocity(this.body, { x: 0, y: 0 });
     return true;
   }
@@ -1856,8 +1859,8 @@ export class Character {
     }
     // Character bodies have no Matter.js platform collision (mask: CAT_GROUND only).
     // Without pinning, gravity pulls the body through the platform to the ground,
-    // making char.y drift to GROUND_Y while floorY stays stale at platform height.
-    const onPlatform = !this.isAirborne && this.floorY < GROUND_Y;
+    // making char.y drift to this.groundY while floorY stays stale at platform height.
+    const onPlatform = !this.isAirborne && this.floorY < this.groundY;
     Matter.Body.setPosition(this.body, {
       x: this.x,
       y: onPlatform ? this.floorY - (this.config.height * BODY_HEIGHT_MULT) / 2 : this.body.position.y,
@@ -1919,7 +1922,7 @@ export class Character {
     this.y          = this.body.position.y + halfH;
 
     if (this.isAirborne) {
-      // Drop-through clears once feet are clear of the source platform — after
+      // Drop-through clears once feet are clear of the source platform â€” after
       // that, normal landing logic resumes (so lower platforms still catch us).
       if (this.dropFromY !== null && this.y > this.dropFromY + 5) {
         this.dropFromY = null;
@@ -1958,18 +1961,18 @@ export class Character {
         }
       }
 
-      // Ground landing: only when falling (vy ≥ 0) — prevents premature reset
+      // Ground landing: only when falling (vy â‰¥ 0) â€” prevents premature reset
       // on the tick a jump starts, when the body hasn't moved up yet.
-      if (this.y >= GROUND_Y - 1 && this.body.velocity.y >= 0) {
+      if (this.y >= this.groundY - 1 && this.body.velocity.y >= 0) {
         this.isAirborne = false;
         this.jumpVx     = 0;
-        this.floorY     = GROUND_Y;
-        this.y          = GROUND_Y;
+        this.floorY     = this.groundY;
+        this.y          = this.groundY;
         this.dropFromY  = null;
-        this.recordJumpOutcome(GROUND_Y);
+        this.recordJumpOutcome(this.groundY);
       }
-    } else if (this.floorY < GROUND_Y) {
-      // On elevated surface — detect walking off edge horizontally.
+    } else if (this.floorY < this.groundY) {
+      // On elevated surface â€” detect walking off edge horizontally.
       // Match only the surface at this character's current floorY; a different
       // platform/block below that happens to overlap in x must not count, or the
       // character keeps walking at the higher floorY in mid-air.
@@ -1979,7 +1982,7 @@ export class Character {
     }
   }
 
-  // ── Pathfinding ──────────────────────────────────────────────────────────────
+  // â”€â”€ Pathfinding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Request a fresh path to (toX, toFloorY) only when the target moved
@@ -2032,7 +2035,7 @@ export class Character {
    * Steps that are "instant-complete" (walk within 10-px stop tolerance,
    * jump-target-already-reached, fall-landed, drop-landed, drop-init failed,
    * tanker hitting a jump step) just bump `pathIdx` and chain into the next
-   * step in the same tick — otherwise a character that spawns 8 px from a
+   * step in the same tick â€” otherwise a character that spawns 8 px from a
    * jump trigger would burn a tick on the walk-complete advance and only
    * jump on the *next* tick (looking like a delay before takeoff). Capped
    * at MAX_STEPS_PER_TICK iterations as a safety against pathological paths.
@@ -2043,9 +2046,9 @@ export class Character {
       if (this.pathIdx >= this.path.length) return true;
       const step = this.path[this.pathIdx];
 
-      // ── walk ───────────────────────────────────────────────────────────────
+      // â”€â”€ walk â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (step.action === 'walk') {
-        // Already on a different surface (e.g. fell off mid-walk) — skip.
+        // Already on a different surface (e.g. fell off mid-walk) â€” skip.
         if (!this.isAirborne && Math.abs(this.floorY - step.floorY) > 20) {
           this.pathIdx++;
           continue;
@@ -2059,14 +2062,14 @@ export class Character {
         return false;
       }
 
-      // ── jump ───────────────────────────────────────────────────────────────
+      // â”€â”€ jump â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (step.action === 'jump') {
         if (this.config.type === 'tanker') {
           this.pathIdx++;
           continue;
         }
-        // Already on the target surface — redundant step, advance.
-        if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20 && step.floorY < GROUND_Y - 10) {
+        // Already on the target surface â€” redundant step, advance.
+        if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20 && step.floorY < this.groundY - 10) {
           this.pathIdx++;
           continue;
         }
@@ -2090,7 +2093,7 @@ export class Character {
         return false;
       }
 
-      // ── fall ───────────────────────────────────────────────────────────────
+      // â”€â”€ fall â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (step.action === 'fall') {
         if (!this.isAirborne && Math.abs(this.floorY - step.floorY) < 20) {
           this.pathIdx++;
@@ -2102,7 +2105,7 @@ export class Character {
         return false;
       }
 
-      // ── drop ───────────────────────────────────────────────────────────────
+      // â”€â”€ drop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // In-place fall through the current platform. Only emitted by the planner
       // when the character is on a non-solid platform and the destination
       // surface spans the character's current x.
@@ -2113,7 +2116,7 @@ export class Character {
         }
         if (this.isAirborne) return false;
         // dropFromPlatform fails if the character has drifted onto a block /
-        // off the platform — skip so the outer behaviour can rebuild a path.
+        // off the platform â€” skip so the outer behaviour can rebuild a path.
         if (!this.dropFromPlatform(platforms)) {
           this.pathIdx++;
           continue;
@@ -2121,12 +2124,12 @@ export class Character {
         return false;
       }
 
-      return true;  // unknown action — abort
+      return true;  // unknown action â€” abort
     }
     return false;
   }
 
-  // ── Attacking behaviour ──────────────────────────────────────────────────────
+  // â”€â”€ Attacking behaviour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private updateAttacking(ctx: UpdateContext) {
     const { dt, enemies, enemyTowerFrontX, enemyTowerY, onFire, navGraph, blocks } = ctx;
@@ -2156,15 +2159,15 @@ export class Character {
     } else {
       this.state = 'marching';
       // Use enemyTowerBaseFloorY so the destination floor matches the surface the
-      // enemy tower sits on (may be an elevated block, not GROUND_Y).
+      // enemy tower sits on (may be an elevated block, not this.groundY).
       this.requestPath(enemyTowerFrontX, ctx.enemyTowerBaseFloorY, navGraph, dt);
       this.followPath(dt, ctx.platforms);
     }
   }
 
-  // ── Rush behaviour ───────────────────────────────────────────────────────────
+  // â”€â”€ Rush behaviour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Charge straight to the enemy tower, dodging enemy characters by jumping over
-  // them. Fires at any enemy in range while moving — does not stop to engage.
+  // them. Fires at any enemy in range while moving â€” does not stop to engage.
 
   private updateRushing(ctx: UpdateContext) {
     const { dt, enemies, enemyTowerFrontX, enemyTowerY, onFire, blocks, navGraph } = ctx;
@@ -2204,7 +2207,7 @@ export class Character {
     this.followPath(dt, ctx.platforms);
   }
 
-  // ── Collecting behaviour ─────────────────────────────────────────────────────
+  // â”€â”€ Collecting behaviour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private updateCollecting(ctx: UpdateContext) {
     const { dt, enemies, allies, coins, homeTowerFrontX, homeTowerBaseFloorY, onFire, onDepositCoin, navGraph, blocks } = ctx;
@@ -2216,7 +2219,7 @@ export class Character {
     }
 
     // Evasive jump: 80% chance to leap over a blocking enemy while en route
-    // Suppressed on platform — jumping from height would throw the character off
+    // Suppressed on platform â€” jumping from height would throw the character off
     if (!this.isAirborne && !this.isOnPlatform && this.evasiveJumpTimer <= 0) {
       const dirToTarget = this.carryingCoin
         ? Math.sign(homeTowerFrontX - this.x)
@@ -2241,7 +2244,7 @@ export class Character {
       // tower's base surface. If the carrier is on a surface that sits
       // COIN_THROW_MAX_Y_GAP or more below the tower's base (e.g. on the
       // ground while the tower is elevated on a block), throwing would arc
-      // the coin into the side of that block — keep carrying until they
+      // the coin into the side of that block â€” keep carrying until they
       // reach a surface within range of the tower.
       // Using `this.floorY` (the snapped surface y) instead of `this.y`
       // avoids sub-pixel physics bounce making the gap fall just under
@@ -2256,7 +2259,7 @@ export class Character {
         this.earnAP(PROMO_COIN_AP);
         return;
       } else if (distToTower > COIN_THROW_MIN_DIST && !tooLowToThrow) {
-        // Hold coin for COIN_THROW_HOLD_SEC before releasing the 45° throw
+        // Hold coin for COIN_THROW_HOLD_SEC before releasing the 45Â° throw
         if (this.coinThrowTimer < 0) {
           this.coinThrowTimer  = COIN_THROW_HOLD_SEC;
           this.throwFacingDir  = (homeTowerFrontX < this.x ? -1 : 1);
@@ -2264,15 +2267,15 @@ export class Character {
         this.coinThrowTimer -= dt;
         this.state = 'returning';   // stand still while winding up
         if (this.coinThrowTimer > 0) return;
-        // Timer expired — release throw, scan nearby for a new coin, fall through
+        // Timer expired â€” release throw, scan nearby for a new coin, fall through
         this.coinThrowTimer = -1;
         this.throwCarriedCoin(homeTowerFrontX);
         this.targetCoin = this.nearestCoin(coins, COIN_THROW_SCAN_RANGE);
-        // carryingCoin is now false — fall through to pickup logic
+        // carryingCoin is now false â€” fall through to pickup logic
       } else {
-        this.coinThrowTimer = -1;  // moved close enough — cancel any pending windup
+        this.coinThrowTimer = -1;  // moved close enough â€” cancel any pending windup
         this.state = 'returning';
-        // Route to the tower's actual surface, not GROUND_Y — otherwise an
+        // Route to the tower's actual surface, not this.groundY â€” otherwise an
         // elevated tower causes carriers to path *under* it (to the ground)
         // and stall there without ever reaching the deposit x-strip.
         this.requestPath(homeTowerFrontX, homeTowerBaseFloorY, navGraph, dt);
@@ -2298,7 +2301,7 @@ export class Character {
 
     if (this.targetCoin) {
       // Navigate to the coin's settled floor level (coin.floorY is correct once settled,
-      // falls back to GROUND_Y for in-flight coins which is fine — pathfinding adjusts en-route).
+      // falls back to this.groundY for in-flight coins which is fine â€” pathfinding adjusts en-route).
       this.requestPath(this.targetCoin.x, this.targetCoin.floorY, navGraph, dt);
       this.followPath(dt, ctx.platforms);
 
@@ -2306,14 +2309,14 @@ export class Character {
 
       if (this.isAirborne) return;   // horizontal position handled by physics
 
-      // ── Pickup check ──────────────────────────────────────────────────────
+      // â”€â”€ Pickup check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const dist    = Math.abs(this.x - this.targetCoin.x);
       const yProx   = Math.abs(this.floorY - this.targetCoin.y);
       // Same surface: settled floorY match OR character is physically close in Y
       const sameSurface  = Math.abs(this.floorY - this.targetCoin.floorY) < 30 || yProx < 40;
       // Reachable: settled on any surface, near ground, or character is close in Y
       const coinReachable = this.targetCoin.isOnGround
-        || this.targetCoin.y >= GROUND_Y - 30
+        || this.targetCoin.y >= this.groundY - 30
         || yProx < 40;
 
       if (dist <= CHAR_PICKUP_DIST && sameSurface && coinReachable && this.coinPickupCooldown <= 0) {
@@ -2327,7 +2330,7 @@ export class Character {
         this.state = 'returning';
       }
     } else {
-      // No coins on field — drift toward center drop zone
+      // No coins on field â€” drift toward center drop zone
       this.state = 'marching';
       const center = ctx.worldWidth / 2;
       if (Math.abs(this.x - center) > 40) {
@@ -2336,7 +2339,7 @@ export class Character {
     }
   }
 
-  // ── Harass behaviour ─────────────────────────────────────────────────────────
+  // â”€â”€ Harass behaviour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private updateHarass(ctx: UpdateContext) {
     const { dt, enemies, allies, enemyTowerFrontX, homeTowerFrontX, onFire, platforms, blocks, navGraph } = ctx;
@@ -2345,7 +2348,7 @@ export class Character {
     const dir   = this.side === 'player' ? 1 : -1;
     const safeX = enemyTowerFrontX - dir * (TOWER_ATTACK_RANGE + HARASS_SAFETY_BUFFER);
 
-    // Retreat is highest priority — back off before doing anything else
+    // Retreat is highest priority â€” back off before doing anything else
     if (dir * (this.x - safeX) > 0) {
       this.state = 'marching';
       this.x -= dir * this.moveSpeed * dt;
@@ -2371,7 +2374,7 @@ export class Character {
         }
       }
     } else if (this.state === 'fighting') {
-      // No valid in-range target this tick — release the fighting lock so the
+      // No valid in-range target this tick â€” release the fighting lock so the
       // movement branches below can correctly drive 'marching' (and so the
       // animation stops showing 'attack' while the character is walking).
       this.state = 'marching';
@@ -2388,12 +2391,12 @@ export class Character {
 
     const clamp = (v: number) => dir > 0 ? Math.min(v, safeX) : Math.max(v, safeX);
 
-    const charOnPlatform = this.floorY < GROUND_Y;
+    const charOnPlatform = this.floorY < this.groundY;
 
     if (closest) {
       const toEnemy = dir * (closest.x - this.x);
 
-      // Closest enemy is on the platform and we're on the ground — climb up
+      // Closest enemy is on the platform and we're on the ground â€” climb up
       if (closest.isOnPlatform && !charOnPlatform && platforms.length > 0) {
         const plat = platforms[0];
         const dirToEnemy = Math.sign(closest.x - this.x);
@@ -2403,7 +2406,7 @@ export class Character {
         }
         this.state = 'marching';
       } else if (toEnemy > 0 && closestDist > this.config.attackRange * 0.8) {
-        // Enemy is ahead and not yet in range — use pathfinding to navigate around blocks.
+        // Enemy is ahead and not yet in range â€” use pathfinding to navigate around blocks.
         // Pass the enemy's floor (not this.floorY): if the character is on a platform and the
         // enemy is on the ground/a different surface, using this.floorY snaps the destination
         // to the current platform's edge and the character can stall there.
@@ -2416,14 +2419,14 @@ export class Character {
           this.x -= dir * this.moveSpeed * dt;
           if (this.state !== 'fighting') this.state = 'marching';
         } else if (dir * (safeX - this.x) > 5) {
-          // Ranged or enemy too far behind — use pathfinding to drift to safe line
+          // Ranged or enemy too far behind â€” use pathfinding to drift to safe line
           this.requestPath(safeX, this.floorY, navGraph, dt);
           this.followPath(dt, ctx.platforms);
           if (this.state !== 'fighting') this.state = 'marching';
         }
       } else if (Math.abs(closest.floorY - this.floorY) > 20) {
         // Enemy is in horizontal attack range but on a different floor (directly
-        // above or below) — we can't actually hit them from here. Path toward
+        // above or below) â€” we can't actually hit them from here. Path toward
         // their floor so we either jump up onto their platform or walk off an
         // edge to drop down. Without this, the character holds position
         // indefinitely thinking it's already in range.
@@ -2431,9 +2434,9 @@ export class Character {
         this.followPath(dt, ctx.platforms);
         if (this.state !== 'fighting') this.state = 'marching';
       }
-      // else: enemy is ahead, in attack range, on same plane — hold position
+      // else: enemy is ahead, in attack range, on same plane â€” hold position
     } else {
-      // No enemies — use pathfinding to group up or rally near own tower
+      // No enemies â€” use pathfinding to group up or rally near own tower
       const mate = this.nearestAlly(allies);
       const rallyX = mate ? mate.x : homeTowerFrontX + dir * 80;
       const dist   = Math.abs(this.x - rallyX);
@@ -2446,7 +2449,7 @@ export class Character {
     }
   }
 
-  // ── Defend behaviour ─────────────────────────────────────────────────────────
+  // â”€â”€ Defend behaviour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private updateDefending(ctx: UpdateContext) {
     const { dt, enemies, allies, homeTowerFrontX, onFire, blocks, navGraph } = ctx;
@@ -2455,13 +2458,13 @@ export class Character {
     const dir = this.side === 'player' ? 1 : -1;
 
     // Two zones around the home tower:
-    //   • Defence zone  — narrow slab matching the tower's auto-fire range; this
+    //   â€¢ Defence zone  â€” narrow slab matching the tower's auto-fire range; this
     //     is where defenders idle when no threat is present.
-    //   • Attack zone   — wider slab (DEFEND_PURSUIT_RANGE) used for *detection*
+    //   â€¢ Attack zone   â€” wider slab (DEFEND_PURSUIT_RANGE) used for *detection*
     //     and *pursuit clamp*. Any enemy here is a threat; the defender may step
     //     out of the defence zone to chase, but never beyond the attack zone.
     // The attack zone catches ranged enemies firing in from just outside the
-    // defence zone — without it, defenders take chip damage they can't return.
+    // defence zone â€” without it, defenders take chip damage they can't return.
     const defNearX = Math.min(homeTowerFrontX, homeTowerFrontX + dir * TOWER_ATTACK_RANGE);
     const defFarX  = Math.max(homeTowerFrontX, homeTowerFrontX + dir * TOWER_ATTACK_RANGE);
     const atkNearX = Math.min(homeTowerFrontX, homeTowerFrontX + dir * DEFEND_PURSUIT_RANGE);
@@ -2500,7 +2503,7 @@ export class Character {
       this.defendTargetIntruder = intruder;
       this.defendWasPursuing    = true;
 
-      // Within personal attack range — fire (uses nearestEnemy so LOS / canSnapHit
+      // Within personal attack range â€” fire (uses nearestEnemy so LOS / canSnapHit
       // gating still applies; falls through to pursuit if the geometry blocks the shot).
       const target = this.nearestEnemy(enemies, this.config.attackRange, blocks);
       if (target) {
@@ -2518,7 +2521,7 @@ export class Character {
         return;
       }
 
-      // Intruder in attack zone but no clean shot — pursue at the intruder's
+      // Intruder in attack zone but no clean shot â€” pursue at the intruder's
       // elevation. Clamp to the *attack* zone so the defender can leave the
       // defence zone to engage, but never wanders past the pursuit boundary.
       const pursueX = Math.max(atkNearX, Math.min(atkFarX, intruder.x));
@@ -2528,11 +2531,11 @@ export class Character {
       return;
     }
 
-    // No intruders → release our pursuit claim, regenerate the rally point if
+    // No intruders â†' release our pursuit claim, regenerate the rally point if
     // we just got back from chasing, then return to it.
     this.defendTargetIntruder = null;
     if (this.defendWasPursuing || this.defendRallyX === null) {
-      // Random spot inside the defence zone — keeps a group of defenders
+      // Random spot inside the defence zone â€” keeps a group of defenders
       // spread out rather than stacked on a single rally x.
       this.defendRallyX      = defNearX + Math.random() * (defFarX - defNearX);
       this.defendWasPursuing = false;
@@ -2541,20 +2544,20 @@ export class Character {
     const delta = restX - this.x;
     if (Math.abs(delta) > 20) {
       this.state = 'marching';
-      // Destination is always ground level — the home tower sits on GROUND_Y,
+      // Destination is always ground level â€” the home tower sits on this.groundY,
       // so the defence zone slab is on the ground regardless of what the
       // defender is currently standing on. Using this.floorY here would ask
       // the pathfinder for a surface at the destination x that doesn't exist
       // (e.g. character on a block top, rally point off the block) and the
       // returned path would be empty, freezing the defender in place.
-      this.requestPath(restX, GROUND_Y, navGraph, dt);
+      this.requestPath(restX, this.groundY, navGraph, dt);
       this.followPath(dt, ctx.platforms);
     } else {
       this.state = 'marching';
     }
   }
 
-  // ── Attack helpers ───────────────────────────────────────────────────────────
+  // â”€â”€ Attack helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private tickHealParticles(dt: number, healing: boolean) {
     if (healing) {
@@ -2629,7 +2632,7 @@ export class Character {
   }
 
   /**
-   * Forces the firing direction to horizontal — ranged units shoot sideways only,
+   * Forces the firing direction to horizontal â€” ranged units shoot sideways only,
    * no diagonal or vertical arcs. The projectile travels the original distance
    * so splash damage still lands at the intended horizontal position. Targets
    * at meaningfully different elevations are filtered out earlier by canSnapHit,
@@ -2669,15 +2672,15 @@ export class Character {
     const animDur = this.bodyAnimDuration('attack');
     // Hold body on 'attack' for at least one full cycle (or 0.3s default if no sprite).
     this.attackFacingTimer = Math.max(this.attackFacingTimer, animDur > 0 ? animDur : 0.3);
-    // Melee hit lands ~40% into the swing anim — feels like the moment of contact.
+    // Melee hit lands ~40% into the swing anim â€” feels like the moment of contact.
     return animDur > 0 ? animDur * 0.4 : 0.15;
   }
 
   /**
    * Advance the pending melee swing's wind-up timer. When it expires the swing
    * lands: apply damage to the target (or tower) if the target is still valid.
-   * Targets that died or moved out of melee range simply waste the swing — no
-   * homing — which matches how melee feels visually.
+   * Targets that died or moved out of melee range simply waste the swing â€” no
+   * homing â€” which matches how melee feels visually.
    */
   private tickPendingMeleeSwing(ctx: UpdateContext) {
     const swing = this.pendingMeleeSwing;
@@ -2773,7 +2776,7 @@ export class Character {
     if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
     const windUp = this.beginAttack();
     this.attackTimer = this.config.fireRate;
-    if (Math.random() < this.config.critical) return;  // miss — silent, towers have no label system
+    if (Math.random() < this.config.critical) return;  // miss â€” silent, towers have no label system
     if (this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'knight' || this.config.type === 'heavy') {
       this.pendingMeleeSwing = { target: null, damage: this.effectiveAtk, delay: windUp, onTower: onDamageTower };
       spawnSlashArc(this.x, this.y - this.config.height * 0.4, this.lastAttackDir, this.side);
@@ -2797,7 +2800,7 @@ export class Character {
           tx: snapped.tx,  ty: snapped.ty,
           damage: this.effectiveAtk, projectileKind: this.projectileKind,
         });
-        // Gun-wielders only — see attackEnemy for rationale.
+        // Gun-wielders only â€” see attackEnemy for rationale.
         if (this.projectileKind === 'bullet') {
           spawnMuzzleGlow(this.x + this.lastAttackDir * 18, this.bowY);
         }
@@ -2818,12 +2821,12 @@ export class Character {
   /**
    * For snap-firing types, returns true if the snapped landing X lands within the
    * projectile's splash radius of the target. Non-snap types (melee, grenade, rocket)
-   * always return true — they aim freely.
+   * always return true â€” they aim freely.
    */
   private canSnapHit(target: Character): boolean {
     const t = this.config.type;
     if (t === 'conscript' || t === 'warrior' || t === 'viking' || t === 'knight' || t === 'heavy' || t === 'grenadier' || t === 'rocketeer') return true;
-    // Horizontal-only fire — the projectile travels along the shooter's bowY
+    // Horizontal-only fire â€” the projectile travels along the shooter's bowY
     // without arcing. A target is hittable only when its collision box
     // vertically spans the bow line (i.e. they're on roughly the same plane).
     return this.bowY >= target.y - target.collisionHeight && this.bowY <= target.y;
@@ -2832,9 +2835,9 @@ export class Character {
   /**
    * Returns the nearest living enemy within `range` px.
    * Ranged characters additionally require an unobstructed line of sight through blocks.
-   * Snap-firing types also require the snapped angle to actually land on the target —
+   * Snap-firing types also require the snapped angle to actually land on the target â€”
    * otherwise the bullet would deterministically miss every shot.
-   * Enemies more than 30 px below the shooter are excluded — projectiles cannot arc
+   * Enemies more than 30 px below the shooter are excluded â€” projectiles cannot arc
    * downward and melee cannot swing through a platform floor.
    */
   /** `enemies` must already be filtered to characters on the other side. */
@@ -2844,7 +2847,7 @@ export class Character {
     const rangeSq = range * range;
     for (const t of enemies) {
       if (t.isDead) continue;
-      // Skip enemies that are meaningfully below — projectiles cannot fire downward,
+      // Skip enemies that are meaningfully below â€” projectiles cannot fire downward,
       // and melee cannot swing through the floor of a platform.
       if (t.y > this.y + 30) continue;
       const dx = this.x - t.x;
@@ -2884,7 +2887,7 @@ export class Character {
     return best;
   }
 
-  /** Coin closest to own tower front — prioritises easy-to-deposit coins. */
+  /** Coin closest to own tower front â€” prioritises easy-to-deposit coins. */
   private coinClosestToTower(coins: Coin[], homeTowerFrontX: number): Coin | null {
     let best: Coin | null = null;
     let minDistToTower = Infinity;

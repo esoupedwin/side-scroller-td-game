@@ -86,6 +86,7 @@ export class NavGraph {
     playerTowerX: number,
     enemyTowerX:  number,
     blocks:       { x: number; y: number; width: number; height?: number }[] = [],
+    groundY:      number = GROUND_Y,
   ): void {
     // Skip rebuild when geometry is effectively unchanged (4 px granularity).
     // This prevents animated blocks from forcing path invalidation on every tick
@@ -134,7 +135,7 @@ export class NavGraph {
       }
     };
 
-    splitSurface(groundLeft, GROUND_Y, groundRight - groundLeft);
+    splitSurface(groundLeft, groundY, groundRight - groundLeft);
     for (const p of platforms) splitSurface(p.x, p.y, p.width);
     for (const b of blocks) {
       this.surfaces.push({ id: nextId++, x: b.x, y: b.y, width: b.width, solid: true });

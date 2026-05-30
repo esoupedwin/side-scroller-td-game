@@ -20,6 +20,7 @@ export interface MapDefinition {
   name:         string;
   worldWidth:   number;
   worldHeight?: number;  // canvas height in px (default: GameConfig.canvas.height)
+  groundHeight?: number; // height of the green ground strip below GROUND_Y (default: worldHeight - GROUND_Y)
   playerTowerX: number;  // centre x of the player tower
   playerTowerY?: number; // base y (bottom) of the player tower (default: GROUND_Y)
   enemyTowerX:  number;  // centre x of the enemy tower
@@ -32,14 +33,18 @@ export interface MapDefinition {
    */
   playerTowerTribe?: Tribe;  // default 'tomaro'
   enemyTowerTribe?:  Tribe;  // default 'meowee'
+  playerTowerZ?:     number; // render layer order relative to blocks & platforms (default 0)
+  enemyTowerZ?:      number;
   platforms:       PlatformData[];
   blocks:          BlockData[];
   coinBox:         CoinBoxDef;
   groundSkin?:       string;  // data URL; tiled across the ground plane
   groundSkinTileW?:  number;  // tile width  in world px (default: image natural width)
   groundSkinTileH?:  number;  // tile height in world px (default: image natural height)
-  backgroundSkin?:   string;  // data URL; replaces the procedural parallax mountain layer
-  backgroundSkinY?:  number;  // screen-space Y offset of the parallax image (default 0 = top of sky)
+  backgroundSkin?:    string;  // data URL; replaces the procedural parallax mountain layer
+  backgroundSkinY?:   number;  // screen-space Y offset of the parallax image (default 0 = top of sky)
+  backgroundSkin2?:   string;  // data URL; second parallax layer rendered behind backgroundSkin (slower scroll)
+  backgroundSkin2Y?:  number;  // screen-space Y offset of the far parallax image (default 0)
   durationSec?:      number;  // match countdown in seconds (default: GAME_DURATION_SEC from gameConfig)
 }
 

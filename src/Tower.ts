@@ -21,6 +21,8 @@ export class Tower {
   readonly x: number;
   /** Bottom y of the tower body. */
   readonly baseY: number;
+  /** Vertical centre of the tower body — cached to avoid per-tick multiplication. */
+  readonly centerY: number;
   readonly container: PIXI.Container;
 
   hp: number = TOWER_HP;
@@ -45,9 +47,10 @@ export class Tower {
   private readonly tplSpawn: { x: number; y: number };
 
   constructor(side: Side, x: number, baseY: number, tribe: Tribe) {
-    this.side  = side;
-    this.x     = x;
-    this.baseY = baseY;
+    this.side    = side;
+    this.x       = x;
+    this.baseY   = baseY;
+    this.centerY = baseY - TOWER_HEIGHT * 0.5;
     this.container = new PIXI.Container();
 
     const tpl     = getTowerTemplate(tribe);

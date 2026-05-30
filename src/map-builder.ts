@@ -107,6 +107,10 @@ class MapBuilder {
 
   /** Effective world height — per-map override or the global canvas height. */
   private get worldH(): number { return this.map.worldHeight ?? WORLD_H; }
+  /** Height of the green ground strip. Defaults to the gap between GROUND_Y and the map bottom. */
+  private get groundStripH(): number { return this.map.groundHeight ?? (this.worldH - GROUND_Y); }
+  /** World-space Y of the top surface of the ground strip (bottom is always worldH). */
+  private get groundTopY(): number { return this.worldH - this.groundStripH; }
 
   // Position transforms (include pan offset)
   private wx(worldX: number): number { return worldX * this.scale + this.panX; }
@@ -230,6 +234,15 @@ class MapBuilder {
     ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(wx0, wy0, ww, wh);
 
+    // Far background layer (behind the near one)
+    if (m.backgroundSkin2) {
+      const img = this.getSkinImage(m.backgroundSkin2);
+      if (img.complete && img.naturalWidth > 0) {
+        const yOff = this.sh(m.backgroundSkin2Y ?? 0);
+        ctx.drawImage(img, wx0, wy0 + yOff, ww, this.sh(GROUND_Y));
+      }
+    }
+
     // Background parallax layer — PNG skin or procedural mountains
     if (m.backgroundSkin) {
       const img = this.getSkinImage(m.backgroundSkin);
@@ -251,12 +264,14 @@ class MapBuilder {
       ctx.fill();
     }
 
-    // Ground (world x-span only)
-    const groundH = this.sh(this.worldH - GROUND_Y);
+    // Ground (world x-span only) — bottom flush with map bottom; top = worldH - groundStripH
+    const groundStripH = this.groundStripH;
+    const groundTopY   = this.groundTopY;
+    const groundH      = this.sh(groundStripH);
     ctx.fillStyle = '#4a7c59';
-    ctx.fillRect(wx0, this.wy(GROUND_Y), ww, groundH);
+    ctx.fillRect(wx0, this.wy(groundTopY), ww, groundH);
     ctx.fillStyle = '#3d6b4a';
-    ctx.fillRect(wx0, this.wy(GROUND_Y), ww, Math.min(this.sh(6), groundH));
+    ctx.fillRect(wx0, this.wy(groundTopY), ww, Math.min(this.sh(6), groundH));
 
     // Ground skin (tiling pattern)
     if (m.groundSkin) {
@@ -273,12 +288,12 @@ class MapBuilder {
           ]));
           ctx.save();
           ctx.beginPath();
-          ctx.rect(wx0, this.wy(GROUND_Y), ww, groundH);
+          ctx.rect(wx0, this.wy(groundTopY), ww, groundH);
           ctx.clip();
-          ctx.translate(this.panX, this.wy(GROUND_Y));
+          ctx.translate(this.panX, this.wy(groundTopY));
           ctx.scale(this.scale, this.scale);
           ctx.fillStyle = pat;
-          ctx.fillRect(0, 0, m.worldWidth, this.worldH - GROUND_Y);
+          ctx.fillRect(0, 0, m.worldWidth, groundStripH);
           ctx.restore();
         }
       }
@@ -288,7 +303,7 @@ class MapBuilder {
     if (this.selectedGround) {
       ctx.strokeStyle = '#4ade80';
       ctx.lineWidth   = 2;
-      ctx.strokeRect(wx0, this.wy(GROUND_Y), ww, groundH);
+      ctx.strokeRect(wx0, this.wy(groundTopY), ww, groundH);
     }
 
     // World border
@@ -326,70 +341,77 @@ class MapBuilder {
       ctx.fillRect(tx, ty, tw, th);
       ctx.strokeRect(tx, ty, tw, th);
     };
-    const pBaseY = m.playerTowerY ?? GROUND_Y;
-    const eBaseY = m.enemyTowerY  ?? GROUND_Y;
+    const pBaseY = m.playerTowerY ?? this.groundTopY;
+    const eBaseY = m.enemyTowerY  ?? this.groundTopY;
     const pTpl   = getTowerTemplate(m.playerTowerTribe ?? 'tomaro');
     const eTpl   = getTowerTemplate(m.enemyTowerTribe  ?? 'meowee');
-    drawTower(m.playerTowerX, pBaseY, '#00b4d8', '#007fa3', this.selectedTower === 'player', false, pTpl.skin, pTpl.w, pTpl.h);
-    drawTower(m.enemyTowerX,  eBaseY, '#e63946', '#a02830', this.selectedTower === 'enemy',  true,  eTpl.skin, eTpl.w, eTpl.h);
 
-    // Blocks — draw in ascending zIndex order so higher-z blocks render on top.
-    const blockDrawOrder = m.blocks
-      .map((_, i) => i)
-      .sort((a, b) => (m.blocks[a].zIndex ?? 0) - (m.blocks[b].zIndex ?? 0));
+    // Unified z-sorted draw list: blocks, platforms, and towers share the same
+    // z-index space so towers can be layered relative to environment elements.
+    type LayerKind = 'block' | 'platform' | 'tower-player' | 'tower-enemy';
+    const layerItems: { kind: LayerKind; idx: number; z: number }[] = [];
+    for (let i = 0; i < m.blocks.length;    i++) layerItems.push({ kind: 'block',        idx: i, z: m.blocks[i].zIndex    ?? 0 });
+    for (let i = 0; i < m.platforms.length; i++) layerItems.push({ kind: 'platform',     idx: i, z: m.platforms[i].zIndex ?? 0 });
+    layerItems.push({ kind: 'tower-player', idx: 0, z: m.playerTowerZ ?? 0 });
+    layerItems.push({ kind: 'tower-enemy',  idx: 1, z: m.enemyTowerZ  ?? 0 });
+    layerItems.sort((a, b) => a.z - b.z);
 
-    for (const i of blockDrawOrder) {
-      const b   = m.blocks[i];
-      const sel = this.selectedKind === 'block' && i === this.selected;
-      const bx  = this.wx(b.x);
-      const by  = this.wy(b.y);
-      const bw  = this.sw(b.width);
-      const bh  = this.sh(b.height);
+    for (const item of layerItems) {
+      if (item.kind === 'tower-player') {
+        drawTower(m.playerTowerX, pBaseY, '#00b4d8', '#007fa3', this.selectedTower === 'player', false, pTpl.skin, pTpl.w, pTpl.h);
+        continue;
+      }
+      if (item.kind === 'tower-enemy') {
+        drawTower(m.enemyTowerX, eBaseY, '#e63946', '#a02830', this.selectedTower === 'enemy', true, eTpl.skin, eTpl.w, eTpl.h);
+        continue;
+      }
 
-      if (b.skin) {
-        const img = this.getSkinImage(b.skin);
-        if (img.complete && img.naturalWidth > 0) {
-          ctx.drawImage(img, bx, by, bw, bh);
+      if (item.kind === 'block') {
+        const i   = item.idx;
+        const b   = m.blocks[i];
+        const sel = this.selectedKind === 'block' && i === this.selected;
+        const bx  = this.wx(b.x);
+        const by  = this.wy(b.y);
+        const bw  = this.sw(b.width);
+        const bh  = this.sh(b.height);
+
+        if (b.skin) {
+          const img = this.getSkinImage(b.skin);
+          if (img.complete && img.naturalWidth > 0) {
+            ctx.drawImage(img, bx, by, bw, bh);
+          } else {
+            ctx.fillStyle = '#444';
+            ctx.fillRect(bx, by, bw, bh);
+          }
         } else {
-          ctx.fillStyle = '#444';
+          ctx.fillStyle   = sel ? '#a5b4fc' : '#6b7280';
+          ctx.strokeStyle = sel ? '#6366f1' : '#374151';
+          ctx.lineWidth   = sel ? 2 : 1;
           ctx.fillRect(bx, by, bw, bh);
+          ctx.strokeRect(bx, by, bw, bh);
         }
-      } else {
-        ctx.fillStyle   = sel ? '#a5b4fc' : '#6b7280';
-        ctx.strokeStyle = sel ? '#6366f1' : '#374151';
-        ctx.lineWidth   = sel ? 2 : 1;
-        ctx.fillRect(bx, by, bw, bh);
-        ctx.strokeRect(bx, by, bw, bh);
+
+        if (sel) {
+          ctx.strokeStyle = '#6366f1';
+          ctx.lineWidth   = 2;
+          ctx.strokeRect(bx, by, bw, bh);
+          ctx.fillStyle = '#ffffff';
+          const hw = 6, hh = 10;
+          ctx.fillRect(bx - hw / 2,      by + bh / 2 - hh / 2, hw, hh);
+          ctx.fillRect(bx + bw - hw / 2, by + bh / 2 - hh / 2, hw, hh);
+          const hw2 = 10, hh2 = 6;
+          ctx.fillRect(bx + bw / 2 - hw2 / 2, by - hh2 / 2,      hw2, hh2);
+          ctx.fillRect(bx + bw / 2 - hw2 / 2, by + bh - hh2 / 2, hw2, hh2);
+        }
+
+        if (b.anim) {
+          this.drawAnimGhost(ctx, b.x, b.y, b.anim.endX, b.anim.endY, b.width, b.height, sel);
+        }
+        continue;
       }
 
-      if (sel) {
-        ctx.strokeStyle = '#6366f1';
-        ctx.lineWidth   = 2;
-        ctx.strokeRect(bx, by, bw, bh);
-        ctx.fillStyle = '#ffffff';
-        // left / right handles (vertical pill)
-        const hw = 6, hh = 10;
-        ctx.fillRect(bx - hw / 2,      by + bh / 2 - hh / 2, hw, hh);
-        ctx.fillRect(bx + bw - hw / 2, by + bh / 2 - hh / 2, hw, hh);
-        // top / bottom handles (horizontal pill)
-        const hw2 = 10, hh2 = 6;
-        ctx.fillRect(bx + bw / 2 - hw2 / 2, by - hh2 / 2,      hw2, hh2);
-        ctx.fillRect(bx + bw / 2 - hw2 / 2, by + bh - hh2 / 2, hw2, hh2);
-      }
-
-      // Animation ghost: dashed outline at end position + connector + S/E labels.
-      if (b.anim) {
-        this.drawAnimGhost(ctx, b.x, b.y, b.anim.endX, b.anim.endY, b.width, b.height, sel);
-      }
-    }
-
-    // Platforms — draw in ascending zIndex order so higher-z platforms render on top.
-    // Sorting is done on a temporary index array so the original array (and stored indices) stay stable.
-    const platDrawOrder = m.platforms
-      .map((_, i) => i)
-      .sort((a, b) => (m.platforms[a].zIndex ?? 0) - (m.platforms[b].zIndex ?? 0));
-
-    for (const i of platDrawOrder) {
+      // platform
+      const i   = item.idx;
       const p   = m.platforms[i];
       const sel = this.selectedKind === 'platform' && i === this.selected;
       const px  = this.wx(p.x);
@@ -402,7 +424,6 @@ class MapBuilder {
         if (img.complete && img.naturalWidth > 0) {
           ctx.drawImage(img, px, py, pw, ph);
         } else {
-          // image not yet loaded — draw placeholder
           ctx.fillStyle = '#444';
           ctx.fillRect(px, py, pw, ph);
         }
@@ -417,22 +438,18 @@ class MapBuilder {
       }
 
       if (sel) {
-        // Selection outline + resize handles (drawn over skin or plain rect)
         ctx.strokeStyle = '#e0a500';
         ctx.lineWidth   = 2;
         ctx.strokeRect(px, py, pw, ph);
         ctx.fillStyle = '#ffffff';
-        // left / right handles (vertical pill)
         const hw = 6, hh = 10;
         ctx.fillRect(px - hw / 2,      py + ph / 2 - hh / 2, hw, hh);
         ctx.fillRect(px + pw - hw / 2, py + ph / 2 - hh / 2, hw, hh);
-        // top / bottom handles (horizontal pill)
         const hw2 = 10, hh2 = 6;
         ctx.fillRect(px + pw / 2 - hw2 / 2, py - hh2 / 2,      hw2, hh2);
         ctx.fillRect(px + pw / 2 - hw2 / 2, py + ph - hh2 / 2, hw2, hh2);
       }
 
-      // Animation ghost — dashed outline at end position + arrow + S/E labels
       if (p.anim) {
         this.drawAnimGhost(ctx, p.x, p.y, p.anim.endX, p.anim.endY, p.width, p.height, sel);
       }
@@ -651,6 +668,12 @@ class MapBuilder {
       String(this.map.backgroundSkinY ?? 0);
   }
 
+  private syncBackgroundSkin2Preview() {
+    this.syncSkinPreview('preview-bg-skin2', 'btn-clear-bg-skin2', this.map.backgroundSkin2, 'input-bg-skin2');
+    (document.getElementById('input-bg-skin2-y') as HTMLInputElement).value =
+      String(this.map.backgroundSkin2Y ?? 0);
+  }
+
   private syncGroundSkinPreview() {
     this.syncSkinPreview('preview-ground-skin', 'btn-clear-ground-skin', this.map.groundSkin, 'input-ground-skin');
   }
@@ -721,7 +744,7 @@ class MapBuilder {
     if (this.drag.kind === 'platform-move') {
       const p = m.platforms[this.drag.idx];
       p.x = Math.round(wx - this.drag.ox);
-      p.y = Math.min(GROUND_Y - p.height, Math.round(wy - this.drag.oy));
+      p.y = Math.min(this.groundTopY - p.height, Math.round(wy - this.drag.oy));
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'platform-left') {
       const p   = m.platforms[this.drag.idx];
@@ -741,12 +764,12 @@ class MapBuilder {
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'platform-bottom') {
       const p  = m.platforms[this.drag.idx];
-      p.height = Math.max(20, Math.round(Math.min(wy, GROUND_Y) - p.y));
+      p.height = Math.max(20, Math.round(Math.min(wy, this.groundTopY) - p.y));
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'block-move') {
       const b = m.blocks[this.drag.idx];
       b.x = Math.round(wx - this.drag.ox);
-      b.y = Math.min(GROUND_Y - b.height, Math.round(wy - this.drag.oy));
+      b.y = Math.min(this.groundTopY - b.height, Math.round(wy - this.drag.oy));
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'block-left') {
       const b  = m.blocks[this.drag.idx];
@@ -766,21 +789,21 @@ class MapBuilder {
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'block-bottom') {
       const b  = m.blocks[this.drag.idx];
-      b.height = Math.max(20, Math.round(Math.min(wy, GROUND_Y) - b.y));
+      b.height = Math.max(20, Math.round(Math.min(wy, this.groundTopY) - b.y));
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'coinbox') {
       m.coinBox.x = Math.round(wx - this.drag.ox);
-      m.coinBox.y = Math.min(GROUND_Y - m.coinBox.height, Math.round(wy - this.drag.oy));
+      m.coinBox.y = Math.min(this.groundTopY - m.coinBox.height, Math.round(wy - this.drag.oy));
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'tower-player') {
       m.playerTowerX = Math.max(TOWER_W / 2 + 5, Math.round(wx - this.drag.ox));
       const newY = Math.round(wy - this.drag.oy);
-      m.playerTowerY = newY >= GROUND_Y ? undefined : Math.max(TOWER_H + 20, newY);
+      m.playerTowerY = newY >= this.groundTopY ? undefined : Math.max(TOWER_H + 20, newY);
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'tower-enemy') {
       m.enemyTowerX = Math.min(m.worldWidth - TOWER_W / 2 - 5, Math.round(wx - this.drag.ox));
       const newY = Math.round(wy - this.drag.oy);
-      m.enemyTowerY = newY >= GROUND_Y ? undefined : Math.max(TOWER_H + 20, newY);
+      m.enemyTowerY = newY >= this.groundTopY ? undefined : Math.max(TOWER_H + 20, newY);
       this.syncInputsFromMap();
     }
     this.canvas.style.cursor = 'grabbing';
@@ -820,8 +843,8 @@ class MapBuilder {
       return 'grab';
 
     // Towers
-    const pBaseY = m.playerTowerY ?? GROUND_Y;
-    const eBaseY = m.enemyTowerY  ?? GROUND_Y;
+    const pBaseY = m.playerTowerY ?? this.groundTopY;
+    const eBaseY = m.enemyTowerY  ?? this.groundTopY;
     if (wx >= m.playerTowerX - TOWER_W / 2 && wx <= m.playerTowerX + TOWER_W / 2 &&
         wy >= pBaseY - TOWER_H && wy <= pBaseY)
       return 'grab';
@@ -977,7 +1000,7 @@ class MapBuilder {
 
     // Player tower
     {
-      const pBaseY = m.playerTowerY ?? GROUND_Y;
+      const pBaseY = m.playerTowerY ?? this.groundTopY;
       if (wx >= m.playerTowerX - TOWER_W / 2 && wx <= m.playerTowerX + TOWER_W / 2 &&
           wy >= pBaseY - TOWER_H && wy <= pBaseY) {
         this.clearSelection(); this.selectedTower = 'player';
@@ -991,12 +1014,12 @@ class MapBuilder {
 
     // Enemy tower
     {
-      const eBaseY = m.enemyTowerY ?? GROUND_Y;
+      const eBaseY = m.enemyTowerY ?? this.groundTopY;
       if (wx >= m.enemyTowerX - TOWER_W / 2 && wx <= m.enemyTowerX + TOWER_W / 2 &&
           wy >= eBaseY - TOWER_H && wy <= eBaseY) {
         this.clearSelection(); this.selectedTower = 'enemy';
         this.pushUndo();
-        this.drag = { kind: 'tower-enemy', ox: wx - m.enemyTowerX, oy: wy - (m.enemyTowerY ?? GROUND_Y) };
+        this.drag = { kind: 'tower-enemy', ox: wx - m.enemyTowerX, oy: wy - (m.enemyTowerY ?? this.groundTopY) };
         this.syncInputsFromMap();
         document.getElementById('section-enemy-tower')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         return;
@@ -1004,7 +1027,7 @@ class MapBuilder {
     }
 
     // Ground strip — not draggable, just selectable
-    if (wx >= 0 && wx <= m.worldWidth && wy >= GROUND_Y) {
+    if (wx >= 0 && wx <= m.worldWidth && wy >= this.groundTopY) {
       this.clearSelection(); this.selectedGround = true;
       this.syncInputsFromMap();
       document.getElementById('section-ground')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1121,7 +1144,7 @@ class MapBuilder {
         const maxZ   = MapBuilder.maxZOf(m.platforms);
         const zIndex = maxZ + 1;
         this.pushUndo();
-        m.platforms.push({ id, x: Math.round(m.worldWidth / 2 - w / 2), y: GROUND_Y - 260, width: w, height: h, zIndex });
+        m.platforms.push({ id, x: Math.round(m.worldWidth / 2 - w / 2), y: this.groundTopY - 260, width: w, height: h, zIndex });
         this.clearSelection();
         this.selected     = m.platforms.length - 1;
         this.selectedKind = 'platform';
@@ -1144,7 +1167,7 @@ class MapBuilder {
       const maxZ = MapBuilder.maxZOf(m.blocks);
       const zIndex = maxZ + 1;
       this.pushUndo();
-      m.blocks.push({ x: cx - 100, y: GROUND_Y - 80, width: 200, height: 40, zIndex });
+      m.blocks.push({ x: cx - 100, y: this.groundTopY - 80, width: 200, height: 40, zIndex });
       this.clearSelection();
       this.selected     = m.blocks.length - 1;
       this.selectedKind = 'block';
@@ -1185,19 +1208,26 @@ class MapBuilder {
       const margin = TOWER_W / 2 + 5;
       this.map.playerTowerX = Math.max(margin, Math.min(this.map.playerTowerX, val - margin));
       this.map.enemyTowerX  = Math.max(margin, Math.min(this.map.enemyTowerX,  val - margin));
-      this.fitView();
       this.syncInputsFromMap();
     });
 
-    // World height input — ground Y is fixed; extra height extends the sky above it
+    // World height input — adjusts total canvas height (sky + ground strip together)
     document.getElementById('input-world-height')!.addEventListener('change', () => {
-      const val    = parseInt((document.getElementById('input-world-height') as HTMLInputElement).value, 10);
-      const minH   = GROUND_Y + 80;   // must keep at least 80 px of ground strip visible
+      const val  = parseInt((document.getElementById('input-world-height') as HTMLInputElement).value, 10);
+      const minH = GROUND_Y + 20;   // must keep at least 20 px of ground strip
       if (isNaN(val) || val < minH) return;
       this.pushUndo();
-      // Store undefined when matching the default so exported JSON stays clean
       this.map.worldHeight = val === WORLD_H ? undefined : val;
-      this.fitView();
+      this.syncInputsFromMap();
+    });
+
+    // Ground height input — controls only the visual green strip; does not affect Map Height
+    document.getElementById('input-ground-height')!.addEventListener('change', () => {
+      const val = parseInt((document.getElementById('input-ground-height') as HTMLInputElement).value, 10);
+      if (isNaN(val) || val < 20) return;
+      this.pushUndo();
+      const defaultGH = (this.map.worldHeight ?? WORLD_H) - GROUND_Y;
+      this.map.groundHeight = val === defaultGH ? undefined : val;
       this.syncInputsFromMap();
     });
 
@@ -1237,6 +1267,30 @@ class MapBuilder {
       const val = parseInt((document.getElementById('input-bg-skin-y') as HTMLInputElement).value, 10);
       if (isNaN(val) || val === 0) delete this.map.backgroundSkinY;
       else                         this.map.backgroundSkinY = val;
+    });
+
+    // Far background skin picker
+    document.getElementById('input-bg-skin2')!.addEventListener('change', e => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      this.pushUndo();
+      const reader = new FileReader();
+      reader.onload = () => {
+        this.map.backgroundSkin2 = reader.result as string;
+        this.syncBackgroundSkin2Preview();
+      };
+      reader.readAsDataURL(file);
+    });
+    document.getElementById('btn-clear-bg-skin2')!.addEventListener('click', () => {
+      this.pushUndo();
+      delete this.map.backgroundSkin2;
+      (document.getElementById('input-bg-skin2') as HTMLInputElement).value = '';
+      this.syncBackgroundSkin2Preview();
+    });
+    document.getElementById('input-bg-skin2-y')!.addEventListener('input', () => {
+      const val = parseInt((document.getElementById('input-bg-skin2-y') as HTMLInputElement).value, 10);
+      if (isNaN(val) || val === 0) delete this.map.backgroundSkin2Y;
+      else                         this.map.backgroundSkin2Y = val;
     });
 
     document.getElementById('btn-save-to-game')!.addEventListener('click', () => {
@@ -1407,7 +1461,7 @@ class MapBuilder {
     document.getElementById('input-player-y')!.addEventListener('change', () => {
       this.pushUndo();
       const val = parseInt((document.getElementById('input-player-y') as HTMLInputElement).value, 10);
-      this.map.playerTowerY = isNaN(val) || val >= GROUND_Y ? undefined : Math.max(TOWER_H + 20, val);
+      this.map.playerTowerY = isNaN(val) || val >= this.groundTopY ? undefined : Math.max(TOWER_H + 20, val);
     });
     document.getElementById('input-enemy-x')!.addEventListener('change', () => {
       this.pushUndo();
@@ -1416,7 +1470,7 @@ class MapBuilder {
     document.getElementById('input-enemy-y')!.addEventListener('change', () => {
       this.pushUndo();
       const val = parseInt((document.getElementById('input-enemy-y') as HTMLInputElement).value, 10);
-      this.map.enemyTowerY = isNaN(val) || val >= GROUND_Y ? undefined : Math.max(TOWER_H + 20, val);
+      this.map.enemyTowerY = isNaN(val) || val >= this.groundTopY ? undefined : Math.max(TOWER_H + 20, val);
     });
 
     // Tower default-tribe dropdowns — populate options and wire change handlers.
@@ -1436,6 +1490,18 @@ class MapBuilder {
         if (side === 'player') this.map.playerTowerTribe = t;
         else                   this.map.enemyTowerTribe  = t;
       });
+    });
+
+    // Tower Z-index inputs
+    document.getElementById('input-player-z')!.addEventListener('change', () => {
+      this.pushUndo();
+      const val = parseInt((document.getElementById('input-player-z') as HTMLInputElement).value, 10);
+      this.map.playerTowerZ = isNaN(val) || val === 0 ? undefined : val;
+    });
+    document.getElementById('input-enemy-z')!.addEventListener('change', () => {
+      this.pushUndo();
+      const val = parseInt((document.getElementById('input-enemy-z') as HTMLInputElement).value, 10);
+      this.map.enemyTowerZ = isNaN(val) || val === 0 ? undefined : val;
     });
 
     this.bindTribeSkinsModal();
@@ -1647,12 +1713,14 @@ class MapBuilder {
 
     if (playerSel) {
       (document.getElementById('input-player-x')      as HTMLInputElement).value  = String(m.playerTowerX);
-      (document.getElementById('input-player-y')      as HTMLInputElement).value  = String(m.playerTowerY ?? GROUND_Y);
+      (document.getElementById('input-player-y')      as HTMLInputElement).value  = String(m.playerTowerY ?? this.groundTopY);
+      (document.getElementById('input-player-z')      as HTMLInputElement).value  = String(m.playerTowerZ ?? 0);
       (document.getElementById('input-player-tribe')  as HTMLSelectElement).value = m.playerTowerTribe ?? 'tomaro';
     }
     if (enemySel) {
       (document.getElementById('input-enemy-x')      as HTMLInputElement).value  = String(m.enemyTowerX);
-      (document.getElementById('input-enemy-y')      as HTMLInputElement).value  = String(m.enemyTowerY  ?? GROUND_Y);
+      (document.getElementById('input-enemy-y')      as HTMLInputElement).value  = String(m.enemyTowerY  ?? this.groundTopY);
+      (document.getElementById('input-enemy-z')      as HTMLInputElement).value  = String(m.enemyTowerZ  ?? 0);
       (document.getElementById('input-enemy-tribe')  as HTMLSelectElement).value = m.enemyTowerTribe ?? 'meowee';
     }
     if (coinSel) {
@@ -1691,17 +1759,19 @@ class MapBuilder {
     }
     if (groundSel) {
       (document.getElementById('display-ground-w') as HTMLInputElement).value = String(m.worldWidth);
-      (document.getElementById('display-ground-h') as HTMLInputElement).value = String(this.worldH - GROUND_Y);
+      (document.getElementById('display-ground-h') as HTMLInputElement).value = String(this.groundStripH);
       (document.getElementById('input-ground-tile-w') as HTMLInputElement).value = m.groundSkinTileW !== undefined ? String(m.groundSkinTileW) : '';
       (document.getElementById('input-ground-tile-h') as HTMLInputElement).value = m.groundSkinTileH !== undefined ? String(m.groundSkinTileH) : '';
       this.syncGroundSkinPreview();
     }
     if (bgSel) {
       this.syncBackgroundSkinPreview();
+      this.syncBackgroundSkin2Preview();
     }
     if (settingsSel) {
-      (document.getElementById('input-world-width')  as HTMLInputElement).value = String(m.worldWidth);
-      (document.getElementById('input-world-height') as HTMLInputElement).value = String(m.worldHeight ?? WORLD_H);
+      (document.getElementById('input-world-width')   as HTMLInputElement).value = String(m.worldWidth);
+      (document.getElementById('input-world-height')  as HTMLInputElement).value = String(m.worldHeight ?? WORLD_H);
+      (document.getElementById('input-ground-height') as HTMLInputElement).value = String(m.groundHeight ?? (m.worldHeight ?? WORLD_H) - GROUND_Y);
       const total       = m.durationSec ?? GameConfig.canvas.durationSec;
       const isOverride  = m.durationSec !== undefined;
       const mins        = Math.floor(total / 60);
@@ -2016,7 +2086,11 @@ class MapBuilder {
   }
 
   private exportAllToFile(): void {
-    const allMaps = WORLDS.flatMap(w => [...w.maps]).map(m => loadMapWithOverride(m));
+    // Use the live in-memory map for whichever campaign map is currently loaded
+    // so unsaved edits are captured without requiring "Save to Game" first.
+    const allMaps = WORLDS.flatMap(w => [...w.maps]).map(m =>
+      m.id === this.map.id ? this.map : loadMapWithOverride(m),
+    );
     const pkg = {
       version:        1,
       type:           'coin_map_collection',
@@ -2028,7 +2102,8 @@ class MapBuilder {
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
-    a.download = 'all-maps.coinmap.json';
+    const dt = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
+    a.download = `mapbuilder-coins-all-${dt}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }

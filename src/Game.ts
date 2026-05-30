@@ -88,12 +88,14 @@ const CHAR_CONFIGS = {
   rocketeer: ROCKETEER,
 } as const;
 
-const PARALLAX_FACTOR = 0.15; // mountains scroll at 10 % of world camera speed
+const PARALLAX_FACTOR     = 0.15; // near background scrolls at 15 % of world camera speed
+const PARALLAX_FACTOR_FAR = 0.05; // far background scrolls at 5 % — feels more distant
 
 export class Game {
   readonly app: PIXI.Application;
 
-  private parallaxGfx!: PIXI.Container;
+  private parallaxGfx!:  PIXI.Container;
+  private parallaxGfx2!: PIXI.Container;
   private rangeMarkers!: PIXI.Container;
   private devMode = false;
   private playerTower!: Tower;
@@ -141,6 +143,7 @@ export class Game {
 
   private world!:     PIXI.Container;
   private cameraX  = 0;
+  private cameraY  = 0;
   private readonly keysDown = new Set<string>();
 
   private navGraph!: NavGraph;
@@ -158,7 +161,7 @@ export class Game {
   private staticCollisionBoxes: CollisionBoxData[] = [];
 
   private readonly onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault();
       this.keysDown.add(e.key);
     }
@@ -196,13 +199,17 @@ export class Game {
   // ArrowLeft / ArrowRight which adjust cameraX directly each frame.
   private isDragging          = false;
   private dragStartClientX    = 0;
+  private dragStartClientY    = 0;
   private dragStartCameraX    = 0;
+  private dragStartCameraY    = 0;
 
   private readonly onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0) return;   // primary button only — don't fight right-click menus
     this.isDragging       = true;
     this.dragStartClientX = e.clientX;
+    this.dragStartClientY = e.clientY;
     this.dragStartCameraX = this.cameraX;
+    this.dragStartCameraY = this.cameraY;
     const c = this.app.view as HTMLCanvasElement;
     c.style.cursor = 'grabbing';
     c.setPointerCapture?.(e.pointerId);
@@ -210,12 +217,13 @@ export class Game {
 
   private readonly onPointerMove = (e: PointerEvent) => {
     if (!this.isDragging) return;
-    // Inverse drag: dragging the map right (positive dx) should shift the
-    // camera *left* so the user feels they're sliding the world under the
-    // viewport. Divide by GAME_ZOOM so 1 client px == 1 world px regardless
-    // of zoom level.
+    // Inverse drag: dragging the map right/down (positive dx/dy) should shift
+    // the camera left/up so the user feels they're sliding the world.
+    // Divide by GAME_ZOOM so 1 client px == 1 world px regardless of zoom.
     const dx = e.clientX - this.dragStartClientX;
+    const dy = e.clientY - this.dragStartClientY;
     this.cameraX = this.dragStartCameraX - dx / GAME_ZOOM;
+    this.cameraY = this.dragStartCameraY + dy / GAME_ZOOM;
     // tick() runs the clamp on every frame, so we don't need to clamp here.
   };
 
@@ -284,6 +292,13 @@ export class Game {
   private cpuStanceMs         = 0;
   private cullingFrame        = 0;
 
+  // Performance: cached values recomputed at lower frequency than 60 fps
+  private mapGroundY               = GROUND_Y;  // per-map ground surface Y; set in build()
+  private cachedLowestPlatY        = GROUND_Y;  // lowest platform top; set in build()
+  private cachedEnemyOppClustered  = false;      // player chars clustered; updated with stance
+  private cachedPlayerOppClustered = false;      // enemy chars clustered (cpuVsCpu only)
+  private navGraphRebuildTimer     = 0;          // ms since last rebuild; throttles animated-block rebuilds
+
   constructor(
     canvas:              HTMLCanvasElement,
     hudEl:               HTMLElement,
@@ -348,6 +363,9 @@ export class Game {
 
   private build() {
     const m = this.mapDef;
+    this.mapGroundY = (m.worldHeight ?? GAME_HEIGHT) - (m.groundHeight ?? (GAME_HEIGHT - GROUND_Y));
+    // Default vertical scroll: ground surface sits 60px above the canvas bottom.
+    this.cameraY = (GAME_HEIGHT - 60 - this.mapGroundY) / GAME_ZOOM;
     const towerFaceL = m.playerTowerX + TOWER_WIDTH / 2;
     const towerFaceR = m.enemyTowerX  - TOWER_WIDTH / 2;
 
@@ -369,6 +387,8 @@ export class Game {
       this.platformData.push(plat.data);
       platLayer.addChild(plat.container);
     }
+    this.cachedLowestPlatY = this.platformData.reduce((minY, p) => Math.min(minY, p.y), this.mapGroundY);
+    this.navGraphRebuildTimer = 0;
 
     // Build one Block visual per map block
     this.blocks = m.blocks.map(b => new Block(b));
@@ -378,7 +398,7 @@ export class Game {
       this.world.addChild(blk.container);
     }
 
-    this.physics = new Physics(m.worldWidth, m.playerTowerX, m.enemyTowerX, m.platforms);
+    this.physics = new Physics(m.worldWidth, m.playerTowerX, m.enemyTowerX, m.platforms, this.mapGroundY);
     this.blockBodies.length = 0;
     for (const blk of this.blocks) {
       const body = this.physics.createBlockBody(blk.data.x, blk.data.y, blk.data.width, blk.data.height);
@@ -405,14 +425,14 @@ export class Game {
     this.world.addChild(this.labelLayer);
     initVfx(this.vfxLayer);
 
-    this.playerTower = new Tower('player', m.playerTowerX, m.playerTowerY ?? GROUND_Y, getPlayerTribe());
-    this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerY  ?? GROUND_Y, getEnemyTribe());
+    this.playerTower = new Tower('player', m.playerTowerX, m.playerTowerY ?? this.mapGroundY, getPlayerTribe());
+    this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerY  ?? this.mapGroundY, getEnemyTribe());
     this.world.addChild(this.playerTower.container);
     this.world.addChild(this.enemyTower.container);
 
     // Navigation graph — built from current platforms; rebuild whenever map changes.
     this.navGraph = new NavGraph();
-    this.navGraph.build(this.platformData, m.playerTowerX, m.enemyTowerX, this.blockData);
+    this.navGraph.build(this.platformData, m.playerTowerX, m.enemyTowerX, this.blockData, this.mapGroundY);
 
     // Tower physics bodies — solid, block character movement.
     this.physics.createTowerBody(this.playerTower.collisionCenterX, this.playerTower.collisionWidth);
@@ -444,31 +464,49 @@ export class Game {
     ];
 
     // Ground plane — drawn above all game objects so units appear grounded.
-    buildGround(this.world, m.worldWidth, m.groundSkin, m.groundSkinTileW, m.groundSkinTileH);
+    buildGround(this.world, m.worldWidth, m.groundSkin, m.groundSkinTileW, m.groundSkinTileH, this.mapGroundY, m.worldHeight ?? GAME_HEIGHT);
 
     // Debug overlay — drawn on top of everything in world space.
     this.collisionDebugLayer = new PIXI.Graphics();
     this.collisionDebugLayer.visible = false;
     this.world.addChild(this.collisionDebugLayer);
 
-    // Zoom: scale the whole world container; anchor world.y so GROUND_Y stays at
-    // its current screen position, keeping the horizon visually stable.
+    // Zoom: scale the whole world container; anchor world.y so the map ground
+    // surface stays at a fixed screen position, keeping the horizon visually stable.
     this.world.scale.set(GAME_ZOOM);
-    this.world.y = GROUND_Y * (1 - GAME_ZOOM);
+    this.world.y = this.mapGroundY * (1 - GAME_ZOOM) + this.cameraY * GAME_ZOOM;
 
-    // Parallax mountain backdrop — sits on app.stage before the world so it
-    // renders behind all world content.  Width covers the viewport plus the
-    // maximum horizontal shift the layer can reach at full camera travel.
-    const maxCameraX   = m.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM;
-    const parallaxWide = Math.ceil(VIEWPORT_WIDTH + maxCameraX * PARALLAX_FACTOR);
-    this.parallaxGfx   = new PIXI.Container();
+    // Parallax backdrop layers — both sit on app.stage before the world so they
+    // render behind all world content.  Width covers the viewport plus the
+    // maximum horizontal shift each layer can reach at full camera travel.
+    const maxCameraX    = m.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM;
+    const parallaxWide  = Math.ceil(VIEWPORT_WIDTH + maxCameraX * PARALLAX_FACTOR);
+    const parallaxWide2 = Math.ceil(VIEWPORT_WIDTH + maxCameraX * PARALLAX_FACTOR_FAR);
+
+    // Far layer (behind everything) — optional image, no procedural fallback.
+    this.parallaxGfx2 = new PIXI.Container();
+    if (m.backgroundSkin2) {
+      PIXI.Assets.load<PIXI.Texture>(m.backgroundSkin2)
+        .then(tex => {
+          const sprite = new PIXI.Sprite(tex);
+          sprite.y      = m.backgroundSkin2Y ?? 0;
+          sprite.width  = parallaxWide2;
+          sprite.height = this.mapGroundY;
+          this.parallaxGfx2.addChild(sprite);
+        })
+        .catch(() => { /* silent — far layer is purely optional */ });
+    }
+    this.app.stage.addChild(this.parallaxGfx2);
+
+    // Near layer — image skin or procedural mountains.
+    this.parallaxGfx = new PIXI.Container();
     if (m.backgroundSkin) {
       PIXI.Assets.load<PIXI.Texture>(m.backgroundSkin)
         .then(tex => {
           const sprite = new PIXI.Sprite(tex);
           sprite.y      = m.backgroundSkinY ?? 0;
           sprite.width  = parallaxWide;
-          sprite.height = GROUND_Y;
+          sprite.height = this.mapGroundY;
           this.parallaxGfx.addChild(sprite);
         })
         .catch(() => {
@@ -645,7 +683,7 @@ export class Game {
     // (not centre) sits at the tribe's configured spawn point — keeps the
     // body from overlapping the tower physics box.
     const spawnX  = this.playerTower.spawnX + config.width / 2;
-    const c = new Character('player', spawnX, this.playerTower.spawnY, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type));
+    const c = new Character('player', spawnX, this.playerTower.spawnY, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type), this.mapGroundY);
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
@@ -725,6 +763,19 @@ export class Game {
     return stance;
   }
 
+  /** Returns true if 3+ characters in `chars` sit within 80 px of any single one. */
+  private isCharsClustered(chars: Character[]): boolean {
+    const RADIUS    = 80;
+    const THRESHOLD = 3;
+    for (const c of chars) {
+      let count = 0;
+      for (const other of chars) {
+        if (Math.abs(c.x - other.x) <= RADIUS && ++count >= THRESHOLD) return true;
+      }
+    }
+    return false;
+  }
+
   private spawnCpu(self: 'player' | 'enemy', selfChars: Character[], oppChars: Character[]) {
     if (this.isOver) return;
 
@@ -739,20 +790,11 @@ export class Game {
     type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'viking' | 'knight' | 'heavy' | 'rocketeer' | 'grenadier';
     let order: UnitType[];
 
-    // Opponent cluster detection: if 3+ opponents sit within CLUSTER_RADIUS
-    // of any single opponent, splash damage is high-value — switch the push
-    // stance into a splash-heavy spawn order.
-    const CLUSTER_RADIUS    = 80;
-    const CLUSTER_THRESHOLD = 3;
-    let maxCluster = 0;
-    for (const c of oppChars) {
-      let count = 0;
-      for (const other of oppChars) {
-        if (Math.abs(c.x - other.x) <= CLUSTER_RADIUS) count++;
-      }
-      if (count > maxCluster) maxCluster = count;
-    }
-    const opponentsClustered = maxCluster >= CLUSTER_THRESHOLD;
+    // Opponent cluster result is pre-computed every 500 ms alongside the stance
+    // assessment — no need to run the O(n²) scan here on every spawn call.
+    const opponentsClustered = self === 'enemy'
+      ? this.cachedEnemyOppClustered
+      : this.cachedPlayerOppClustered;
 
     if (stance === 'push') {
       if (opponentsClustered && balance >= CHAR_COST.rocketeer) {
@@ -792,9 +834,13 @@ export class Game {
     const cpuTribe   = tribeForSide(self);
     const roster     = TRIBE_ROSTERS[cpuTribe];
     const heavyMelee = heavyMeleeForTribe(cpuTribe);
-    order = order
-      .map(t => (t === 'knight' || t === 'viking') ? heavyMelee as UnitType : t)
-      .filter(t => roster.includes(t));
+    const rosterSet = new Set<string>(roster);
+    const resolved: UnitType[] = [];
+    for (const t of order) {
+      const mapped = (t === 'knight' || t === 'viking') ? heavyMelee as UnitType : t;
+      if (rosterSet.has(mapped)) resolved.push(mapped);
+    }
+    order = resolved;
 
     for (const type of order) {
       const cost = CHAR_COST[type];
@@ -812,7 +858,7 @@ export class Game {
       const cpuSpawnX   = self === 'enemy'
         ? towerSpawnX - cpuConfig.width / 2
         : towerSpawnX + cpuConfig.width / 2;
-      const c = new Character(self, cpuSpawnX, spawnY, cpuConfig, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type));
+      const c = new Character(self, cpuSpawnX, spawnY, cpuConfig, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type), this.mapGroundY);
       this.characters.push(c);
       this.unitLayer.addChild(c.container);
       if (self === 'player') this.hud.add(c);
@@ -841,13 +887,14 @@ export class Game {
     const cb        = this.mapDef.coinBox;
     const wallL     = this.mapDef.playerTowerX - TOWER_WIDTH / 2;
     const wallR     = this.mapDef.enemyTowerX  + TOWER_WIDTH / 2;
-    // Aim vxMax so a coin spread by spreadDeg lands on the lowest platform (rough target)
-    const lowestPlatY = this.platformData.reduce((minY, p) => Math.min(minY, p.y), GROUND_Y);
+    // Aim vxMax so a coin spread by spreadDeg lands on the lowest platform (rough target).
+    // cachedLowestPlatY is set once in build() — sufficient precision for spread physics.
+    const lowestPlatY = this.cachedLowestPlatY;
     const fallH     = lowestPlatY - (cb.y + cb.height);
     const spreadRad = cb.spreadDeg * (Math.PI / 180);
     const vxMax     = Math.tan(spreadRad) * Math.sqrt(Math.max(1, fallH) * COIN_GRAVITY / 2);
     const vx        = (Math.random() * 2 - 1) * vxMax;
-    const coin = new Coin(cb.x, COIN_LIFETIME_S, value, kind, vx, 0, cb.y + cb.height, this.physics, dt, wallL, wallR);
+    const coin = new Coin(cb.x, COIN_LIFETIME_S, value, kind, vx, 0, cb.y + cb.height, this.physics, dt, wallL, wallR, this.mapGroundY);
     this.coins.push(coin);
     this.coinLayer.addChild(coin.container);
   }
@@ -951,12 +998,19 @@ export class Game {
       carryStanders(plat.data.x, plat.data.y, plat.data.width, dx, dy);
     }
 
-    // Any animated surface that actually moved this tick invalidates the
-    // NavGraph: surface splits shift, block-top + platform surfaces relocate.
-    // Rebuild so the next requestPath() sees the live geometry. Characters
-    // cache navGraph.version and refresh their cached paths when it bumps.
+    // Any animated surface that actually moved this tick invalidates the NavGraph.
+    // Throttle to ~30 rebuilds/s (every 33 ms) so the O(n²) edge pass doesn't
+    // run 60× per second during continuous animation. When movement stops, do
+    // one final rebuild to sync the navGraph to the at-rest geometry.
     if (anyMoved) {
-      this.navGraph.build(this.platformData, this.mapDef.playerTowerX, this.mapDef.enemyTowerX, this.blockData);
+      this.navGraphRebuildTimer += dt * 1000;
+      if (this.navGraphRebuildTimer >= 33) {
+        this.navGraphRebuildTimer = 0;
+        this.navGraph.build(this.platformData, this.mapDef.playerTowerX, this.mapDef.enemyTowerX, this.blockData, this.mapGroundY);
+      }
+    } else if (this.navGraphRebuildTimer > 0) {
+      this.navGraphRebuildTimer = 0;
+      this.navGraph.build(this.platformData, this.mapDef.playerTowerX, this.mapDef.enemyTowerX, this.blockData, this.mapGroundY);
     }
   }
 
@@ -1027,9 +1081,21 @@ export class Game {
     const CAMERA_SPEED = 500; // px/s
     if (this.keysDown.has('ArrowLeft'))  this.cameraX -= CAMERA_SPEED * dt;
     if (this.keysDown.has('ArrowRight')) this.cameraX += CAMERA_SPEED * dt;
-    this.cameraX        = Math.max(0, Math.min(this.mapDef.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM, this.cameraX));
+    if (this.keysDown.has('ArrowUp'))    this.cameraY += CAMERA_SPEED * dt;
+    if (this.keysDown.has('ArrowDown'))  this.cameraY -= CAMERA_SPEED * dt;
+    this.cameraX = Math.max(0, Math.min(this.mapDef.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM, this.cameraX));
+    // Y: positive cameraY = scrolled up (world Y=0 toward canvas top); negative = scrolled down.
+    // world.y = zoom_anchor + cameraY*GAME_ZOOM, so larger cameraY raises the world on screen.
+    // Max up: world Y=0 at canvas top.
+    // Max down: world bottom (worldHeight) at canvas bottom.
+    const worldH  = (this.mapDef.worldHeight ?? GAME_HEIGHT) as number;
+    const camYMax = Math.max(0, this.mapGroundY * (GAME_ZOOM - 1) / GAME_ZOOM);
+    const camYMin = Math.min(0, GAME_HEIGHT / GAME_ZOOM - worldH + this.mapGroundY * (GAME_ZOOM - 1) / GAME_ZOOM);
+    this.cameraY  = Math.max(camYMin, Math.min(camYMax, this.cameraY));
     this.world.x        = -this.cameraX * GAME_ZOOM;
-    this.parallaxGfx.x  = -this.cameraX * PARALLAX_FACTOR;
+    this.world.y        = this.mapGroundY * (1 - GAME_ZOOM) + this.cameraY * GAME_ZOOM;
+    this.parallaxGfx.x   = -this.cameraX * PARALLAX_FACTOR;
+    this.parallaxGfx2.x  = -this.cameraX * PARALLAX_FACTOR_FAR;
     setViewport(this.cameraX, this.cameraX + VIEWPORT_WIDTH / GAME_ZOOM);
 
     if (this.isOver)   { this.tickGameOver(dt, ticker.deltaMS); return; }
@@ -1057,12 +1123,15 @@ export class Game {
     }
     const liveChars = this.liveChars;
 
-    // Throttle stance assessment to every 500 ms — frame-perfect precision not needed
+    // Throttle stance assessment to every 500 ms — frame-perfect precision not needed.
+    // Also refresh the opponent-cluster cache here: same cadence, avoids a per-spawn O(n²) scan.
     this.cpuStanceMs += ticker.deltaMS;
     if (this.cpuStanceMs >= 500) {
       this.cpuStanceMs = 0;
       this.cpuStance = this.assessCpuStance('enemy', this.enemyLive, this.playerLive);
       if (this.cpuVsCpu) this.playerStance = this.assessCpuStance('player', this.playerLive, this.enemyLive);
+      this.cachedEnemyOppClustered  = this.isCharsClustered(this.playerLive);
+      if (this.cpuVsCpu) this.cachedPlayerOppClustered = this.isCharsClustered(this.enemyLive);
     }
 
     // CPU auto-spawn (uses liveChars for strategic decisions)
@@ -1147,7 +1216,7 @@ export class Game {
       const innerLeft  = this.mapDef.playerTowerX + TOWER_WIDTH / 2 + 60;
       const innerRight = this.mapDef.enemyTowerX  - TOWER_WIDTH / 2 - 60;
       const px  = Math.max(innerLeft, Math.min(innerRight, this.powerUpIndicatorX));
-      const pu  = new PowerUp(px, this.powerUpTypePreview, this.physics);
+      const pu  = new PowerUp(px, this.powerUpTypePreview, this.physics, this.mapGroundY);
       this.powerUps.push(pu);
       this.powerUpLayer.addChild(pu.container);
     }
@@ -1188,7 +1257,7 @@ export class Game {
     // that change each tick to eliminate per-character object + closure allocation.
     this.playerCtx.dt                   = dt;
     this.playerCtx.enemyTowerFrontX     = this.enemyTower.frontX;
-    this.playerCtx.enemyTowerY          = this.enemyTower.baseY - TOWER_HEIGHT * 0.5;
+    this.playerCtx.enemyTowerY          = this.enemyTower.centerY;
     this.playerCtx.enemyTowerBaseFloorY = this.enemyTower.baseY;
     this.playerCtx.homeTowerFrontX      = this.playerTower.frontX;
     this.playerCtx.homeTowerBaseFloorY  = this.playerTower.baseY;
@@ -1196,7 +1265,7 @@ export class Game {
 
     this.enemyCtx.dt                   = dt;
     this.enemyCtx.enemyTowerFrontX     = this.playerTower.frontX;
-    this.enemyCtx.enemyTowerY          = this.playerTower.baseY - TOWER_HEIGHT * 0.5;
+    this.enemyCtx.enemyTowerY          = this.playerTower.centerY;
     this.enemyCtx.enemyTowerBaseFloorY = this.playerTower.baseY;
     this.enemyCtx.homeTowerFrontX      = this.enemyTower.frontX;
     this.enemyCtx.homeTowerBaseFloorY  = this.enemyTower.baseY;
@@ -1240,7 +1309,7 @@ export class Game {
       const vy    = throwVy  ?? -(COIN_DROP_VY_MIN + Math.random() * (COIN_DROP_VY_MAX - COIN_DROP_VY_MIN));
       const wallL = this.mapDef.playerTowerX - TOWER_WIDTH / 2;
       const wallR = this.mapDef.enemyTowerX  + TOWER_WIDTH / 2;
-      const coin  = new Coin(x, COIN_LIFETIME_S, dropValue, dropKind, vx, vy, y, this.physics, dt, wallL, wallR);
+      const coin  = new Coin(x, COIN_LIFETIME_S, dropValue, dropKind, vx, vy, y, this.physics, dt, wallL, wallR, this.mapGroundY);
       this.coins.push(coin);
       this.coinLayer.addChild(coin.container);
       if (!c.isDead && !isThrow) c.recoverCoin(coin);
@@ -1284,14 +1353,17 @@ export class Game {
 
     // Update rockets + process AoE explosions (proximity hit → detonate)
     const rocketKnockbackDecay = Math.exp(-ROCKET_KNOCKBACK_DECAY * dt);
+    const rocketHitRadiusSq    = ROCKET_HIT_RADIUS * ROCKET_HIT_RADIUS;
     for (const r of this.rockets) {
       r.update(dt, this.platformData, this.blockData);
-      // Detonate on enemy character contact (proximity sphere)
+      // Detonate on enemy character contact (proximity sphere).
+      // Squared-distance avoids Math.hypot()'s square root on every check.
       if (!r.isDead) {
         for (const c of liveChars) {
           if (c.side === r.side) continue;
           const charCenterY = c.y - c.config.height * 0.5;
-          if (Math.hypot(c.x - r.x, charCenterY - r.y) <= ROCKET_HIT_RADIUS) {
+          const dx = c.x - r.x, dy = charCenterY - r.y;
+          if (dx * dx + dy * dy <= rocketHitRadiusSq) {
             r.triggerHit();
             break;
           }
@@ -1302,7 +1374,7 @@ export class Game {
         const targetTower = r.side === 'player' ? this.enemyTower : this.playerTower;
         const tLeft = targetTower.x - TOWER_WIDTH / 2;
         const tRight = targetTower.x + TOWER_WIDTH / 2;
-        const tTop  = GROUND_Y - TOWER_HEIGHT;
+        const tTop  = this.mapGroundY - TOWER_HEIGHT;
         if (r.x >= tLeft && r.x <= tRight && r.y >= tTop) {
           r.triggerHit();
         }
@@ -1631,9 +1703,9 @@ export class Game {
     const targetTower = sourceSide === 'player' ? this.enemyTower : this.playerTower;
     const towerLeft   = targetTower.x - TOWER_WIDTH / 2;
     const towerRight  = targetTower.x + TOWER_WIDTH / 2;
-    const towerTop    = GROUND_Y - TOWER_HEIGHT;
+    const towerTop    = this.mapGroundY - TOWER_HEIGHT;
     const nearX = Math.max(towerLeft,  Math.min(towerRight, ex.x));
-    const nearY = Math.max(towerTop,   Math.min(GROUND_Y,   ex.y));
+    const nearY = Math.max(towerTop,   Math.min(this.mapGroundY, ex.y));
     if (Math.hypot(nearX - ex.x, nearY - ex.y) <= ex.radius) {
       targetTower.takeDamage(ex.damage);
     }
@@ -1891,6 +1963,7 @@ export class Game {
     this.cpuStanceMs         = 0;
     this.cullingFrame        = 0;
     this.cameraX = 0;
+    // cameraY default is set by build() based on mapGroundY
     this.hud.clear();
     this.app.stage.removeChildren();
     this.build();

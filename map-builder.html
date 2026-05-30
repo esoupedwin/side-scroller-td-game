@@ -695,6 +695,8 @@
             <input type="number" id="input-player-x" value="60" />
             <label>Y:</label>
             <input type="number" id="input-player-y" value="480" style="width:80px;" />
+            <label title="Render order — higher draws in front">Z:</label>
+            <input type="number" id="input-player-z" value="0" style="width:60px;" title="z-index: higher = rendered in front" />
             <label>Default tribe:</label>
             <select id="input-player-tribe"></select>
           </div>
@@ -706,6 +708,8 @@
             <input type="number" id="input-enemy-x" value="2748" />
             <label>Y:</label>
             <input type="number" id="input-enemy-y" value="480" style="width:80px;" />
+            <label title="Render order — higher draws in front">Z:</label>
+            <input type="number" id="input-enemy-z" value="0" style="width:60px;" title="z-index: higher = rendered in front" />
             <label>Default tribe:</label>
             <select id="input-enemy-tribe"></select>
           </div>
@@ -787,6 +791,17 @@
               <span class="hint">px</span>
             </div>
             <span class="hint" style="width:100%; margin-top:2px;">Replaces the procedural mountain layer</span>
+            <div style="width:100%; height:1px; background:var(--border); margin:8px 0;"></div>
+            <span class="skin-label">Far Background PNG</span>
+            <input type="file" id="input-bg-skin2" accept="image/*" />
+            <img id="preview-bg-skin2" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
+            <button id="btn-clear-bg-skin2" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
+            <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:4px;">
+              <label>Y offset:</label>
+              <input type="number" id="input-bg-skin2-y" value="0" style="width:80px;" title="Screen-space Y offset in pixels (positive = lower)" />
+              <span class="hint">px</span>
+            </div>
+            <span class="hint" style="width:100%; margin-top:2px;">Rendered behind the parallax layer; scrolls slower</span>
           </div>
 
           <!-- Map Settings (shown when Map Settings is clicked) -->
@@ -799,10 +814,15 @@
             </div>
             <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:6px;">
               <label>Map Height:</label>
-              <input type="number" id="input-world-height" min="400" step="50" style="width:120px;" title="Total map height in pixels — extra height adds sky above the ground" />
+              <input type="number" id="input-world-height" min="400" step="50" style="width:120px;" title="Total map height in pixels (sky + ground)" />
               <span class="hint">px</span>
             </div>
-            <span class="hint" style="width:100%; margin-top:2px;">Resizes the world — towers are clamped to stay within bounds; extra height extends the sky</span>
+            <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:6px;">
+              <label>Ground Height:</label>
+              <input type="number" id="input-ground-height" min="20" step="10" style="width:120px;" title="Height of the green ground strip below the walking surface (px)" />
+              <span class="hint">px</span>
+            </div>
+            <span class="hint" style="width:100%; margin-top:2px;">Map Height = sky + ground. Adjust Ground Height to change the green strip below the walking surface.</span>
             <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:8px;">
               <label>Countdown:</label>
               <input type="number" id="input-map-duration-min" min="0" style="width:80px;" title="Match countdown — minutes" />

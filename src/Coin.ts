@@ -7,8 +7,6 @@ const DEFAULT_WALL_R = ENEMY_TOWER_X  + TOWER_WIDTH / 2;
 import type { Physics } from './Physics';
 import type { PlatformData } from './Platform';
 
-const LAND_Y = GROUND_Y - 14;
-
 export type CoinKind = 'gold' | 'silver';
 
 export const COIN_PALETTE: Record<CoinKind, readonly [number, number, number, number]> = {
@@ -29,9 +27,12 @@ export class Coin {
   isOnGround = false;
   isPickedUp = false;
   isDead     = false;
-  floorY     = GROUND_Y;
+  floorY:    number;
 
-  get isOnPlatform() { return this.isOnGround && this.floorY < GROUND_Y; }
+  private readonly groundY: number;
+  private readonly landY:   number;
+
+  get isOnPlatform() { return this.isOnGround && this.floorY < this.groundY; }
 
   body:    Matter.Body;
   private physics:     Physics;
@@ -53,9 +54,13 @@ export class Coin {
     dt          = 1 / 60,
     wallBoundsL = DEFAULT_WALL_L,
     wallBoundsR = DEFAULT_WALL_R,
+    groundY     = GROUND_Y,
   ) {
+    this.groundY     = groundY;
+    this.landY       = groundY - 14;
+    this.floorY      = groundY;
     this.x           = x;
-    this.y           = initY < 0 ? LAND_Y + initY : initY;
+    this.y           = initY < 0 ? this.landY + initY : initY;
     this.value       = value;
     this.kind        = kind;
     this.wallBoundsL = wallBoundsL;
@@ -112,22 +117,29 @@ export class Coin {
       );
 
       // Settle when nearly stopped and close to a surface (ground, platform, or block).
+      // Search platforms first, then blocks — short-circuit as soon as one is found
+      // so both arrays are never fully scanned when a platform match exists.
       if (speed < 0.05) {
-        const platBelow = platforms.find(
-          p => this.x >= p.x && this.x <= p.x + p.width &&
-               this.y >= p.y - 35 && this.y <= p.y + 5,
-        );
-        const blockBelow = blocks.find(
-          b => this.x >= b.x && this.x <= b.x + b.width &&
-               this.y >= b.y - 35 && this.y <= b.y + 5,
-        );
-        const nearGround = this.y >= GROUND_Y - 35;
-
-        if (platBelow || blockBelow || nearGround) {
+        let surfaceY: number | null = null;
+        for (const s of platforms) {
+          if (this.x >= s.x && this.x <= s.x + s.width && this.y >= s.y - 35 && this.y <= s.y + 5) {
+            surfaceY = s.y;
+            break;
+          }
+        }
+        if (surfaceY === null) {
+          for (const s of blocks) {
+            if (this.x >= s.x && this.x <= s.x + s.width && this.y >= s.y - 35 && this.y <= s.y + 5) {
+              surfaceY = s.y;
+              break;
+            }
+          }
+        }
+        if (surfaceY !== null || this.y >= this.groundY - 35) {
           this.isOnGround = true;
-          this.floorY     = platBelow ? platBelow.y : blockBelow ? blockBelow.y : GROUND_Y;
+          this.floorY     = surfaceY ?? this.groundY;
           Matter.Body.setStatic(this.body, true);
-          this.y = this.floorY === GROUND_Y ? LAND_Y : this.floorY - 14;
+          this.y = this.floorY === this.groundY ? this.landY : this.floorY - 14;
         }
       }
 

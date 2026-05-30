@@ -32,22 +32,23 @@ export function buildBackground(stage: PIXI.Container, worldWidth: number) {
 }
 
 /** Ground plane — must be added to stage LAST so it renders above all game objects. */
-export function buildGround(stage: PIXI.Container, worldWidth: number, groundSkin?: string, groundSkinTileW?: number, groundSkinTileH?: number) {
+export function buildGround(stage: PIXI.Container, worldWidth: number, groundSkin?: string, groundSkinTileW?: number, groundSkinTileH?: number, groundY: number = GROUND_Y, worldHeight: number = GAME_HEIGHT) {
+  const stripH = worldHeight - groundY;
   const g = new PIXI.Graphics();
   g.beginFill(0x4a7c59);
-  g.drawRect(0, GROUND_Y, worldWidth, GAME_HEIGHT - GROUND_Y);
+  g.drawRect(0, groundY, worldWidth, stripH);
   g.endFill();
   g.beginFill(0x3d6b4a);
-  g.drawRect(0, GROUND_Y, worldWidth, 6);
+  g.drawRect(0, groundY, worldWidth, 6);
   g.endFill();
   stage.addChild(g);
 
   if (groundSkin) {
     PIXI.Assets.load<PIXI.Texture>(groundSkin)
       .then(tex => {
-        const ts = new PIXI.TilingSprite(tex, worldWidth, GAME_HEIGHT - GROUND_Y);
+        const ts = new PIXI.TilingSprite(tex, worldWidth, stripH);
         ts.x = 0;
-        ts.y = GROUND_Y;
+        ts.y = groundY;
         if (groundSkinTileW !== undefined) ts.tileScale.x = groundSkinTileW / tex.width;
         if (groundSkinTileH !== undefined) ts.tileScale.y = groundSkinTileH / tex.height;
         stage.addChild(ts);

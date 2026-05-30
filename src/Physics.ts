@@ -26,13 +26,16 @@ export class Physics {
    *  setPosition on each body when the platform animates. */
   get platformBodies(): readonly Matter.Body[] { return this._platformBodies; }
   private onSurface = new Set<number>();
+  private readonly groundY: number;
 
   constructor(
     worldWidth:   number,
     playerTowerX: number,
     enemyTowerX:  number,
     platforms:    PlatformData[],
+    groundY:      number = GROUND_Y,
   ) {
+    this.groundY = groundY;
     this.engine = Matter.Engine.create({
       gravity: { x: 0, y: CHAR_GRAVITY / 1000, scale: 0.001 },
     });
@@ -40,7 +43,7 @@ export class Physics {
     const groundThickness = 80;
     const ground = Matter.Bodies.rectangle(
       worldWidth / 2,
-      GROUND_Y + groundThickness / 2,
+      groundY + groundThickness / 2,
       worldWidth * 3,
       groundThickness,
       {
@@ -53,7 +56,7 @@ export class Physics {
 
     // Tower boundary walls — block coins/power-ups/sheep (character X is clamped in code)
     const wallThick   = 20;
-    const wallHeight  = GROUND_Y + 60;
+    const wallHeight  = groundY + 60;
     const wallCenterY = wallHeight / 2;
     const wallOpts = (label: string): Matter.IBodyDefinition => ({
       isStatic: true, label,
@@ -138,7 +141,7 @@ export class Physics {
   }
 
   createTowerBody(centerX: number, w: number): Matter.Body {
-    const h = GROUND_Y + 60;
+    const h = this.groundY + 60;
     const body = Matter.Bodies.rectangle(centerX, h / 2, w, h, {
       isStatic: true,
       label: 'tower',

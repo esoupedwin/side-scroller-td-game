@@ -23,7 +23,8 @@ export class PowerUp {
   isDead     = false;
   isPickedUp = false;
   isOnGround = false;
-  floorY     = GROUND_Y;
+  floorY:    number;
+  private readonly groundY: number;
 
   readonly body:      Matter.Body;
   readonly container: PIXI.Container;
@@ -37,7 +38,9 @@ export class PowerUp {
   private floatT         = 0;
   private lastDrawAlpha  = -1;
 
-  constructor(x: number, type: PowerUpType, physics: Physics) {
+  constructor(x: number, type: PowerUpType, physics: Physics, groundY: number = GROUND_Y) {
+    this.groundY = groundY;
+    this.floorY  = groundY;
     this.x       = x;
     this.y       = -POWERUP_BODY_RADIUS;
     this.type    = type;
@@ -114,11 +117,11 @@ export class PowerUp {
           this.x >= b.x && this.x <= b.x + b.width &&
           this.y >= b.y - 40 && this.y <= b.y + 5,
         );
-        const nearGround = this.y >= GROUND_Y - 40;
+        const nearGround = this.y >= this.groundY - 40;
 
         if (platBelow || blockBelow || nearGround) {
           this.isOnGround = true;
-          this.floorY     = platBelow ? platBelow.y : blockBelow ? blockBelow.y : GROUND_Y;
+          this.floorY     = platBelow ? platBelow.y : blockBelow ? blockBelow.y : this.groundY;
           this.settledY   = this.floorY - POWERUP_BODY_RADIUS;
           Matter.Body.setStatic(this.body, true);
           this.y = this.settledY;
@@ -156,7 +159,7 @@ export class PowerUp {
   // ── Pickup ────────────────────────────────────────────────────────────────
 
   tryPickup(chars: { x: number; y: number; isDead: boolean }[]): number {
-    if (!(this.isOnGround || this.y >= GROUND_Y - 35) || this.isDead || this.isPickedUp) return -1;
+    if (!(this.isOnGround || this.y >= this.groundY - 35) || this.isDead || this.isPickedUp) return -1;
     for (let i = 0; i < chars.length; i++) {
       const c = chars[i];
       if (c.isDead) continue;
