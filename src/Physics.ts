@@ -36,6 +36,8 @@ export class Physics {
     groundY:      number = GROUND_Y,
   ) {
     this.groundY = groundY;
+    // Matter applies: acceleration = gravity.y * gravity.scale * body.mass each step.
+    // Engine.update receives dt in ms, so effective px/s² = (y * scale) * 1000 = CHAR_GRAVITY.
     this.engine = Matter.Engine.create({
       gravity: { x: 0, y: CHAR_GRAVITY / 1000, scale: 0.001 },
     });

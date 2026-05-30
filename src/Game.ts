@@ -945,6 +945,16 @@ export class Game {
    * both the normal tick loop and the post-game-over loop so animations
    * continue to play while the player reviews the field.
    */
+  private patchCtx(ctx: UpdateContext, home: Tower, enemy: Tower, dt: number): void {
+    ctx.dt                   = dt;
+    ctx.enemyTowerFrontX     = enemy.frontX;
+    ctx.enemyTowerY          = enemy.centerY;
+    ctx.enemyTowerBaseFloorY = enemy.baseY;
+    ctx.homeTowerFrontX      = home.frontX;
+    ctx.homeTowerBaseFloorY  = home.baseY;
+    ctx.worldWidth           = this.mapDef.worldWidth;
+  }
+
   private tickBlocks(dt: number): void {
     let anyMoved = false;
 
@@ -1258,21 +1268,8 @@ export class Game {
 
     // Update characters — reuse pre-allocated ctx objects; patch only the fields
     // that change each tick to eliminate per-character object + closure allocation.
-    this.playerCtx.dt                   = dt;
-    this.playerCtx.enemyTowerFrontX     = this.enemyTower.frontX;
-    this.playerCtx.enemyTowerY          = this.enemyTower.centerY;
-    this.playerCtx.enemyTowerBaseFloorY = this.enemyTower.baseY;
-    this.playerCtx.homeTowerFrontX      = this.playerTower.frontX;
-    this.playerCtx.homeTowerBaseFloorY  = this.playerTower.baseY;
-    this.playerCtx.worldWidth           = this.mapDef.worldWidth;
-
-    this.enemyCtx.dt                   = dt;
-    this.enemyCtx.enemyTowerFrontX     = this.playerTower.frontX;
-    this.enemyCtx.enemyTowerY          = this.playerTower.centerY;
-    this.enemyCtx.enemyTowerBaseFloorY = this.playerTower.baseY;
-    this.enemyCtx.homeTowerFrontX      = this.enemyTower.frontX;
-    this.enemyCtx.homeTowerBaseFloorY  = this.enemyTower.baseY;
-    this.enemyCtx.worldWidth           = this.mapDef.worldWidth;
+    this.patchCtx(this.playerCtx, this.playerTower, this.enemyTower, dt);
+    this.patchCtx(this.enemyCtx,  this.enemyTower,  this.playerTower, dt);
 
     for (const c of liveChars) {
       this.updateChar = c;
