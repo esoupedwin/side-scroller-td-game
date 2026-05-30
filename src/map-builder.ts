@@ -60,6 +60,7 @@ class MapBuilder {
   private selectedGround     = false;
   private selectedBackground = false;
   private selectedMapSettings = false;
+  private selectedGameConfig  = false;
 
   // ── Copy / Paste clipboard ────────────────────────────────────────────────
   private clipboard: {
@@ -1049,8 +1050,9 @@ class MapBuilder {
     this.selectedTower     = null;
     this.selectedCoinBox   = false;
     this.selectedGround    = false;
-    this.selectedBackground = false;
+    this.selectedBackground  = false;
     this.selectedMapSettings = false;
+    this.selectedGameConfig  = false;
   }
 
   /** Snapshot current map state before a destructive operation. Clears redo stack. */
@@ -1196,6 +1198,14 @@ class MapBuilder {
       this.selectedMapSettings = true;
       this.syncInputsFromMap();
       document.getElementById('section-map-settings')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+
+    // Game Config button
+    document.getElementById('btn-game-config')!.addEventListener('click', () => {
+      this.clearSelection();
+      this.selectedGameConfig = true;
+      this.syncInputsFromMap();
+      document.getElementById('section-game-config')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
 
     // World width input
@@ -1696,8 +1706,9 @@ class MapBuilder {
     const enemySel   = this.selectedTower === 'enemy';
     const coinSel    = this.selectedCoinBox;
     const groundSel  = this.selectedGround;
-    const bgSel      = this.selectedBackground;
-    const settingsSel = this.selectedMapSettings;
+    const bgSel        = this.selectedBackground;
+    const settingsSel  = this.selectedMapSettings;
+    const configSel    = this.selectedGameConfig;
     const platSel    = this.selected !== null && this.selectedKind === 'platform' && this.selected < m.platforms.length;
     const blockSel   = this.selected !== null && this.selectedKind === 'block'    && this.selected < m.blocks.length;
 
@@ -1708,6 +1719,7 @@ class MapBuilder {
     document.getElementById('section-ground')!      .style.display = groundSel ? 'flex' : 'none';
     document.getElementById('section-background')!  .style.display = bgSel       ? 'flex' : 'none';
     document.getElementById('section-map-settings')!.style.display = settingsSel ? 'flex' : 'none';
+    document.getElementById('section-game-config')! .style.display = configSel  ? 'flex' : 'none';
     document.getElementById('section-platforms')!   .style.display = platSel   ? 'flex' : 'none';
     document.getElementById('section-blocks')!      .style.display = blockSel  ? 'flex' : 'none';
 
@@ -1782,6 +1794,15 @@ class MapBuilder {
       secInput.value = isOverride ? String(secs) : '';
       minInput.placeholder = String(Math.floor(GameConfig.canvas.durationSec / 60));
       secInput.placeholder = String(GameConfig.canvas.durationSec % 60);
+    }
+    if (configSel) {
+      const gc = GameConfig;
+      const jumpV   = gc.characters.jumpVelocity;
+      const gravity = gc.characters.gravity;
+      const jumpH   = Math.round(jumpV * jumpV / (2 * gravity));
+      (document.getElementById('gc-jump-velocity') as HTMLElement).textContent = `${jumpV} px/s`;
+      (document.getElementById('gc-gravity')       as HTMLElement).textContent = `${gravity} px/s²`;
+      (document.getElementById('gc-jump-height')   as HTMLElement).textContent = `≈ ${jumpH} px`;
     }
 
     document.getElementById('plat-count')!.textContent  = `${m.platforms.length} platform(s)`;
