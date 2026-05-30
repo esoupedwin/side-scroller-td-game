@@ -1,4 +1,5 @@
 import { Game, type CpuStrategyInfo } from './Game';
+import type { PowerUpType } from './PowerUp';
 import { CHAR_COST } from './constants';
 import { TYPE_ICON } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
@@ -115,10 +116,10 @@ refreshMuteUi();
   const fpsEl    = document.getElementById('perf-fps')!;
   const msEl     = document.getElementById('perf-ms')!;
   const memEl    = document.getElementById('perf-mem')!;
-  const memLabel = document.getElementById('perf-mem-label')!;
+  const memRow   = document.getElementById('perf-mem-row')!;
 
   const hasMem = 'memory' in performance;
-  if (hasMem) { memEl.style.display = ''; memLabel.style.display = ''; }
+  if (hasMem) { memRow.style.display = ''; }
 
   const frameTimes: number[] = [];
   let lastT        = performance.now();
@@ -156,10 +157,10 @@ function refreshDiagnoseUi() {
   diagnoseBtn.classList.toggle('is-active', active);
   diagnoseBtn.textContent = active ? 'Diagnose: ON' : 'Diagnose';
   const count = game.diagnostics.entryCount();
-  diagnoseExportBtn.disabled = count === 0;
-  diagnoseStatusEl.textContent = active
-    ? `recording — ${count} entries`
-    : count > 0 ? `${count} entries ready` : 'idle';
+  diagnoseExportBtn.disabled    = count === 0;
+  diagnoseExportBtn.style.display = count > 0 ? '' : 'none';
+  diagnoseStatusEl.style.display  = active ? '' : 'none';
+  diagnoseStatusEl.textContent    = `recording — ${count} entries`;
 }
 
 diagnoseBtn.addEventListener('click', () => {
@@ -269,6 +270,14 @@ cpuVsCpuBtn.addEventListener('click', () => {
   refreshCpuVsCpuUi();
 });
 refreshCpuVsCpuUi();
+
+// ── Game Shark: force power-up drop ───────────────────────────────────────
+const powerUpSelect  = document.getElementById('dev-powerup-select')   as HTMLSelectElement;
+const dropPowerUpBtn = document.getElementById('dev-drop-powerup-btn') as HTMLButtonElement;
+
+dropPowerUpBtn.addEventListener('click', () => {
+  game.forceDropPowerUp(powerUpSelect.value as PowerUpType);
+});
 
 function handleCpuCoinsChanged(coins: number) {
   cpuCoinAmountEl.textContent = String(coins);

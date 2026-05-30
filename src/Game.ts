@@ -266,6 +266,7 @@ export class Game {
   private playerSpawnTimer    = 0;
   private playerSpawnInterval = 0;
   private cpuVsCpu            = false;
+  private gameShark           = false;
   private timeRemaining    = this.mapDurationSec;
   private lastNotifiedTime = -1;
   private cpuStrategyInfo: CpuStrategyInfo = {
@@ -716,6 +717,19 @@ export class Game {
 
   isCpuVsCpu(): boolean { return this.cpuVsCpu; }
 
+  /** Dev cheat: when ON the player's coin balance is pinned to 9999. */
+  setGameShark(on: boolean): void { this.gameShark = on; }
+
+  /** Dev: immediately drop a power-up of the given type at a random map position. */
+  forceDropPowerUp(type: PowerUpType): void {
+    const innerLeft  = this.mapDef.playerTowerX + TOWER_WIDTH / 2 + 60;
+    const innerRight = this.mapDef.enemyTowerX  - TOWER_WIDTH / 2 - 60;
+    const px = innerLeft + Math.random() * (innerRight - innerLeft);
+    const pu = new PowerUp(px, type, this.physics, this.mapGroundY);
+    this.powerUps.push(pu);
+    this.powerUpLayer.addChild(pu.container);
+  }
+
   // ── CPU strategic assessment ─────────────────────────────────────────────────
 
   private assessCpuStance(self: 'player' | 'enemy', selfChars: Character[], oppChars: Character[]): 'push' | 'economy' | 'defend' {
@@ -1111,6 +1125,7 @@ export class Game {
     if (this.isOver)   { this.tickGameOver(dt, ticker.deltaMS); return; }
     if (this.isPaused) { this.updateCulling(); return; }
 
+    if (this.gameShark && this.coinBalance < 9999) this.coinBalance += 9999 - this.coinBalance;
     const playerRate = this.coinBalance    < LOW_BALANCE_THRESHOLD ? PASSIVE_INCOME_RATE * LOW_BALANCE_INCOME_MULT : PASSIVE_INCOME_RATE;
     const cpuRate    = this.cpuCoinBalance < LOW_BALANCE_THRESHOLD ? PASSIVE_INCOME_RATE * LOW_BALANCE_INCOME_MULT : PASSIVE_INCOME_RATE;
     this.coinBalance    += playerRate * dt;

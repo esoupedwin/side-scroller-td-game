@@ -34,12 +34,29 @@
         margin-right: 14px;
         border-right: 1px solid rgba(255,255,255,0.07);
         white-space: nowrap;
+        line-height: 1.6;
+        text-align: center;
+        flex-shrink: 0;
+      }
+      .dev-section-tag {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        color: #444;
+        text-transform: uppercase;
+        padding-right: 10px;
+        margin-right: 10px;
+        border-right: 1px solid rgba(255,255,255,0.07);
+        white-space: nowrap;
+        line-height: 1.6;
+        text-align: center;
+        flex-shrink: 0;
       }
       .dev-items {
         display: flex;
         flex-direction: row;
         align-items: center;
-        gap: 24px;
+        gap: 14px;
         flex: 1;
       }
       .dev-item {
@@ -570,64 +587,95 @@
       </div>
     </div>
     <div id="dev-panel">
-      <span class="dev-tag">Dev</span>
+      <span class="dev-tag">DEV<br>BAR</span>
       <div class="dev-items">
-        <div class="dev-item">
-          <span class="dev-item-label">CPU Coins</span>
-          <span class="dev-item-value" id="cpu-coin-amount">150</span>
+        <!-- ── Enemy info ── -->
+        <span class="dev-section-tag" style="border-right:none; padding-right:6px; margin-right:0;">ENEMY<br>INFO</span>
+        <div class="dev-item" style="gap:14px; align-items:flex-start;">
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <div class="dev-item">
+              <span class="dev-item-label">Coins</span>
+              <span class="dev-item-value" id="cpu-coin-amount">150</span>
+            </div>
+            <div class="dev-item">
+              <span class="dev-item-label">Stance</span>
+              <span class="dev-item-value" id="cpu-stance" style="min-width:40px;">—</span>
+            </div>
+            <div class="dev-item">
+              <span class="dev-item-label">Tower HP</span>
+              <span class="dev-item-value" id="enemy-tower-hp">—</span>
+            </div>
+          </div>
+          <div class="dev-score-block">
+            <div style="display:flex;align-items:baseline;gap:4px;">
+              <span class="dev-item-label">Score</span>
+              <span class="dev-score-main" id="cpu-score">—</span>
+            </div>
+            <span class="dev-score-sub" id="cpu-breakdown">U:— T:— C:—</span>
+          </div>
         </div>
-        <div class="dev-item">
-          <span class="dev-item-label">Enemy Tower HP</span>
-          <span class="dev-item-value" id="enemy-tower-hp">—</span>
-        </div>
-        <div class="dev-item" style="gap:8px; flex-wrap:wrap;">
+
+        <!-- ── CPU Units ── -->
+        <div class="dev-item" style="gap:8px; flex-wrap:wrap; border-left:1px solid rgba(255,255,255,0.07); padding-left:14px;">
           <span class="dev-item-label">CPU Units</span>
           <span id="cpu-chars-list" style="display:flex;gap:4px;flex-wrap:wrap;">—</span>
         </div>
 
-        <div class="dev-strategy">
-          <div class="dev-item">
-            <span class="dev-item-label">Stance</span>
-            <span class="dev-item-value" id="cpu-stance" style="min-width:52px;">—</span>
+        <!-- hidden; kept for JS compatibility -->
+        <span id="cpu-decision" style="display:none;">—</span>
+
+        <!-- ── Game Perf ── -->
+        <span class="dev-section-tag" style="border-left:1px solid rgba(255,255,255,0.07); border-right:none; padding-left:10px; padding-right:6px; margin-left:4px; margin-right:0;">GAME<br>PERF.</span>
+        <div style="display:flex; flex-direction:column; gap:2px;">
+          <div class="dev-item" style="gap:6px;">
+            <span class="dev-item-label">FPS</span>
+            <span class="dev-item-value" id="perf-fps" style="min-width:28px;">—</span>
           </div>
-          <div class="dev-item">
-            <span class="dev-item-label">Score</span>
-            <div class="dev-score-block">
-              <span class="dev-score-main" id="cpu-score">—</span>
-              <span class="dev-score-sub" id="cpu-breakdown">U:— T:— C:—</span>
+          <div class="dev-item" style="gap:6px;">
+            <span class="dev-item-label">MS</span>
+            <span class="dev-item-value" id="perf-ms" style="min-width:36px;">—</span>
+          </div>
+          <div class="dev-item" id="perf-mem-row" style="gap:6px; display:none;">
+            <span class="dev-item-label" id="perf-mem-label">MEM</span>
+            <span class="dev-item-value" id="perf-mem" style="min-width:48px;">—</span>
+          </div>
+        </div>
+
+        <!-- ── Diagnose ── -->
+        <div class="dev-item" style="gap:5px;">
+          <button id="diagnose-btn" class="dev-btn">Diagnose</button>
+          <button id="diagnose-export-btn" class="dev-btn" disabled style="display:none;">Produce<br>Diagnostic<br>Data</button>
+          <span id="diagnose-status" style="font-size:9px;color:#555;display:none;">idle</span>
+        </div>
+
+        <!-- ── Game Shark segment ── -->
+        <div class="dev-item" style="gap:6px; border-left:1px solid rgba(255,255,255,0.07); padding-left:14px; align-items:flex-start;">
+          <span class="dev-section-tag" style="border-right:none; padding-right:6px; margin-right:0;">GAME<br>SHARK</span>
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <button id="cpu-vs-cpu-btn" class="dev-btn">CPU vs CPU</button>
+            <div class="dev-item" style="gap:4px;">
+              <select id="dev-powerup-select" class="dev-select" style="max-width:90px;">
+                <option value="heal">Heal</option>
+                <option value="speed">Speed</option>
+                <option value="attack">Attack</option>
+                <option value="promote">Promote</option>
+              </select>
+              <button id="dev-drop-powerup-btn" class="dev-btn">Drop</button>
             </div>
           </div>
-          <div class="dev-item" style="flex-direction:column; align-items:flex-start; gap:2px; max-width:220px;">
-            <span class="dev-item-label">Last Decision</span>
-            <span id="cpu-decision" style="font-size:10px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px;">—</span>
+        </div>
+
+        <!-- ── Tribe + Map ── -->
+        <div style="display:flex; flex-direction:column; gap:2px; margin-left:auto; border-left:1px solid rgba(255,255,255,0.07); padding-left:14px;">
+          <div class="dev-item" style="gap:6px;">
+            <span class="dev-item-label">Tribe</span>
+            <select id="dev-tribe-select" class="dev-select"></select>
           </div>
-        </div>
-
-        <div class="dev-item" style="gap:6px;">
-          <span class="dev-item-label">FPS</span>
-          <span class="dev-item-value" id="perf-fps" style="min-width:28px;">—</span>
-          <span class="dev-item-label">MS</span>
-          <span class="dev-item-value" id="perf-ms" style="min-width:36px;">—</span>
-          <span class="dev-item-label" id="perf-mem-label" style="display:none;">MEM</span>
-          <span class="dev-item-value" id="perf-mem" style="min-width:48px; display:none;">—</span>
-        </div>
-
-        <div class="dev-item" style="gap:6px; margin-left:auto;">
-          <span class="dev-item-label">Tribe</span>
-          <select id="dev-tribe-select" class="dev-select"></select>
-        </div>
-
-        <div class="dev-item" style="gap:6px;">
-          <span class="dev-item-label">Map</span>
-          <select id="dev-map-select" class="dev-select"></select>
-          <button id="dev-load-map-btn" class="dev-btn">Load</button>
-        </div>
-
-        <div class="dev-item" style="gap:6px;">
-          <button id="cpu-vs-cpu-btn" class="dev-btn">CPU vs CPU</button>
-          <button id="diagnose-btn" class="dev-btn">Diagnose</button>
-          <button id="diagnose-export-btn" class="dev-btn" disabled>Produce Diagnostic Data</button>
-          <span id="diagnose-status" style="font-size:9px; color:#666;">idle</span>
+          <div class="dev-item" style="gap:6px;">
+            <span class="dev-item-label">Map</span>
+            <select id="dev-map-select" class="dev-select"></select>
+            <button id="dev-load-map-btn" class="dev-btn">Load</button>
+          </div>
         </div>
       </div>
     </div>

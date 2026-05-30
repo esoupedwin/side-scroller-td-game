@@ -2344,7 +2344,7 @@ export class Character {
   // â”€â”€ Harass behaviour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private updateHarass(ctx: UpdateContext) {
-    const { dt, enemies, allies, enemyTowerFrontX, homeTowerFrontX, onFire, platforms, blocks, navGraph } = ctx;
+    const { dt, enemies, allies, enemyTowerFrontX, homeTowerFrontX, onFire, blocks, navGraph } = ctx;
     if (this.isAirborne) return;
 
     const dir   = this.side === 'player' ? 1 : -1;
@@ -2398,14 +2398,11 @@ export class Character {
     if (closest) {
       const toEnemy = dir * (closest.x - this.x);
 
-      // Closest enemy is on the platform and we're on the ground â€” climb up
-      if (closest.isOnPlatform && !charOnPlatform && platforms.length > 0) {
-        const plat = platforms[0];
-        const dirToEnemy = Math.sign(closest.x - this.x);
-        this.x += dirToEnemy * this.moveSpeed * dt;
-        if (this.x >= plat.x && this.x <= plat.x + plat.width) {
-          this.jump(dirToEnemy, dt);
-        }
+      // Closest enemy is on a platform and we're on the ground — use pathfinding
+      // to navigate up. The old primitive froze when Math.sign(0) = 0 (same X, different floor).
+      if (closest.isOnPlatform && !charOnPlatform) {
+        this.requestPath(clamp(closest.x), closest.floorY, navGraph, dt);
+        this.followPath(dt, ctx.platforms);
         this.state = 'marching';
       } else if (toEnemy > 0 && closestDist > this.config.attackRange * 0.8) {
         // Enemy is ahead and not yet in range â€” use pathfinding to navigate around blocks.

@@ -279,8 +279,8 @@ export const GameConfig = {
     speedMult:   2.5,   // speed multiplier for speed power-up
     speedDurSec: 15,    // seconds the speed boost lasts
     atkMult:     2.0,   // attack multiplier for attack power-up
-    dropIntervalSec: 40, // seconds between power-up drops
-    indicatorLeadSec: 20, // seconds before drop that indicator appears
+    dropIntervalSec: 25, // seconds between power-up drops
+    indicatorLeadSec: 12, // seconds before drop that indicator appears
     indicatorDriftSpeed: 0.667, // fraction of full drift speed (1 = original, 2/3 = 3× slower)
   },
 
