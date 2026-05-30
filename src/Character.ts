@@ -22,7 +22,7 @@ import {
   getLegsAnimFps, getLegsSpriteScale, getLegsFeetAnchorY,
 } from './SpriteRegistry';
 import { type Tribe, tribeForSide } from './Tribes';
-import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow } from './Vfx';
+import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow, spawnSpeedStreak } from './Vfx';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
 
@@ -289,9 +289,10 @@ export class Character {
   private lastLocoMoveSpeed = -1;
 
   // Power-up effects
-  private powerUpSpeedMult  = 1.0;
-  private powerUpSpeedTimer = 0;
-  private powerUpAtkMult    = 1.0;
+  private powerUpSpeedMult   = 1.0;
+  private powerUpSpeedTimer  = 0;
+  private powerUpAtkMult     = 1.0;
+  private speedStreakTimer   = 0;
 
   constructor(side: Side, startX: number, startY: number, config: CharacterConfig, id: number, name: string, physics: Physics, spriteSet?: LoadedSpriteSet | null, groundY: number = GROUND_Y) {
     this.groundY   = groundY;
@@ -1721,6 +1722,7 @@ export class Character {
     const inSafeZone = this.hp < this.maxHp && Math.abs(this.x - ctx.homeTowerFrontX) <= TOWER_ATTACK_RANGE;
     if (inSafeZone) this.heal(SAFE_ZONE_HEAL_RATE * ctx.dt);
     this.tickHealParticles(ctx.dt, inSafeZone);
+    this.tickSpeedStreaks(ctx.dt);
 
     if (this.coinPickupCooldown > 0) {
       this.coinPickupCooldown = Math.max(0, this.coinPickupCooldown - ctx.dt);
@@ -2589,6 +2591,15 @@ export class Character {
         p.gfx.destroy();
         this.healParticles.splice(i, 1);
       }
+    }
+  }
+
+  private tickSpeedStreaks(dt: number): void {
+    if (this.powerUpSpeedMult <= 1) { this.speedStreakTimer = 0; return; }
+    this.speedStreakTimer -= dt;
+    if (this.speedStreakTimer <= 0) {
+      this.speedStreakTimer = 0.05;
+      spawnSpeedStreak(this.x, this.y, this.config.height, this.lastMoveDir);
     }
   }
 

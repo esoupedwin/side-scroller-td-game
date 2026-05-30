@@ -200,6 +200,51 @@ class MuzzleGlow implements VfxEffect {
   }
 }
 
+// ── SpeedStreak ──────────────────────────────────────────────────────────────
+// A burst of horizontal lines anchored in world space as the character moves.
+// Spawned every ~50 ms while a speed power-up is active; because they stay put
+// while the character advances, they accumulate into a visible motion trail.
+
+const STREAK_DUR      = 0.22;   // seconds before fully faded
+const STREAK_COUNT    = 4;      // lines per burst
+const STREAK_LEN_MIN  = 10;
+const STREAK_LEN_MAX  = 36;
+const STREAK_COLORS   = [0x00ffff, 0x88eeff, 0xffffff] as const;
+
+class SpeedStreak implements VfxEffect {
+  container: PIXI.Container;
+  isDone   = false;
+  private g:    PIXI.Graphics;
+  private life = 0;
+
+  constructor(x: number, feetY: number, charH: number, dir: 1 | -1) {
+    this.container = new PIXI.Container();
+    this.container.x = x;
+    this.container.y = feetY;
+
+    this.g = new PIXI.Graphics();
+    for (let i = 0; i < STREAK_COUNT; i++) {
+      const yOff  = -(charH * (0.12 + Math.random() * 0.76));
+      const len   = STREAK_LEN_MIN + Math.random() * (STREAK_LEN_MAX - STREAK_LEN_MIN);
+      const color = STREAK_COLORS[Math.floor(Math.random() * STREAK_COLORS.length)];
+      const thick = 0.8 + Math.random() * 1.4;
+      this.g.lineStyle(thick, color, 0.9);
+      // Lines trail opposite to movement direction so they fly behind the runner.
+      this.g.moveTo(0, yOff);
+      this.g.lineTo(-dir * len, yOff);
+    }
+    this.g.lineStyle(0);
+    this.container.addChild(this.g);
+  }
+
+  update(dt: number): void {
+    this.life += dt;
+    const t = this.life / STREAK_DUR;
+    if (t >= 1) { this.isDone = true; return; }
+    this.g.alpha = 1 - t;
+  }
+}
+
 // ── Spawn helpers ───────────────────────────────────────────────────────────
 
 export function spawnSlashArc(x: number, y: number, dir: 1 | -1, side: 'player' | 'enemy'): void {
@@ -212,4 +257,8 @@ export function spawnHitSpark(x: number, y: number): void {
 
 export function spawnMuzzleGlow(x: number, y: number): void {
   register(new MuzzleGlow(x, y));
+}
+
+export function spawnSpeedStreak(x: number, feetY: number, charH: number, dir: 1 | -1): void {
+  register(new SpeedStreak(x, feetY, charH, dir));
 }
