@@ -542,9 +542,9 @@ export class Game {
     this.powerUpIndicatorText.y = 28;
     this.powerUpIndicatorContainer.addChild(this.powerUpIndicatorGfx);
     this.powerUpIndicatorContainer.addChild(this.powerUpIndicatorText);
-    this.powerUpIndicatorContainer.y   = 5;   // fixed at top of world
+    this.powerUpIndicatorContainer.y   = 5;   // fixed at top of screen
     this.powerUpIndicatorContainer.visible = false;
-    this.world.addChild(this.powerUpIndicatorContainer);  // world space — scrolls with camera
+    this.app.stage.addChild(this.powerUpIndicatorContainer);  // screen space — sticks to camera top
 
     // Pre-build one UpdateContext per side. Stable fields are set here; dt and
     // tower frontX/Y values are patched each tick — no per-character allocation needed.
@@ -1189,9 +1189,12 @@ export class Game {
         this.powerUpIndicatorMoveTimer  = 0;
         this.powerUpIndicatorTargetX    = innerLeft + Math.random() * (innerRight - innerLeft);
       }
-      // Smooth slide toward target
+      // Smooth slide toward target (world space)
       this.powerUpIndicatorX += (this.powerUpIndicatorTargetX - this.powerUpIndicatorX) * Math.min(1, dt * 2 / 9);
-      this.powerUpIndicatorContainer.x = this.powerUpIndicatorX;
+      // Convert to screen space so the indicator sticks to the camera top edge.
+      // Clamp so it stays visible even when the drop point is scrolled off-screen.
+      const screenX = (this.powerUpIndicatorX - this.cameraX) * GAME_ZOOM;
+      this.powerUpIndicatorContainer.x = Math.max(20, Math.min(VIEWPORT_WIDTH - 20, screenX));
 
       // Countdown text (update only when integer second changes)
       const secs = Math.max(0, Math.ceil(timeUntilDrop / 1000));
