@@ -289,6 +289,14 @@ export const GameConfig = {
     cpuCoinGrant:    100,   // L key — coins added to CPU balance
   },
 
+  vfx: {
+    shakeDecay:     3.0,   // trauma units bled off per second
+    shakeMaxOffset: 30,    // px world displacement at full trauma
+    shakeGrenade:   0.55,  // trauma added by a grenade blast
+    shakeRocket:    0.85,  // trauma added by a rocket blast (bigger boom)
+    shakeFalloffPx: 650,   // off-screen distance over which blast shake fades to 0
+  },
+
   promotions: {
     killAP:            1,     // achievement points per kill
     coinAP:            2,     // AP per successful coin deposit

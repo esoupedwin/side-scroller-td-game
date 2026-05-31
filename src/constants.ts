@@ -129,6 +129,14 @@ export const POWERUP_ATK_MULT       = pu.atkMult;
 export const POWERUP_DROP_INTERVAL  = pu.dropIntervalSec;
 export const POWERUP_INDICATOR_LEAD = pu.indicatorLeadSec;
 
+// ── VFX / screen shake ─────────────────────────────────────────────────────────
+const vfx = GameConfig.vfx;
+export const SHAKE_DECAY       = vfx.shakeDecay;
+export const SHAKE_MAX_OFFSET  = vfx.shakeMaxOffset;
+export const SHAKE_GRENADE     = vfx.shakeGrenade;
+export const SHAKE_ROCKET      = vfx.shakeRocket;
+export const SHAKE_FALLOFF_PX  = vfx.shakeFalloffPx;
+
 // ── Promotions ───────────────────────────────────────────────────────────────
 export const PROMO_KILL_AP     = promo.killAP;
 export const PROMO_COIN_AP     = promo.coinAP;

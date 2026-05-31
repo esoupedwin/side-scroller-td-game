@@ -2769,7 +2769,7 @@ export class Character {
         // Gun-wielders (rifleman / sniper / tanker) get a muzzle flash that
         // additively lights up the front of the body. Archers don't.
         if (this.projectileKind === 'bullet') {
-          spawnMuzzleGlow(this.x + this.lastAttackDir * 18, this.bowY);
+          spawnMuzzleGlow(this.x + this.lastAttackDir * 18, this.bowY, this.lastAttackDir);
         }
       }
     }
@@ -2813,7 +2813,7 @@ export class Character {
         });
         // Gun-wielders only â€” see attackEnemy for rationale.
         if (this.projectileKind === 'bullet') {
-          spawnMuzzleGlow(this.x + this.lastAttackDir * 18, this.bowY);
+          spawnMuzzleGlow(this.x + this.lastAttackDir * 18, this.bowY, this.lastAttackDir);
         }
       }
     }

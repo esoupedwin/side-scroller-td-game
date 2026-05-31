@@ -56,9 +56,10 @@ import {
   CPU_NEUTRAL_MIN_FACTOR, CPU_NEUTRAL_MAX_FACTOR,
   POWERUP_DROP_INTERVAL, POWERUP_INDICATOR_LEAD,
   CHEAT_PLAYER_COIN_GRANT, CHEAT_CPU_COIN_GRANT,
+  SHAKE_DECAY, SHAKE_MAX_OFFSET, SHAKE_GRENADE, SHAKE_ROCKET, SHAKE_FALLOFF_PX,
 } from './constants';
 import { playSoundAt, setViewport } from './AudioManager';
-import { initVfx, tickVfx, clearVfx, spawnHitSpark } from './Vfx';
+import { initVfx, tickVfx, clearVfx, spawnHitSpark, spawnExplosion } from './Vfx';
 
 function spawnBoost(): number {
   return Math.min(Math.floor(Math.random() * 11), Math.floor(Math.random() * 11));
@@ -144,6 +145,11 @@ export class Game {
   private world!:     PIXI.Container;
   private cameraX  = 0;
   private cameraY  = 0;
+  // Screen shake — `trauma` (0..1) is added by blasts and bled off each tick;
+  // the applied offset scales with trauma² so small hits barely register and
+  // big ones punch. `shakeTime` drives the oscillation.
+  private shakeTrauma = 0;
+  private shakeTime   = 0;
   private readonly keysDown = new Set<string>();
 
   private navGraph!: NavGraph;
@@ -724,6 +730,22 @@ export class Game {
     this.powerUpLayer.addChild(pu.container);
   }
 
+  /** Add screen-shake trauma. If `worldX` is given, the amount fades for blasts
+   *  that detonate off the sides of the viewport so off-screen booms don't
+   *  jolt the camera as hard as on-screen ones. */
+  private addShake(amount: number, worldX?: number): void {
+    let a = amount;
+    if (worldX !== undefined) {
+      const viewL = this.cameraX;
+      const viewR = this.cameraX + VIEWPORT_WIDTH / GAME_ZOOM;
+      if (worldX < viewL || worldX > viewR) {
+        const off = worldX < viewL ? viewL - worldX : worldX - viewR;
+        a *= Math.max(0, 1 - off / SHAKE_FALLOFF_PX);
+      }
+    }
+    this.shakeTrauma = Math.min(1, this.shakeTrauma + a);
+  }
+
   // ── CPU strategic assessment ─────────────────────────────────────────────────
 
   private assessCpuStance(self: 'player' | 'enemy', selfChars: Character[], oppChars: Character[]): 'push' | 'economy' | 'defend' {
@@ -1112,6 +1134,15 @@ export class Game {
     this.cameraY  = Math.max(camYMin, Math.min(camYMax, this.cameraY));
     this.world.x        = -this.cameraX * GAME_ZOOM;
     this.world.y        = this.mapGroundY * (1 - GAME_ZOOM) + this.cameraY * GAME_ZOOM;
+    // Screen shake — decay trauma, then add a quick oscillating offset to the
+    // world transform (parallax bg stays put so the foreground reads as jolted).
+    this.shakeTime  += dt;
+    this.shakeTrauma = Math.max(0, this.shakeTrauma - SHAKE_DECAY * dt);
+    if (this.shakeTrauma > 0) {
+      const mag = SHAKE_MAX_OFFSET * this.shakeTrauma * this.shakeTrauma;
+      this.world.x += mag * Math.sin(this.shakeTime * 47 + 1.3);
+      this.world.y += mag * 0.6 * Math.sin(this.shakeTime * 41 + 4.7);
+    }
     this.parallaxGfx.x   = -this.cameraX * PARALLAX_FACTOR;
     this.parallaxGfx2.x  = -this.cameraX * PARALLAX_FACTOR_FAR;
     setViewport(this.cameraX, this.cameraX + VIEWPORT_WIDTH / GAME_ZOOM);
@@ -1391,6 +1422,8 @@ export class Game {
       const ex = r.consumeExplosion();
       if (ex) {
         playSoundAt('rocket_explosion', ex.x);
+        spawnExplosion(ex.x, ex.y, ex.radius);
+        this.addShake(SHAKE_ROCKET, ex.x);
         this.processAoE(
           ex, r.side,
           ROCKET_SPLASH_MIN_FRAC,
@@ -1408,6 +1441,8 @@ export class Game {
       const ex = g.consumeExplosion();
       if (ex) {
         playSoundAt('grenade_explosion', ex.x);
+        spawnExplosion(ex.x, ex.y, ex.radius);
+        this.addShake(SHAKE_GRENADE, ex.x);
         this.processAoE(
           ex, g.side,
           GRENADE_SPLASH_MIN_FRAC,
@@ -1938,6 +1973,7 @@ export class Game {
     for (const pu of this.powerUps)     { pu.destroy(); }
     for (const l of this.damageLabels)  { l.destroy(); }
     clearVfx();
+    this.shakeTrauma = 0;
     this.sheep?.destroy();
     this.sheep = null;
     this.characters   = [];
