@@ -16,7 +16,14 @@ export type LegsAnimName = 'idle' | 'walk';
 // frame count within the grid is detected from the image (trailing empty cells
 // in the last row are skipped).
 const FRAMES_PER_ROW = 6;
-const FRAME_HEIGHT_PX = 800;
+// Frame height after the one-time downscale (scripts/downscale-sprites.mjs):
+// sheets are 512px-tall frames (3072×3072 / 3072×2048). Row count is derived as
+// sheet.height / FRAME_HEIGHT_PX. If you replace the sheets at a different
+// resolution, update this to the new frame height.
+const FRAME_HEIGHT_PX = 512;
+
+// Per-sheet load logging — 112 lines at startup. Flip on only when debugging sheets.
+const DEBUG_SPRITES = false;
 
 export interface SpriteLayerAnimDef {
   path:        string;  // URL served from /public, e.g. '/sprites/tomaro/warrior/body/walk.png'
@@ -150,33 +157,53 @@ function extractFrames(texture: PIXI.Texture, frameCount: number, fw: number, fh
 const ALPHA_THRESHOLD     = 32;     // pixel must be > this to count as "drawn"
 const MIN_CELL_FILL_RATIO = 0.001;  // >= 0.1 % of sampled pixels above threshold
 
-function detectFrameCount(
-  texture: PIXI.Texture,
-  rows: number,
-  fw: number,
-  fh: number,
-): number {
+// Probe resolution per grid cell. The source frames are far larger than needed
+// just to answer "does this cell contain art?", so we downscale the whole sheet
+// onto a tiny canvas (PROBE_CELL px per cell) and do a SINGLE readback. This
+// replaces the old per-cell full-resolution getImageData calls (one 2.5 MB
+// readback per cell × 112 sheets) with one ~tens-of-KB readback per sheet —
+// the bulk of the loader's main-thread cost.
+//
+// Downscaling uses NEAREST-neighbour (imageSmoothing off): bilinear averaging
+// dilutes thin shapes (e.g. legs) below ALPHA_THRESHOLD and makes filled cells
+// read as empty. Nearest preserves peak alpha and introduces no cross-cell bleed,
+// so we can sample the full cell exactly like the original full-res scan did.
+const PROBE_CELL = 64;
+
+function detectFrameCount(texture: PIXI.Texture, rows: number): number {
   const source = (texture.baseTexture.resource as { source?: CanvasImageSource }).source;
   if (!source) return rows * FRAMES_PER_ROW;  // can't introspect — assume full grid
 
+  const cols   = FRAMES_PER_ROW;
+  const probeW = cols * PROBE_CELL;
+  const probeH = rows * PROBE_CELL;
+
   const canvas = document.createElement('canvas');
-  canvas.width  = texture.width;
-  canvas.height = texture.height;
+  canvas.width  = probeW;
+  canvas.height = probeH;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return rows * FRAMES_PER_ROW;
-  ctx.drawImage(source, 0, 0);
+  ctx.imageSmoothingEnabled = false;  // nearest-neighbour — preserve peak alpha
+  // Downscale the entire sheet in one draw, then read it back once.
+  ctx.drawImage(source, 0, 0, texture.width, texture.height, 0, 0, probeW, probeH);
+  const data = ctx.getImageData(0, 0, probeW, probeH).data;
 
-  const total = rows * FRAMES_PER_ROW;
+  const total = rows * cols;
   for (let i = 0; i < total; i++) {
-    const c = i % FRAMES_PER_ROW;
-    const r = Math.floor(i / FRAMES_PER_ROW);
-    const data = ctx.getImageData(c * fw, r * fh, fw, fh).data;
-    let filled = 0;
-    const sampledPixels = data.length / 4;
-    for (let j = 3; j < data.length; j += 4) {
-      if (data[j] > ALPHA_THRESHOLD) filled++;
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    const x0 = c * PROBE_CELL, x1 = (c + 1) * PROBE_CELL;
+    const y0 = r * PROBE_CELL, y1 = (r + 1) * PROBE_CELL;
+    let filled = 0, sampled = 0;
+    for (let y = y0; y < y1; y++) {
+      let idx = (y * probeW + x0) * 4 + 3;  // alpha byte of (x0, y)
+      for (let x = x0; x < x1; x++) {
+        if (data[idx] > ALPHA_THRESHOLD) filled++;
+        sampled++;
+        idx += 4;
+      }
     }
-    if (filled / sampledPixels < MIN_CELL_FILL_RATIO) return i;
+    if (filled / sampled < MIN_CELL_FILL_RATIO) return i;
   }
   return total;
 }
@@ -206,8 +233,8 @@ async function loadLayerAnim(
     const rows       = animDef.rows ?? Math.max(1, Math.round(texture.height / FRAME_HEIGHT_PX));
     const fw         = Math.floor(texture.width  / FRAMES_PER_ROW);
     const fh         = Math.floor(texture.height / rows);
-    const frameCount = detectFrameCount(texture, rows, fw, fh);
-    console.log(`[sprites] ${tribeId}/${type}/${layer}/${animName}: sheet ${texture.width}×${texture.height}, detected ${frameCount} frames in ${FRAMES_PER_ROW}×${rows} grid, frame ${fw}×${fh}`);
+    const frameCount = detectFrameCount(texture, rows);
+    if (DEBUG_SPRITES) console.log(`[sprites] ${tribeId}/${type}/${layer}/${animName}: sheet ${texture.width}×${texture.height}, detected ${frameCount} frames in ${FRAMES_PER_ROW}×${rows} grid, frame ${fw}×${fh}`);
     return extractFrames(texture, frameCount, fw, fh);
   } catch {
     return null;

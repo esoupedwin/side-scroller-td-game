@@ -5,3 +5,4 @@ dist/
 .playwright-mcp/
 /*.png
 game-perf-improvements.md
+.sprites-backup-4800/
