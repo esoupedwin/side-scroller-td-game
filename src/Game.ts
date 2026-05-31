@@ -650,12 +650,6 @@ export class Game {
     }
     g.endFill();
 
-    // Separator line
-    g.lineStyle(1, color, 0.35);
-    g.moveTo(-8, 6);
-    g.lineTo(-8, bh - 6);
-    g.lineStyle(0);
-
     // Stem line from box to arrowhead
     g.lineStyle(2, color, 0.8);
     g.moveTo(0, bh);
