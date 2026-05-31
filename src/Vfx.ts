@@ -327,7 +327,8 @@ class Explosion implements VfxEffect {
     for (let i = 0; i < EXP_SPARKS; i++) {
       const a  = Math.random() * Math.PI * 2;
       const sp = (0.7 + Math.random() * 1.1) * radius * 5;  // px/s
-      this.embers.push({ x: 0, y: 0, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - radius });
+      // Slight upward bias (proportional to speed) so embers arc up before gravity pulls them back.
+      this.embers.push({ x: 0, y: 0, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - sp * 0.3 });
     }
     for (let i = 0; i < 4; i++) {
       this.puffs.push({
@@ -375,18 +376,22 @@ class Explosion implements VfxEffect {
     this.sparkG.clear();
     const sa = Math.max(0, 1 - this.life / 0.55);
     if (sa > 0) {
+      // Advance physics, then draw all streaks under one line style, then all
+      // bright heads under one fill — avoids re-setting Graphics state per ember.
       for (const e of this.embers) {
         e.vy += EXP_SPARK_GRAV * dt;
         e.x  += e.vx * dt;
         e.y  += e.vy * dt;
-        this.sparkG.lineStyle(2, 0xffd66b, sa);
+      }
+      this.sparkG.lineStyle(2, 0xffd66b, sa);
+      for (const e of this.embers) {
         this.sparkG.moveTo(e.x - e.vx * EXP_SPARK_TAIL, e.y - e.vy * EXP_SPARK_TAIL);
         this.sparkG.lineTo(e.x, e.y);
-        this.sparkG.lineStyle(0);
-        this.sparkG.beginFill(0xffe9a0, sa);
-        this.sparkG.drawCircle(e.x, e.y, 1.8);
-        this.sparkG.endFill();
       }
+      this.sparkG.lineStyle(0);
+      this.sparkG.beginFill(0xffe9a0, sa);
+      for (const e of this.embers) this.sparkG.drawCircle(e.x, e.y, 1.8);
+      this.sparkG.endFill();
     }
 
     // ── Smoke (normal blend) — ramps in as the fireball dies, then rises/fades.
