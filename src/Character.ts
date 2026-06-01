@@ -2139,33 +2139,36 @@ export class Character {
     if (this.isAirborne) return;   // don't change horizontal intent mid-air
 
     const dir         = this.side === 'player' ? 1 : -1;
-    const nearest     = this.nearestEnemy(enemies, this.config.attackRange, blocks);
     const distToTower = Math.abs(this.x - enemyTowerFrontX);
 
-    if (nearest !== null) {
-      this.state = 'fighting';
-      this.attackEnemy(nearest, onFire);
-
-      // Kiting: ranged units back away when a melee enemy closes in
-      if (this.isRanged) {
-        const dist        = Math.abs(this.x - nearest.x);
-        const enemyIsMelee = Character.isMeleeType(nearest.config.type);
-        if (enemyIsMelee && dist < RANGED_KITE_THRESHOLD) {
-          const retreatX = this.x - dir * this.moveSpeed * dt;
-          // Don't back into own tower
-          this.x = dir > 0 ? Math.max(retreatX, ctx.homeTowerFrontX) : Math.min(retreatX, ctx.homeTowerFrontX);
-        }
-      }
-    } else if (distToTower <= this.config.attackRange) {
+    // Reached the enemy tower — sit and pound it.
+    if (distToTower <= this.config.attackRange) {
       this.state = 'fighting';
       this.attackTower(enemyTowerFrontX, enemyTowerY, onFire, ctx.onDamageTower);
-    } else {
-      this.state = 'marching';
-      // Use enemyTowerBaseFloorY so the destination floor matches the surface the
-      // enemy tower sits on (may be an elevated block, not this.groundY).
-      this.requestPath(enemyTowerFrontX, ctx.enemyTowerBaseFloorY, navGraph, dt);
-      this.followPath(dt, ctx.platforms);
+      return;
     }
+
+    // Opportunistic attack: fire at any enemy in range WITHOUT halting the advance.
+    // (Attacking no longer stops to fight — movement is driven purely by the
+    // behaviour; the attack is a free action layered on top.)
+    const nearest = this.nearestEnemy(enemies, this.config.attackRange, blocks);
+    if (nearest) this.attackEnemy(nearest, onFire);
+
+    // Kiting is a movement nuance of the attack behaviour, not an attack gate:
+    // a ranged unit backs away from a closing melee enemy (but never into its own tower).
+    if (nearest && this.isRanged && Character.isMeleeType(nearest.config.type)
+        && Math.abs(this.x - nearest.x) < RANGED_KITE_THRESHOLD) {
+      this.state = 'marching';
+      const retreatX = this.x - dir * this.moveSpeed * dt;
+      this.x = dir > 0 ? Math.max(retreatX, ctx.homeTowerFrontX) : Math.min(retreatX, ctx.homeTowerFrontX);
+      return;
+    }
+
+    // Advance toward the enemy tower. enemyTowerBaseFloorY matches the surface the
+    // tower sits on (may be an elevated block, not this.groundY).
+    this.state = 'marching';
+    this.requestPath(enemyTowerFrontX, ctx.enemyTowerBaseFloorY, navGraph, dt);
+    this.followPath(dt, ctx.platforms);
   }
 
   // â”€â”€ Rush behaviour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
