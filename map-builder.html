@@ -377,6 +377,39 @@
       }
       #platform-size-overlay.open { display: flex; }
 
+      /* ── Decor skin upload dialog ─────────────────────────────────────── */
+      #decor-skin-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.65);
+        backdrop-filter: blur(3px);
+        z-index: 500;
+        align-items: center;
+        justify-content: center;
+      }
+      #decor-skin-overlay.open { display: flex; }
+      #decor-skin-dialog {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 28px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        min-width: 420px;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+      }
+      #decor-skin-dialog .decor-drop {
+        display: flex; flex-direction: column; align-items: center; gap: 12px;
+        padding: 22px; border: 1px dashed var(--border); border-radius: 10px;
+      }
+      #decor-skin-preview {
+        max-width: 220px; max-height: 160px; border: 1px solid var(--border);
+        border-radius: 6px; display: none; image-rendering: auto;
+      }
+      #decor-skin-dialog .dialog-actions { display: flex; gap: 12px; justify-content: flex-end; }
+
       #platform-size-dialog {
         background: var(--card);
         border: 1px solid var(--border);
@@ -674,6 +707,14 @@
         </svg>
         Game Config
       </button>
+      <button id="btn-add-decor" class="tool-btn" title="Place a decorative object (flower, rock, …) with a custom PNG — no collision">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 4 a3 3 0 0 1 3 3 a3 3 0 0 1 -3 3 a3 3 0 0 1 -3 -3 a3 3 0 0 1 3 -3"/>
+          <path d="M12 10 l0 6"/>
+          <path d="M9 20 q3 -5 6 0"/>
+        </svg>
+        Add Decor
+      </button>
     </div>
 
     <!-- ── Workspace ────────────────────────────────────────────────────── -->
@@ -897,6 +938,32 @@
             </div>
           </div>
 
+          <!-- Decor (only when a decor object is selected) -->
+          <div id="section-decor" class="section" style="display:none;">
+            <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+              <span id="decor-label" style="font-size:18px; font-weight:600; color:var(--fg);">Decor 1</span>
+              <button id="btn-delete-decor" class="danger" style="height:34px; padding:0 12px; font-size:17px;">Delete</button>
+            </div>
+            <span class="hint" style="width:100%;">Visual only — no collision. Characters and coins pass through it.</span>
+            <label>X:</label><input type="number" id="input-decor-x" value="0" />
+            <label>Y:</label><input type="number" id="input-decor-y" value="0" />
+            <label>W:</label><input type="number" id="input-decor-w" value="100" />
+            <label>H:</label><input type="number" id="input-decor-h" value="100" />
+            <label title="Render order — shares one z-space with platforms & blocks">Z:</label>
+            <input type="number" id="input-decor-z" value="0" style="width:80px;" title="z-index — shares ordering with platforms & blocks" />
+            <label style="display:flex; align-items:center; gap:6px; width:100%; margin-top:4px;">
+              <input type="checkbox" id="input-decor-front" style="width:auto; height:auto;" />
+              <span>Infront of Characters</span>
+            </label>
+            <span class="hint" style="width:100%;">Off: z orders it among platforms &amp; blocks (behind characters). On: forces z = 999 so characters are always behind it.</span>
+            <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
+              <span class="skin-label">Skin</span>
+              <input type="file" id="input-decor-skin" accept="image/*" />
+              <img id="preview-decor-skin" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
+              <button id="btn-clear-decor-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
+            </div>
+          </div>
+
         </div><!-- #sidebar-content -->
       </div><!-- #sidebar -->
 
@@ -947,6 +1014,25 @@
           </button>
         </div>
         <button id="platform-size-cancel">Cancel</button>
+      </div>
+    </div>
+
+    <!-- ── Add Decor: skin upload dialog ─────────────────────────────────── -->
+    <div id="decor-skin-overlay">
+      <div id="decor-skin-dialog">
+        <div class="dialog-header">
+          <span class="dialog-title">Add Decor</span>
+          <span class="dialog-subtitle">Choose a PNG for the object, then place it</span>
+        </div>
+        <div class="decor-drop">
+          <input type="file" id="input-decor-upload" accept="image/png,image/*" />
+          <img id="decor-skin-preview" alt="preview" />
+          <span class="hint" id="decor-skin-hint">No image chosen yet</span>
+        </div>
+        <div class="dialog-actions">
+          <button id="decor-skin-cancel">Cancel</button>
+          <button id="decor-skin-place" class="primary" disabled>Place</button>
+        </div>
       </div>
     </div>
 

@@ -1,5 +1,6 @@
 import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
+import type { DecorData } from './Decor';
 import type { Tribe } from './Tribes';
 import { GameConfig } from './gameConfig';
 
@@ -37,6 +38,7 @@ export interface MapDefinition {
   enemyTowerZ?:      number;
   platforms:       PlatformData[];
   blocks:          BlockData[];
+  decor?:          DecorData[];  // purely-visual props (flowers, rocks, …); no collision
   coinBox:         CoinBoxDef;
   groundSkin?:       string;  // data URL; tiled across the ground plane
   groundSkinTileW?:  number;  // tile width  in world px (default: image natural width)

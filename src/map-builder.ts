@@ -1,4 +1,5 @@
 import { DEFAULT_MAP, WORLDS, saveMapToStorage, loadMapWithOverride, type MapDefinition } from './maps';
+import { DECOR_FRONT_Z, type DecorData } from './Decor';
 import { GameConfig } from './gameConfig';
 import { TRIBES, type Tribe } from './Tribes';
 import {
@@ -32,6 +33,11 @@ type DragKind =
   | { kind: 'block-right';     idx: number; origW: number }
   | { kind: 'block-top';       idx: number; origY: number; origH: number }
   | { kind: 'block-bottom';    idx: number }
+  | { kind: 'decor-move';      idx: number; ox: number; oy: number }
+  | { kind: 'decor-left';      idx: number; origX: number; origW: number }
+  | { kind: 'decor-right';     idx: number; origW: number }
+  | { kind: 'decor-top';       idx: number; origY: number; origH: number }
+  | { kind: 'decor-bottom';    idx: number; origY: number; origH: number }
   | { kind: 'coinbox';         ox: number; oy: number }
   | { kind: 'tower-player';   ox: number; oy: number }
   | { kind: 'tower-enemy';    ox: number; oy: number };
@@ -43,7 +49,7 @@ class MapBuilder {
   private canvas: HTMLCanvasElement;
   private ctx2d: CanvasRenderingContext2D;
   private selected:     number | null        = null;
-  private selectedKind: 'platform' | 'block' = 'platform';
+  private selectedKind: 'platform' | 'block' | 'decor' = 'platform';
   private drag: DragKind | null              = null;
   private mouseX = 0;
   private mouseY = 0;
@@ -67,6 +73,8 @@ class MapBuilder {
     kind: 'platform'; data: MapDefinition['platforms'][number];
   } | {
     kind: 'block'; data: MapDefinition['blocks'][number];
+  } | {
+    kind: 'decor'; data: DecorData;
   } | null = null;
 
   // ── Custom platform draw mode (drag on canvas to size a new platform) ────
@@ -349,10 +357,12 @@ class MapBuilder {
 
     // Unified z-sorted draw list: blocks, platforms, and towers share the same
     // z-index space so towers can be layered relative to environment elements.
-    type LayerKind = 'block' | 'platform' | 'tower-player' | 'tower-enemy';
+    type LayerKind = 'block' | 'platform' | 'decor' | 'tower-player' | 'tower-enemy';
     const layerItems: { kind: LayerKind; idx: number; z: number }[] = [];
     for (let i = 0; i < m.blocks.length;    i++) layerItems.push({ kind: 'block',        idx: i, z: m.blocks[i].zIndex    ?? 0 });
     for (let i = 0; i < m.platforms.length; i++) layerItems.push({ kind: 'platform',     idx: i, z: m.platforms[i].zIndex ?? 0 });
+    const decor = m.decor ?? [];
+    for (let i = 0; i < decor.length;       i++) layerItems.push({ kind: 'decor',        idx: i, z: decor[i].zIndex      ?? 0 });
     layerItems.push({ kind: 'tower-player', idx: 0, z: m.playerTowerZ ?? 0 });
     layerItems.push({ kind: 'tower-enemy',  idx: 1, z: m.enemyTowerZ  ?? 0 });
     layerItems.sort((a, b) => a.z - b.z);
@@ -407,6 +417,49 @@ class MapBuilder {
 
         if (b.anim) {
           this.drawAnimGhost(ctx, b.x, b.y, b.anim.endX, b.anim.endY, b.width, b.height, sel);
+        }
+        continue;
+      }
+
+      if (item.kind === 'decor') {
+        const i   = item.idx;
+        const d   = decor[i];
+        const sel = this.selectedKind === 'decor' && i === this.selected;
+        const dx  = this.wx(d.x);
+        const dy  = this.wy(d.y);
+        const dw  = this.sw(d.width);
+        const dh  = this.sh(d.height);
+
+        if (d.skin) {
+          const img = this.getSkinImage(d.skin);
+          if (img.complete && img.naturalWidth > 0) {
+            ctx.drawImage(img, dx, dy, dw, dh);
+          } else {
+            ctx.fillStyle = 'rgba(120,180,120,0.25)';
+            ctx.fillRect(dx, dy, dw, dh);
+          }
+        } else {
+          // No skin yet — faint dashed placeholder.
+          ctx.fillStyle = 'rgba(120,180,120,0.18)';
+          ctx.fillRect(dx, dy, dw, dh);
+          ctx.strokeStyle = sel ? '#34d399' : '#4b8b5e';
+          ctx.setLineDash([5, 4]);
+          ctx.lineWidth = 1;
+          ctx.strokeRect(dx, dy, dw, dh);
+          ctx.setLineDash([]);
+        }
+
+        if (sel) {
+          ctx.strokeStyle = '#34d399';
+          ctx.lineWidth   = 2;
+          ctx.strokeRect(dx, dy, dw, dh);
+          ctx.fillStyle = '#ffffff';
+          const hw = 6, hh = 10;
+          ctx.fillRect(dx - hw / 2,      dy + dh / 2 - hh / 2, hw, hh);
+          ctx.fillRect(dx + dw - hw / 2, dy + dh / 2 - hh / 2, hw, hh);
+          const hw2 = 10, hh2 = 6;
+          ctx.fillRect(dx + dw / 2 - hw2 / 2, dy - hh2 / 2,      hw2, hh2);
+          ctx.fillRect(dx + dw / 2 - hw2 / 2, dy + dh - hh2 / 2, hw2, hh2);
         }
         continue;
       }
@@ -663,6 +716,12 @@ class MapBuilder {
     this.syncSkinPreview('preview-block-skin', 'btn-clear-block-skin', skin, 'input-block-skin');
   }
 
+  private syncDecorSkinPreview() {
+    const skin = this.selected !== null && this.selectedKind === 'decor'
+      ? (this.map.decor ?? [])[this.selected]?.skin : undefined;
+    this.syncSkinPreview('preview-decor-skin', 'btn-clear-decor-skin', skin, 'input-decor-skin');
+  }
+
   private syncBackgroundSkinPreview() {
     this.syncSkinPreview('preview-bg-skin', 'btn-clear-bg-skin', this.map.backgroundSkin, 'input-bg-skin');
     (document.getElementById('input-bg-skin-y') as HTMLInputElement).value =
@@ -792,6 +851,32 @@ class MapBuilder {
       const b  = m.blocks[this.drag.idx];
       b.height = Math.max(20, Math.round(Math.min(wy, this.groundTopY) - b.y));
       this.syncInputsFromMap();
+    } else if (this.drag.kind === 'decor-move') {
+      const d = (m.decor ?? [])[this.drag.idx];
+      // Decor is purely visual — free placement (may float, sit in the sky, etc.).
+      d.x = Math.round(wx - this.drag.ox);
+      d.y = Math.round(wy - this.drag.oy);
+      this.syncInputsFromMap();
+    } else if (this.drag.kind === 'decor-left') {
+      const d  = (m.decor ?? [])[this.drag.idx];
+      const dx = wx - this.drag.origX;
+      d.x      = Math.round(this.drag.origX + dx);
+      d.width  = Math.max(8, Math.round(this.drag.origW - dx));
+      this.syncInputsFromMap();
+    } else if (this.drag.kind === 'decor-right') {
+      const d = (m.decor ?? [])[this.drag.idx];
+      d.width = Math.max(8, Math.round(wx - d.x));
+      this.syncInputsFromMap();
+    } else if (this.drag.kind === 'decor-top') {
+      const d      = (m.decor ?? [])[this.drag.idx];
+      const bottom = this.drag.origY + this.drag.origH;
+      d.y          = Math.round(Math.min(wy, bottom - 8));
+      d.height     = bottom - d.y;
+      this.syncInputsFromMap();
+    } else if (this.drag.kind === 'decor-bottom') {
+      const d  = (m.decor ?? [])[this.drag.idx];
+      d.height = Math.max(8, Math.round(wy - d.y));
+      this.syncInputsFromMap();
     } else if (this.drag.kind === 'coinbox') {
       m.coinBox.x = Math.round(wx - this.drag.ox);
       m.coinBox.y = Math.min(this.groundTopY - m.coinBox.height, Math.round(wy - this.drag.oy));
@@ -833,6 +918,17 @@ class MapBuilder {
         return 'ew-resize';
       if (inX && (Math.abs(cy - this.wy(b.y)) <= HANDLE_ZONE ||
                   Math.abs(cy - this.wy(b.y + b.height)) <= HANDLE_ZONE))
+        return 'ns-resize';
+      if (inX && inY) return 'grab';
+    }
+    for (const d of (m.decor ?? [])) {
+      const inX = wx >= d.x && wx <= d.x + d.width;
+      const inY = wy >= d.y && wy <= d.y + d.height;
+      if (inY && (Math.abs(cx - this.wx(d.x)) <= HANDLE_ZONE ||
+                  Math.abs(cx - this.wx(d.x + d.width)) <= HANDLE_ZONE))
+        return 'ew-resize';
+      if (inX && (Math.abs(cy - this.wy(d.y)) <= HANDLE_ZONE ||
+                  Math.abs(cy - this.wy(d.y + d.height)) <= HANDLE_ZONE))
         return 'ns-resize';
       if (inX && inY) return 'grab';
     }
@@ -891,6 +987,37 @@ class MapBuilder {
     // Draw order: blocks ascending z → platforms ascending z.
     // Hit-test order: platforms descending z → blocks descending z.
     const HANDLE_ZONE = 5;
+
+    // Decor (hit-tested first so these visual props are always easy to grab),
+    // highest z wins.
+    const decorArr = m.decor ?? [];
+    const decorHitOrder = decorArr
+      .map((_, i) => i)
+      .sort((a, b) => (decorArr[b].zIndex ?? 0) - (decorArr[a].zIndex ?? 0));
+    for (const i of decorHitOrder) {
+      const d = decorArr[i];
+      const startDecor = (drag: DragKind) => {
+        this.clearSelection(); this.selected = i; this.selectedKind = 'decor';
+        this.pushUndo();
+        this.drag = drag;
+        this.syncInputsFromMap(); this.scrollSelectionIntoView();
+      };
+      if (Math.abs(cx - this.wx(d.x)) <= HANDLE_ZONE && wy >= d.y && wy <= d.y + d.height) {
+        startDecor({ kind: 'decor-left', idx: i, origX: d.x, origW: d.width }); return;
+      }
+      if (Math.abs(cx - this.wx(d.x + d.width)) <= HANDLE_ZONE && wy >= d.y && wy <= d.y + d.height) {
+        startDecor({ kind: 'decor-right', idx: i, origW: d.width }); return;
+      }
+      if (Math.abs(cy - this.wy(d.y)) <= HANDLE_ZONE && wx >= d.x && wx <= d.x + d.width) {
+        startDecor({ kind: 'decor-top', idx: i, origY: d.y, origH: d.height }); return;
+      }
+      if (Math.abs(cy - this.wy(d.y + d.height)) <= HANDLE_ZONE && wx >= d.x && wx <= d.x + d.width) {
+        startDecor({ kind: 'decor-bottom', idx: i, origY: d.y, origH: d.height }); return;
+      }
+      if (wx >= d.x && wx <= d.x + d.width && wy >= d.y && wy <= d.y + d.height) {
+        startDecor({ kind: 'decor-move', idx: i, ox: wx - d.x, oy: wy - d.y }); return;
+      }
+    }
 
     const platHitOrder = m.platforms
       .map((_, i) => i)
@@ -1458,6 +1585,114 @@ class MapBuilder {
     // shows/hides the moment the user ticks the box.
     document.getElementById('input-block-anim')!.addEventListener('change', () => { this.pushUndo(); this.readBlockInputs(); });
 
+    // Number inputs for selected decor
+    ['decor-x', 'decor-y', 'decor-w', 'decor-h', 'decor-z'].forEach(id => {
+      document.getElementById(`input-${id}`)!.addEventListener('change', () => { this.pushUndo(); this.readDecorInputs(); });
+    });
+    document.getElementById('input-decor-z')!.addEventListener('input', () => this.readDecorInputs());
+    // "Infront of Characters" — pins zIndex to DECOR_FRONT_Z (so characters always
+    // render behind it); unchecking returns it to the shared scene z-space (z = 0).
+    document.getElementById('input-decor-front')!.addEventListener('change', () => {
+      if (this.selected === null || this.selectedKind !== 'decor') return;
+      const d = (this.map.decor ?? [])[this.selected];
+      if (!d) return;
+      this.pushUndo();
+      const on = (document.getElementById('input-decor-front') as HTMLInputElement).checked;
+      d.zIndex = on ? DECOR_FRONT_Z : undefined;
+      this.syncInputsFromMap();
+    });
+    // Decor skin picker (replaces the skin of the selected decor)
+    document.getElementById('input-decor-skin')!.addEventListener('change', e => {
+      if (this.selected === null || this.selectedKind !== 'decor') return;
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      this.pushUndo();
+      const reader = new FileReader();
+      reader.onload = () => {
+        const d = (this.map.decor ?? [])[this.selected!];
+        if (d) { d.skin = reader.result as string; this.syncDecorSkinPreview(); }
+      };
+      reader.readAsDataURL(file);
+    });
+    document.getElementById('btn-clear-decor-skin')!.addEventListener('click', () => {
+      if (this.selected === null || this.selectedKind !== 'decor') return;
+      this.pushUndo();
+      delete (this.map.decor ?? [])[this.selected]?.skin;
+      this.syncDecorSkinPreview();
+    });
+
+    // ── Add Decor: skin upload dialog ────────────────────────────────────────
+    const decorOverlay = document.getElementById('decor-skin-overlay')!;
+    const decorUpload   = document.getElementById('input-decor-upload') as HTMLInputElement;
+    const decorPreview  = document.getElementById('decor-skin-preview') as HTMLImageElement;
+    const decorHint     = document.getElementById('decor-skin-hint')!;
+    const decorPlaceBtn = document.getElementById('decor-skin-place') as HTMLButtonElement;
+    let pendingDecorSkin: string | null = null;
+
+    const closeDecorDialog = () => {
+      decorOverlay.classList.remove('open');
+      pendingDecorSkin = null;
+      decorUpload.value = '';
+      decorPreview.style.display = 'none';
+      decorPreview.removeAttribute('src');
+      decorHint.textContent = 'No image chosen yet';
+      decorPlaceBtn.disabled = true;
+    };
+
+    document.getElementById('btn-add-decor')!.addEventListener('click', () => {
+      closeDecorDialog();
+      decorOverlay.classList.add('open');
+    });
+    document.getElementById('decor-skin-cancel')!.addEventListener('click', closeDecorDialog);
+    decorOverlay.addEventListener('click', e => { if (e.target === decorOverlay) closeDecorDialog(); });
+
+    decorUpload.addEventListener('change', e => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        pendingDecorSkin = reader.result as string;
+        decorPreview.src = pendingDecorSkin;
+        decorPreview.style.display = 'block';
+        decorHint.textContent = file.name;
+        decorPlaceBtn.disabled = false;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    decorPlaceBtn.addEventListener('click', () => {
+      if (!pendingDecorSkin) return;
+      // Size from the chosen image's aspect ratio (default height 100px, capped width).
+      const natW = decorPreview.naturalWidth  || 100;
+      const natH = decorPreview.naturalHeight || 100;
+      let h = 100, w = Math.round(h * natW / natH);
+      if (w > 300) { w = 300; h = Math.round(w * natH / natW); }
+      // Place at the current view centre so it lands where the author is looking.
+      const cxw = Math.round(this.cw(this.canvas.width  / 2));
+      const cyw = Math.round(this.ch(this.canvas.height / 2));
+
+      const m = this.map;
+      m.decor ??= [];
+      this.pushUndo();
+      // New decor defaults behind characters (z = 0, shared scene space). Use the
+      // "Infront of Characters" toggle to bring it forward.
+      m.decor.push({ id: `d${Date.now()}`, x: cxw - w / 2, y: cyw - h / 2, width: w, height: h, skin: pendingDecorSkin });
+      this.clearSelection();
+      this.selected     = m.decor.length - 1;
+      this.selectedKind = 'decor';
+      closeDecorDialog();
+      this.syncInputsFromMap();
+      this.scrollSelectionIntoView();
+    });
+
+    document.getElementById('btn-delete-decor')!.addEventListener('click', () => {
+      if (this.selected === null || this.selectedKind !== 'decor') return;
+      this.pushUndo();
+      (this.map.decor ?? []).splice(this.selected, 1);
+      this.selected = null;
+      this.syncInputsFromMap();
+    });
+
     // Coin box inputs
     ['cb-x', 'cb-y', 'cb-w', 'cb-h', 'cb-spread'].forEach(id => {
       document.getElementById(`input-${id}`)!.addEventListener('change', () => { this.pushUndo(); this.readCoinBoxInputs(); });
@@ -1540,8 +1775,10 @@ class MapBuilder {
         if (this.selected === null) return;
         if (this.selectedKind === 'platform') {
           this.clipboard = { kind: 'platform', data: structuredClone(this.map.platforms[this.selected]) };
-        } else {
+        } else if (this.selectedKind === 'block') {
           this.clipboard = { kind: 'block', data: structuredClone(this.map.blocks[this.selected]) };
+        } else {
+          this.clipboard = { kind: 'decor', data: structuredClone((this.map.decor ?? [])[this.selected]) };
         }
         return;
       }
@@ -1561,7 +1798,7 @@ class MapBuilder {
           this.clearSelection();
           this.selected     = this.map.platforms.length - 1;
           this.selectedKind = 'platform';
-        } else {
+        } else if (this.clipboard.kind === 'block') {
           const copy    = structuredClone(this.clipboard.data);
           copy.x       += PASTE_OFFSET;
           copy.y       += PASTE_OFFSET;
@@ -1570,6 +1807,18 @@ class MapBuilder {
           this.clearSelection();
           this.selected     = this.map.blocks.length - 1;
           this.selectedKind = 'block';
+        } else {
+          // Preserve the copied decor's z (and thus its front/back state) — the
+          // 999 sentinel must survive a copy, so don't bump it like platforms/blocks.
+          const copy    = structuredClone(this.clipboard.data);
+          copy.id       = `d${Date.now()}`;
+          copy.x       += PASTE_OFFSET;
+          copy.y       += PASTE_OFFSET;
+          this.map.decor ??= [];
+          this.map.decor.push(copy);
+          this.clearSelection();
+          this.selected     = this.map.decor.length - 1;
+          this.selectedKind = 'decor';
         }
         this.syncInputsFromMap();
         return;
@@ -1579,8 +1828,9 @@ class MapBuilder {
 
       if ((e.key === 'Delete' || e.key === 'Backspace') && this.selected !== null) {
         this.pushUndo();
-        if (this.selectedKind === 'platform') this.map.platforms.splice(this.selected, 1);
-        else                                  this.map.blocks.splice(this.selected, 1);
+        if      (this.selectedKind === 'platform') this.map.platforms.splice(this.selected, 1);
+        else if (this.selectedKind === 'block')    this.map.blocks.splice(this.selected, 1);
+        else                                       (this.map.decor ?? []).splice(this.selected, 1);
         this.selected = null;
         this.syncInputsFromMap();
       }
@@ -1689,6 +1939,18 @@ class MapBuilder {
     this.readAnimFields('block', b);
   }
 
+  private readDecorInputs() {
+    if (this.selected === null || this.selectedKind !== 'decor') return;
+    const d  = (this.map.decor ?? [])[this.selected];
+    if (!d) return;
+    d.x      = parseInt((document.getElementById('input-decor-x') as HTMLInputElement).value, 10);
+    d.y      = parseInt((document.getElementById('input-decor-y') as HTMLInputElement).value, 10);
+    d.width  = Math.max(1, parseInt((document.getElementById('input-decor-w') as HTMLInputElement).value, 10));
+    d.height = Math.max(1, parseInt((document.getElementById('input-decor-h') as HTMLInputElement).value, 10));
+    const z  = parseInt((document.getElementById('input-decor-z') as HTMLInputElement).value, 10);
+    d.zIndex = isNaN(z) || z === 0 ? undefined : z;
+  }
+
   private readCoinBoxInputs() {
     const cb     = this.map.coinBox;
     cb.x         = parseInt((document.getElementById('input-cb-x')      as HTMLInputElement).value, 10);
@@ -1711,6 +1973,7 @@ class MapBuilder {
     const configSel    = this.selectedGameConfig;
     const platSel    = this.selected !== null && this.selectedKind === 'platform' && this.selected < m.platforms.length;
     const blockSel   = this.selected !== null && this.selectedKind === 'block'    && this.selected < m.blocks.length;
+    const decorSel   = this.selected !== null && this.selectedKind === 'decor'    && this.selected < (m.decor ?? []).length;
 
     // Show only the relevant section
     document.getElementById('section-player-tower')!.style.display = playerSel ? 'flex' : 'none';
@@ -1722,6 +1985,7 @@ class MapBuilder {
     document.getElementById('section-game-config')! .style.display = configSel  ? 'flex' : 'none';
     document.getElementById('section-platforms')!   .style.display = platSel   ? 'flex' : 'none';
     document.getElementById('section-blocks')!      .style.display = blockSel  ? 'flex' : 'none';
+    document.getElementById('section-decor')!       .style.display = decorSel  ? 'flex' : 'none';
 
     if (playerSel) {
       (document.getElementById('input-player-x')      as HTMLInputElement).value  = String(m.playerTowerX);
@@ -1768,6 +2032,20 @@ class MapBuilder {
       this.syncAnimToUI('block', b, b.x + b.width);
       document.getElementById('block-label')!.textContent = `Block ${this.selected! + 1}`;
       this.syncBlockSkinPreview();
+    }
+    if (decorSel) {
+      const d = (m.decor ?? [])[this.selected!];
+      const front = (d.zIndex ?? 0) >= DECOR_FRONT_Z;
+      (document.getElementById('input-decor-x') as HTMLInputElement).value = String(d.x);
+      (document.getElementById('input-decor-y') as HTMLInputElement).value = String(d.y);
+      (document.getElementById('input-decor-w') as HTMLInputElement).value = String(d.width);
+      (document.getElementById('input-decor-h') as HTMLInputElement).value = String(d.height);
+      const zInput = document.getElementById('input-decor-z') as HTMLInputElement;
+      zInput.value    = String(d.zIndex ?? 0);
+      zInput.disabled = front;  // when in front of characters, z is pinned to DECOR_FRONT_Z
+      (document.getElementById('input-decor-front') as HTMLInputElement).checked = front;
+      document.getElementById('decor-label')!.textContent = `Decor ${this.selected! + 1}`;
+      this.syncDecorSkinPreview();
     }
     if (groundSel) {
       (document.getElementById('display-ground-w') as HTMLInputElement).value = String(m.worldWidth);

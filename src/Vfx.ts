@@ -16,10 +16,18 @@ interface VfxEffect {
 }
 
 let vfxLayer: PIXI.Container | null = null;
+// Separate layer for afterimages so they can render BEHIND characters (vfxLayer
+// sits in front of the unit layer). Added before the unit layer in Game.build().
+let afterImageLayer: PIXI.Container | null = null;
 const effects: VfxEffect[] = [];
 
 export function initVfx(layer: PIXI.Container): void {
   vfxLayer = layer;
+}
+
+/** Layer for afterimages — must be added behind the unit layer in the world. */
+export function initAfterImageLayer(layer: PIXI.Container): void {
+  afterImageLayer = layer;
 }
 
 export function tickVfx(dt: number): void {
@@ -27,7 +35,7 @@ export function tickVfx(dt: number): void {
     const e = effects[i];
     e.update(dt);
     if (e.isDone) {
-      if (vfxLayer && e.container.parent === vfxLayer) vfxLayer.removeChild(e.container);
+      e.container.parent?.removeChild(e.container);
       e.container.destroy({ children: true });
       effects.splice(i, 1);
     }
@@ -37,15 +45,15 @@ export function tickVfx(dt: number): void {
 /** Destroy every active VFX. Called on Game.reset(). */
 export function clearVfx(): void {
   for (const e of effects) {
-    if (vfxLayer && e.container.parent === vfxLayer) vfxLayer.removeChild(e.container);
+    e.container.parent?.removeChild(e.container);
     e.container.destroy({ children: true });
   }
   effects.length = 0;
 }
 
-function register(e: VfxEffect): void {
-  if (!vfxLayer) return;  // pre-init or post-teardown — silently drop
-  vfxLayer.addChild(e.container);
+function register(e: VfxEffect, layer: PIXI.Container | null = vfxLayer): void {
+  if (!layer) return;  // pre-init or post-teardown — silently drop
+  layer.addChild(e.container);
   effects.push(e);
 }
 
@@ -411,10 +419,65 @@ class Explosion implements VfxEffect {
   }
 }
 
+// ── AfterImage ────────────────────────────────────────────────────────────────
+// A fading ghost copy of a character's body+legs sprite frames, dropped in world
+// space while a speed power-up is active. Each part reuses the live frame Texture
+// (no new GPU texture allocated) and copies the source sprite's anchor, scale
+// (including facing flip), and rotation, so the ghost matches the character
+// exactly. Anchored where it spawns — the character glides ahead of the trail.
+// Visual-only: never touches physics, collision, or hitboxes.
+
+const AFTERIMAGE_DUR     = 0.26;   // seconds to fade fully out (in the 200–300 ms range)
+const AFTERIMAGE_ALPHA_0 = 0.4;    // starting opacity (~40%)
+
+export interface AfterImagePart {
+  texture:  PIXI.Texture;
+  x:        number;   // world position of the source sprite
+  y:        number;
+  anchorX:  number;
+  anchorY:  number;
+  scaleX:   number;   // includes facing flip (negative when facing left)
+  scaleY:   number;
+  rotation: number;
+}
+
+class AfterImage implements VfxEffect {
+  container: PIXI.Container;
+  isDone   = false;
+  private life = 0;
+
+  constructor(parts: AfterImagePart[]) {
+    this.container = new PIXI.Container();
+    for (const p of parts) {
+      const s = new PIXI.Sprite(p.texture);
+      s.position.set(p.x, p.y);
+      s.anchor.set(p.anchorX, p.anchorY);
+      s.scale.set(p.scaleX, p.scaleY);
+      s.rotation = p.rotation;
+      this.container.addChild(s);
+    }
+    this.container.alpha = AFTERIMAGE_ALPHA_0;
+  }
+
+  update(dt: number): void {
+    this.life += dt;
+    const t = this.life / AFTERIMAGE_DUR;
+    if (t >= 1) { this.isDone = true; return; }
+    this.container.alpha = AFTERIMAGE_ALPHA_0 * (1 - t);
+  }
+}
+
 // ── Spawn helpers ───────────────────────────────────────────────────────────
 
 export function spawnSlashArc(x: number, y: number, dir: 1 | -1, side: 'player' | 'enemy'): void {
   register(new SlashArc(x, y, dir, side));
+}
+
+/** Drop a fading ghost of the supplied sprite layers into the afterimage layer
+ *  (behind characters). No-op if there are no parts (e.g. Graphics-rendered units). */
+export function spawnAfterImage(parts: AfterImagePart[]): void {
+  if (parts.length === 0) return;
+  register(new AfterImage(parts), afterImageLayer);
 }
 
 export function spawnExplosion(x: number, y: number, radius: number): void {

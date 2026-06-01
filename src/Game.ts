@@ -25,6 +25,7 @@ import { Sheep } from './Sheep';
 import { DamageLabel } from './DamageLabel';
 import { Platform } from './Platform';
 import { Block } from './Block';
+import { Decor, DECOR_FRONT_Z } from './Decor';
 import { pickName } from './names';
 import { getSpriteSet } from './SpriteRegistry';
 import { tribeForSide, TRIBE_ROSTERS, heavyMeleeForTribe, getPlayerTribe, getEnemyTribe, setPlayerTribe, setEnemyTribe } from './Tribes';
@@ -59,7 +60,7 @@ import {
   SHAKE_DECAY, SHAKE_MAX_OFFSET, SHAKE_GRENADE, SHAKE_ROCKET, SHAKE_FALLOFF_PX,
 } from './constants';
 import { playSoundAt, setViewport } from './AudioManager';
-import { initVfx, tickVfx, clearVfx, spawnHitSpark, spawnExplosion } from './Vfx';
+import { initVfx, initAfterImageLayer, tickVfx, clearVfx, spawnHitSpark, spawnExplosion } from './Vfx';
 
 function spawnBoost(): number {
   return Math.min(Math.floor(Math.random() * 11), Math.floor(Math.random() * 11));
@@ -117,6 +118,9 @@ export class Game {
   private powerUpLayer!: PIXI.Container;
   private vfxLayer!:     PIXI.Container;
   private labelLayer!:   PIXI.Container;
+  private afterImageLayer!: PIXI.Container;  // speed-boost ghost trails — renders behind characters
+  private frontDecorLayer!: PIXI.Container;  // decor with z >= DECOR_FRONT_Z — renders in front of characters
+  private decorObjects:  Decor[]      = [];
   private damageLabels:  DamageLabel[] = [];
 
   private powerUpTimer    = 0;
@@ -383,26 +387,30 @@ export class Game {
     this.rangeMarkers.visible = this.devMode;
     buildCoinBox(this.world, m.coinBox);
 
-    // Build one Platform visual per map platform — use a dedicated container so
-    // sortableChildren only affects platform draw-order, not the whole world.
-    const platLayer = new PIXI.Container();
-    platLayer.sortableChildren = true;
-    this.world.addChild(platLayer);
+    // Scene-prop layer: platforms, blocks, and behind-character decor all share
+    // ONE sortable container so their zIndex values order them in a single
+    // space (matches the map builder's preview). Decor flagged "in front of
+    // characters" (zIndex >= DECOR_FRONT_Z) is routed to frontDecorLayer below.
+    const sceneLayer = new PIXI.Container();
+    sceneLayer.sortableChildren = true;
+    this.world.addChild(sceneLayer);
+
+    // Build one Platform visual per map platform.
     this.platforms = m.platforms.map(p => new Platform(p));
     this.platformData.length = 0;
     for (const plat of this.platforms) {
       this.platformData.push(plat.data);
-      platLayer.addChild(plat.container);
+      sceneLayer.addChild(plat.container);
     }
     this.cachedLowestPlatY = this.platformData.reduce((minY, p) => Math.min(minY, p.y), this.mapGroundY);
     this.navGraphRebuildTimer = 0;
 
-    // Build one Block visual per map block
+    // Build one Block visual per map block — same shared scene layer.
     this.blocks = m.blocks.map(b => new Block(b));
     this.blockData.length = 0;
     for (const blk of this.blocks) {
       this.blockData.push(blk.data);
-      this.world.addChild(blk.container);
+      sceneLayer.addChild(blk.container);
     }
 
     this.physics = new Physics(m.worldWidth, m.playerTowerX, m.enemyTowerX, m.platforms, this.mapGroundY);
@@ -418,6 +426,7 @@ export class Game {
     this.projLayer     = new PIXI.Container();
     this.grenadeLayer  = new PIXI.Container();
     this.rocketLayer   = new PIXI.Container();
+    this.afterImageLayer = new PIXI.Container();  // behind characters — speed-boost ghosts
     this.unitLayer     = new PIXI.Container();
     this.vfxLayer      = new PIXI.Container();
     this.labelLayer    = new PIXI.Container();
@@ -427,10 +436,25 @@ export class Game {
     this.world.addChild(this.projLayer);
     this.world.addChild(this.grenadeLayer);
     this.world.addChild(this.rocketLayer);
+    this.world.addChild(this.afterImageLayer);
     this.world.addChild(this.unitLayer);
+    // Foreground decor (zIndex >= DECOR_FRONT_Z) — renders above characters but below VFX/labels.
+    this.frontDecorLayer = new PIXI.Container();
+    this.frontDecorLayer.sortableChildren = true;
+    this.world.addChild(this.frontDecorLayer);
     this.world.addChild(this.vfxLayer);
     this.world.addChild(this.labelLayer);
     initVfx(this.vfxLayer);
+    initAfterImageLayer(this.afterImageLayer);
+
+    // Decor objects — no physics body, not in the nav graph (collision-free).
+    // zIndex >= DECOR_FRONT_Z → frontDecorLayer (in front of characters); otherwise
+    // it sorts in the shared scene layer alongside platforms & blocks (behind characters).
+    this.decorObjects = (m.decor ?? []).map(d => new Decor(d));
+    for (const dec of this.decorObjects) {
+      const layer = (dec.data.zIndex ?? 0) >= DECOR_FRONT_Z ? this.frontDecorLayer : sceneLayer;
+      layer.addChild(dec.container);
+    }
 
     this.playerTower = new Tower('player', m.playerTowerX, m.playerTowerY ?? this.mapGroundY, getPlayerTribe());
     this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerY  ?? this.mapGroundY, getEnemyTribe());
@@ -1972,6 +1996,8 @@ export class Game {
     for (const coin of this.coins)      { coin.destroy(); }
     for (const pu of this.powerUps)     { pu.destroy(); }
     for (const l of this.damageLabels)  { l.destroy(); }
+    for (const d of this.decorObjects)  { d.destroy(); }
+    this.decorObjects = [];
     clearVfx();
     this.shakeTrauma = 0;
     this.sheep?.destroy();

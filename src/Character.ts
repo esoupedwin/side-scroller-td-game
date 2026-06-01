@@ -22,7 +22,7 @@ import {
   getLegsAnimFps, getLegsSpriteScale, getLegsFeetAnchorY,
 } from './SpriteRegistry';
 import { type Tribe, tribeForSide } from './Tribes';
-import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow, spawnSpeedStreak } from './Vfx';
+import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow, spawnSpeedStreak, spawnAfterImage, type AfterImagePart } from './Vfx';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
 
@@ -293,6 +293,7 @@ export class Character {
   private powerUpSpeedTimer  = 0;
   private powerUpAtkMult     = 1.0;
   private speedStreakTimer   = 0;
+  private afterImageTimer    = 0;
 
   constructor(side: Side, startX: number, startY: number, config: CharacterConfig, id: number, name: string, physics: Physics, spriteSet?: LoadedSpriteSet | null, groundY: number = GROUND_Y) {
     this.groundY   = groundY;
@@ -1571,7 +1572,7 @@ export class Character {
     g.beginFill(mid);     g.drawCircle(0, 0, 5);   g.endFill();
     g.beginFill(hi, 0.8); g.drawCircle(-2, -2, 2); g.endFill();
     g.x = 0;
-    g.y = -14;
+    g.y = 6;   // held low, around the character's arms/hands while carried
     this.coinCarryGfx = g;
     this.container.addChild(g);
   }
@@ -2593,12 +2594,42 @@ export class Character {
 
   private tickSpeedStreaks(dt: number): void {
     const isMoving = this.currentLegsAnim === 'walk' ? this.stillTimer < 0.15 : this.movingTimer > 0.05;
-    if (this.powerUpSpeedMult <= 1 || !isMoving) { this.speedStreakTimer = 0; return; }
+    if (this.powerUpSpeedMult <= 1 || !isMoving) { this.speedStreakTimer = 0; this.afterImageTimer = 0; return; }
+
+    // Motion-blur streak lines.
     this.speedStreakTimer -= dt;
     if (this.speedStreakTimer <= 0) {
       this.speedStreakTimer = 0.05;
       spawnSpeedStreak(this.x, this.y, this.config.height, this.lastMoveDir);
     }
+
+    // Afterimage ghost — a fading copy of the current sprite frames every 40–70 ms.
+    this.afterImageTimer -= dt;
+    if (this.afterImageTimer <= 0) {
+      this.afterImageTimer = 0.04 + Math.random() * 0.03;  // 40–70 ms
+      this.spawnAfterImageGhost();
+    }
+  }
+
+  /** Drop a ghost copy of the current body+legs sprite frames (only for
+   *  sprite-rendered characters; Graphics units have no frames to copy). */
+  private spawnAfterImageGhost(): void {
+    const parts: AfterImagePart[] = [];
+    // Legs first so they sit behind the body inside the ghost, matching the live stack.
+    for (const s of [this.legsSprite, this.bodySprite]) {
+      if (!s) continue;
+      parts.push({
+        texture:  s.texture,
+        x:        this.container.x + s.x,   // sprite world position
+        y:        this.container.y + s.y,
+        anchorX:  s.anchor.x,
+        anchorY:  s.anchor.y,
+        scaleX:   s.scale.x,                // carries the facing flip
+        scaleY:   s.scale.y,
+        rotation: s.rotation,
+      });
+    }
+    spawnAfterImage(parts);
   }
 
   private get moveSpeed() {
