@@ -58,6 +58,8 @@ export const CPU_URGENT_MAX_FACTOR   = cpu.urgentMaxFactor;
 export const CPU_COMFORT_MIN_FACTOR  = cpu.comfortMinFactor;
 export const CPU_NEUTRAL_MIN_FACTOR  = cpu.neutralMinFactor;
 export const CPU_NEUTRAL_MAX_FACTOR  = cpu.neutralMaxFactor;
+export const CPU_RETREAT_HP_FRAC      = cpu.retreatHpFrac;
+export const CPU_RETREAT_RECOVER_FRAC = cpu.retreatRecoverFrac;
 
 // ── Platform ─────────────────────────────────────────────────────────────────
 export const PLATFORM_X      = GameConfig.platform.x;
@@ -86,6 +88,9 @@ export const LOW_BALANCE_INCOME_MULT  = economy.lowBalanceIncomeMult;
 export const SILVER_COIN_VALUE        = economy.silverCoinValue;
 export const SILVER_DROP_MIN_MS       = economy.silverDropIntervalMinMs;
 export const SILVER_DROP_MAX_MS       = economy.silverDropIntervalMaxMs;
+export const BLUE_COIN_VALUE          = economy.blueCoinValue;
+export const BLUE_DROP_MIN_MS         = economy.blueDropIntervalMinMs;
+export const BLUE_DROP_MAX_MS         = economy.blueDropIntervalMaxMs;
 export const COIN_GRAVITY             = economy.coinGravity;
 export const COIN_DROP_VX_MIN    = economy.dropBounceVxMin;
 export const COIN_DROP_VX_MAX    = economy.dropBounceVxMax;

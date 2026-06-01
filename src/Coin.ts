@@ -7,11 +7,12 @@ const DEFAULT_WALL_R = ENEMY_TOWER_X  + TOWER_WIDTH / 2;
 import type { Physics } from './Physics';
 import type { PlatformData } from './Platform';
 
-export type CoinKind = 'gold' | 'silver';
+export type CoinKind = 'gold' | 'silver' | 'blue';
 
 export const COIN_PALETTE: Record<CoinKind, readonly [number, number, number, number]> = {
   gold:   [0xf0a500, 0xffd166, 0xf0a500, 0xfffab0],
   silver: [0x909090, 0xbfbfbf, 0x909090, 0xe8e8e8],
+  blue:   [0x0d47a1, 0x2196f3, 0x0d47a1, 0xbbe1ff],   // rare, high-value sapphire coin
 };
 
 export class Coin {

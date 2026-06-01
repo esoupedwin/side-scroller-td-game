@@ -204,6 +204,8 @@ export const GameConfig = {
     comfortMinFactor:     0.65,     // comfortable: interval ∈ [spawnMax × comfortMinFactor, spawnMax]
     neutralMinFactor:     1.4,      // neutral: interval ∈ [spawnMin × neutralMinFactor, spawnMax × neutralMaxFactor]
     neutralMaxFactor:     0.75,
+    retreatHpFrac:        0.15,     // AI combat units fall back to 'defend' below this HP fraction…
+    retreatRecoverFrac:   0.6,      // …and only rejoin the fight once healed back above this (hysteresis)
   },
 
   platform: {
@@ -233,6 +235,9 @@ export const GameConfig = {
     silverCoinValue:         15,     // silver is worth less than gold (20)
     silverDropIntervalMinMs: 5_000, // drops 50% more often than gold (min)
     silverDropIntervalMaxMs: 10_000,// drops 50% more often than gold (max)
+    blueCoinValue:           200,    // rare jackpot — worth ~6.7× a gold coin
+    blueDropIntervalMinMs:   60_000, // super rare: one every 1–2.5 minutes
+    blueDropIntervalMaxMs:   150_000,
     lowBalanceThreshold:  25,   // below this balance, passive income rate doubles
     lowBalanceIncomeMult:  3,   // multiplier applied when balance is below threshold
     coinGravity:        520,    // px/s² — physics for airborne coins

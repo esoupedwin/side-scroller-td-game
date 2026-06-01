@@ -52,9 +52,11 @@ import {
   COIN_DROP_VX_MIN, COIN_DROP_VX_MAX, COIN_DROP_VY_MIN, COIN_DROP_VY_MAX,
   COIN_GRAVITY,
   SILVER_COIN_VALUE, SILVER_DROP_MIN_MS, SILVER_DROP_MAX_MS,
+  BLUE_COIN_VALUE, BLUE_DROP_MIN_MS, BLUE_DROP_MAX_MS,
   CPU_PRESSURE_THRESHOLD,
   CPU_URGENT_MAX_FACTOR, CPU_COMFORT_MIN_FACTOR,
   CPU_NEUTRAL_MIN_FACTOR, CPU_NEUTRAL_MAX_FACTOR,
+  CPU_RETREAT_HP_FRAC, CPU_RETREAT_RECOVER_FRAC,
   POWERUP_DROP_INTERVAL, POWERUP_INDICATOR_LEAD,
   CHEAT_PLAYER_COIN_GRANT, CHEAT_CPU_COIN_GRANT,
   SHAKE_DECAY, SHAKE_MAX_OFFSET, SHAKE_GRENADE, SHAKE_ROCKET, SHAKE_FALLOFF_PX,
@@ -196,9 +198,17 @@ export class Game {
       });
     }
     if (e.key === 'j' || e.key === 'J') {
-      this.spawnCoin(COIN_VALUE, 'gold');
+      // Small chance of blue, matching the natural in-game odds that a freshly
+      // dropped coin is blue: each kind drops on its own timer, so blue's share is
+      // its rate / total rate (rate = 1 / average interval). ~3.8% with current config.
+      const rate = (min: number, max: number) => 2 / (min + max);
+      const blueRate = rate(BLUE_DROP_MIN_MS, BLUE_DROP_MAX_MS);
+      const blueChance = blueRate /
+        (rate(COIN_DROP_MIN_MS, COIN_DROP_MAX_MS) + rate(SILVER_DROP_MIN_MS, SILVER_DROP_MAX_MS) + blueRate);
+      const blue = Math.random() < blueChance;
+      this.spawnCoin(blue ? BLUE_COIN_VALUE : COIN_VALUE, blue ? 'blue' : 'gold');
       this.resetCoinDropTimer();
-      this.diagnostics.noteEvent(this.elapsedSeconds, 'Cheat J: forced gold coin drop');
+      this.diagnostics.noteEvent(this.elapsedSeconds, `Cheat J: forced ${blue ? 'blue' : 'gold'} coin drop`);
     }
   };
   private readonly onKeyUp = (e: KeyboardEvent) => { this.keysDown.delete(e.key); };
@@ -256,6 +266,8 @@ export class Game {
   private coinDropInterval      = 0;
   private silverDropTimer       = 0;
   private silverDropInterval    = 0;
+  private blueDropTimer         = 0;
+  private blueDropInterval      = 0;
   private isOver           = false;
   private isPaused         = false;
 
@@ -273,6 +285,9 @@ export class Game {
   private lastCpuStrategySig  = '';
   private cpuStance: 'push' | 'economy' | 'defend' = 'economy';
   private playerStance: 'push' | 'economy' | 'defend' = 'economy';
+  // AI combat units currently retreating to heal (low HP). WeakSet so dead units
+  // are GC'd automatically without manual cleanup.
+  private readonly retreatingUnits = new WeakSet<Character>();
   private playerSpawnTimer    = 0;
   private playerSpawnInterval = 0;
   private cpuVsCpu            = false;
@@ -362,6 +377,7 @@ export class Game {
     if (this.cpuVsCpu) this.resetSpawnTimerFirst('player');
     this.resetCoinDropTimer();
     this.resetSilverDropTimer();
+    this.resetBlueDropTimer();
     this.app.ticker.add(this.tickFn);
 
     this.notifyCoins();
@@ -992,6 +1008,12 @@ export class Game {
     this.silverDropTimer    = 0;
   }
 
+  private resetBlueDropTimer() {
+    const range = BLUE_DROP_MAX_MS - BLUE_DROP_MIN_MS;
+    this.blueDropInterval = BLUE_DROP_MIN_MS + Math.random() * range;
+    this.blueDropTimer    = 0;
+  }
+
   /**
    * Animate each block AND each platform that has an `anim` definition, sync
    * its Matter body to the new position, and carry any character standing on
@@ -1099,6 +1121,11 @@ export class Game {
     if (this.silverDropTimer >= this.silverDropInterval) {
       this.spawnCoin(SILVER_COIN_VALUE, 'silver');
       this.resetSilverDropTimer();
+    }
+    this.blueDropTimer += deltaMS;
+    if (this.blueDropTimer >= this.blueDropInterval) {
+      this.spawnCoin(BLUE_COIN_VALUE, 'blue');
+      this.resetBlueDropTimer();
     }
 
     // Coin physics + visuals
@@ -1234,6 +1261,13 @@ export class Game {
     if (this.silverDropTimer >= this.silverDropInterval) {
       this.spawnCoin(SILVER_COIN_VALUE, 'silver');
       this.resetSilverDropTimer();
+    }
+
+    // Blue coin drop — rare jackpot
+    this.blueDropTimer += ticker.deltaMS;
+    if (this.blueDropTimer >= this.blueDropInterval) {
+      this.spawnCoin(BLUE_COIN_VALUE, 'blue');
+      this.resetBlueDropTimer();
     }
 
     // Power-up drop (every 40 s) with 20 s lead-up indicator
@@ -1891,10 +1925,33 @@ export class Game {
     const isMelee = (type: string) => type === 'warrior' || type === 'knight' || type === 'heavy' || type === 'tanker';
     const isRangedUnit = (type: string) => type === 'archer' || type === 'rifleman' || type === 'sniper';
 
+    // ── Low-HP retreat (highest priority) ─────────────────────────────────────
+    // A combat unit that drops to critical HP falls back to 'defend', pulling it
+    // toward its own tower where the safe-zone passive regen heals it. It holds
+    // that retreat (skipped by the stance logic below) until healed past the
+    // recover threshold — hysteresis prevents it from bouncing straight back into
+    // the fight at 1 HP. Collectors are left alone (they finish their coin run).
+    for (const c of selfChars) {
+      if (c.behavior === 'collecting') continue;
+      const hpFrac = c.hp / c.maxHp;
+      if (this.retreatingUnits.has(c)) {
+        if (hpFrac >= CPU_RETREAT_RECOVER_FRAC) {
+          this.retreatingUnits.delete(c);          // recovered — stance logic resumes control
+        } else if (c.behavior !== 'defend') {
+          c.behavior = 'defend';                    // keep falling back while healing
+        }
+      } else if (hpFrac < CPU_RETREAT_HP_FRAC && (c.behavior === 'attacking' || c.behavior === 'harass')) {
+        this.retreatingUnits.add(c);
+        c.behavior = 'defend';
+        noteDecision(`🚑 Retreat #${c.id} (${c.config.type}) — critical HP`);
+      }
+    }
+
     if (stance === 'defend') {
       // Melee units form the defensive wall at home tower; ranged units harass from safety.
       for (const c of selfChars) {
         if (c.behavior === 'collecting') continue;
+        if (this.retreatingUnits.has(c)) continue;   // healing at base — leave it alone
         if (isMelee(c.config.type)) {
           if (c.behavior !== 'defend') {
             c.behavior = 'defend';
@@ -1911,6 +1968,7 @@ export class Game {
       // Push: ranged units harass (advance safely), melee units charge
       for (const c of selfChars) {
         if (c.behavior === 'collecting') continue;
+        if (this.retreatingUnits.has(c)) continue;   // healing at base — leave it alone
         if (c.behavior === 'defend') {
           // Lift any lingering defend assignments
           c.behavior = isRangedUnit(c.config.type) ? 'harass' : 'attacking';
@@ -1926,6 +1984,7 @@ export class Game {
     } else {
       // Economy: recall all harassers and defenders back to full attack
       for (const c of selfChars) {
+        if (this.retreatingUnits.has(c)) continue;   // healing at base — leave it alone
         if (c.behavior === 'harass' || c.behavior === 'defend') {
           c.behavior = 'attacking';
           noteDecision(`⇒ Economy attack #${c.id} (${c.config.type})`);
@@ -2042,6 +2101,7 @@ export class Game {
     if (this.cpuVsCpu) this.resetSpawnTimerFirst('player');
     this.resetCoinDropTimer();
     this.resetSilverDropTimer();
+    this.resetBlueDropTimer();
     this.app.ticker.add(this.tickFn);
 
     this.notifyCoins();
