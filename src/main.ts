@@ -186,6 +186,113 @@ diagnoseExportBtn.addEventListener('click', () => {
 setInterval(refreshDiagnoseUi, 500);
 refreshDiagnoseUi();
 
+// ── Benchmark ─────────────────────────────────────────────────────────────
+// Runs the current map with CPU-vs-CPU forced ON for a fixed duration,
+// captures every frame's ms, then prints p50/p95/p99 and dropped-frame
+// counts in a copyable block. Use the Map dropdown beforehand to pick the
+// scenario, and run 2-3 trials to median-out OS-scheduling jitter.
+{
+  const benchBtn    = document.getElementById('bench-btn')    as HTMLButtonElement;
+  const benchResult = document.getElementById('bench-result') as HTMLPreElement;
+  const BENCH_DURATION_SEC = 60;
+
+  let benchActive   = false;
+  let benchSamples: number[] = [];
+  let benchStartT   = 0;
+  let benchLastT    = 0;
+  let benchPrevCpuVsCpu = false;
+  let benchTickFn: (() => void) | null = null;
+
+  const fmt = (n: number) => n.toFixed(2);
+  const pct = (sorted: number[], p: number) => {
+    if (sorted.length === 0) return 0;
+    const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
+    return sorted[idx];
+  };
+
+  const finishBench = () => {
+    if (!benchActive || !benchTickFn) return;
+    benchActive = false;
+    game.app.ticker.remove(benchTickFn);
+    benchTickFn = null;
+
+    // Restore the user's prior CPU-vs-CPU setting silently.
+    if (game.isCpuVsCpu() !== benchPrevCpuVsCpu) {
+      game.setCpuVsCpu(benchPrevCpuVsCpu);
+      refreshCpuVsCpuUi();
+    }
+
+    const samples = benchSamples;
+    if (samples.length < 10) {
+      benchResult.textContent = 'bench aborted (too few samples)';
+      benchResult.style.display = '';
+      benchBtn.disabled  = false;
+      benchBtn.textContent = 'Benchmark';
+      return;
+    }
+
+    const sorted = samples.slice().sort((a, b) => a - b);
+    const mean   = samples.reduce((a, b) => a + b, 0) / samples.length;
+    const p50    = pct(sorted, 50);
+    const p95    = pct(sorted, 95);
+    const p99    = pct(sorted, 99);
+    const max    = sorted[sorted.length - 1];
+    const drop60 = samples.filter(ms => ms > 16.67).length;          // missed 60 FPS budget
+    const drop30 = samples.filter(ms => ms > 33.33).length;          // missed 30 FPS budget
+    const durS   = (performance.now() - benchStartT) / 1000;
+
+    benchResult.textContent =
+      `bench ${durS.toFixed(1)}s · ${samples.length} frames\n` +
+      `mean  ${fmt(mean)}ms  (${(1000 / mean).toFixed(0)} fps)\n` +
+      `p50   ${fmt(p50)}ms   (${(1000 / p50).toFixed(0)} fps)\n` +
+      `p95   ${fmt(p95)}ms   (${(1000 / p95).toFixed(0)} fps)\n` +
+      `p99   ${fmt(p99)}ms   (${(1000 / p99).toFixed(0)} fps)\n` +
+      `max   ${fmt(max)}ms\n` +
+      `>16.7ms ${drop60} (${(100 * drop60 / samples.length).toFixed(1)}%)\n` +
+      `>33.3ms ${drop30} (${(100 * drop30 / samples.length).toFixed(1)}%)`;
+    benchResult.style.display = '';
+    benchBtn.disabled  = false;
+    benchBtn.textContent = 'Benchmark';
+  };
+
+  benchBtn.addEventListener('click', () => {
+    if (benchActive) return;
+    benchActive  = true;
+    benchSamples = [];
+    benchStartT  = performance.now();
+    benchLastT   = benchStartT;
+
+    benchPrevCpuVsCpu = game.isCpuVsCpu();
+    if (!benchPrevCpuVsCpu) {
+      game.setCpuVsCpu(true);
+      refreshCpuVsCpuUi();
+    }
+    // Fresh restart so every trial starts from the same scene state
+    // (active characters, coin balances, timers) on the same map.
+    restartCurrentGame();
+
+    benchResult.style.display = '';
+    benchResult.textContent   = `running ${BENCH_DURATION_SEC}s…`;
+    benchBtn.disabled  = true;
+    benchBtn.textContent = 'Benchmarking…';
+
+    benchTickFn = () => {
+      const now = performance.now();
+      const ms  = now - benchLastT;
+      benchLastT = now;
+      // Drop the first frame (it includes the ticker-add overhead and
+      // post-restart layout work — would skew p99 / max).
+      if (benchSamples.length > 0 || (now - benchStartT) > 50) {
+        benchSamples.push(ms);
+      }
+      const elapsed = (now - benchStartT) / 1000;
+      benchBtn.textContent = `Benchmarking (${Math.max(0, BENCH_DURATION_SEC - elapsed).toFixed(0)}s)`;
+      if (elapsed >= BENCH_DURATION_SEC) finishBench();
+    };
+    game.app.ticker.add(benchTickFn);
+  });
+}
+
 // ── Dev panel: map selector ────────────────────────────────────────────────
 {
   const mapSelect   = document.getElementById('dev-map-select')   as HTMLSelectElement;
