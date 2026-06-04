@@ -748,6 +748,18 @@ export class Game {
     return this.devMode;
   }
 
+  /** Multiply game speed by `s` (1 = normal, 0.2 = slow-mo). Hooks into the
+   *  PIXI ticker's speed so `deltaMS` reports a fraction of the real frame
+   *  delta — every dt-driven sub-system (physics, characters, timers) slows
+   *  proportionally without needing its own time-scale knob. */
+  setTimeScale(s: number): void {
+    this.app.ticker.speed = Math.max(0.01, s);
+  }
+
+  /** Live (non-dead) player-side characters. Snapshot is rebuilt each tick
+   *  in `tick()`, so consumers should re-read this rather than caching. */
+  get playerCharacters(): readonly Character[] { return this.playerLive; }
+
   /** Dev-only: when enabled, the player side is also driven by the CPU AI. */
   setCpuVsCpu(enabled: boolean): void {
     if (this.cpuVsCpu === enabled) return;

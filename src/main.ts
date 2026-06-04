@@ -94,6 +94,137 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// ── Character command modal (Z key) ───────────────────────────────────────
+// Translucent overlay listing every live player character with bulk + per-
+// character behavior controls. While open, the game runs in slow-mo so the
+// player can review and re-route units without their plans going stale.
+{
+  const cmdModal = document.getElementById('cmd-modal')!;
+  const cmdList  = document.getElementById('cmd-list')!;
+  const cmdEmpty = document.getElementById('cmd-empty')!;
+  const SLOW_MO_SCALE = 0.2;   // 5× slower than normal
+  const REFRESH_MS    = 150;   // re-poll HP / behavior labels at this cadence
+
+  type Bhv = 'attacking' | 'collecting' | 'harass' | 'defend' | 'rush';
+  type PlayerChar = (typeof game.playerCharacters)[number];
+
+  // Per-button display config — order matches the cycle the HP-card button
+  // already uses, so muscle memory carries over.
+  const BHV_BUTTONS: ReadonlyArray<{ val: Bhv; icon: string; label: string }> = [
+    { val: 'attacking',  icon: '⚔', label: 'Atk' },
+    { val: 'collecting', icon: '💰', label: 'Col' },
+    { val: 'harass',     icon: '↯', label: 'Har' },
+    { val: 'defend',     icon: '🛡', label: 'Def' },
+    { val: 'rush',       icon: '🏃', label: 'Rsh' },
+  ];
+
+  let cmdOpen   = false;
+  let refreshT: number | null = null;
+
+  const hpLabel = (char: PlayerChar) => `${Math.ceil(char.hp)}/${Math.round(char.maxHp)}`;
+
+  const buildRow = (char: PlayerChar): HTMLElement => {
+    const row = document.createElement('div');
+    row.className   = 'cmd-row';
+    row.dataset.id  = String(char.id);
+    row.innerHTML   = `
+      <span class="cmd-row-id">#${char.id}</span>
+      <span class="cmd-row-name">${char.name}</span>
+      <span class="cmd-row-type">${TYPE_ICON[char.config.type] ?? ''} ${char.config.type}</span>
+      <span class="cmd-row-hp">${hpLabel(char)}</span>
+      <span class="cmd-row-bhv"></span>
+    `;
+    const bhvBox = row.querySelector('.cmd-row-bhv') as HTMLElement;
+    for (const { val, icon, label } of BHV_BUTTONS) {
+      const b = document.createElement('button');
+      b.className   = 'cmd-bhv-btn';
+      b.dataset.bhv = val;
+      b.textContent = `${icon} ${label}`;
+      if (char.behavior === val) b.classList.add('is-active');
+      b.addEventListener('click', () => {
+        char.behavior = val;
+        refreshCmdRows();
+      });
+      bhvBox.appendChild(b);
+    }
+    return row;
+  };
+
+  const rebuildCmdRows = () => {
+    cmdList.innerHTML = '';
+    const chars = game.playerCharacters;
+    cmdEmpty.style.display = chars.length === 0 ? '' : 'none';
+    for (const char of chars) cmdList.appendChild(buildRow(char));
+  };
+
+  // In-place refresh: HP text + active-button class only. Falls back to a
+  // full rebuild when the set of char ids changes (death, spawn) so rows
+  // appear/disappear without flicker.
+  const refreshCmdRows = () => {
+    const chars      = game.playerCharacters;
+    const currentIds = new Set(chars.map(c => c.id));
+    const childArr   = Array.from(cmdList.children) as HTMLElement[];
+    const renderedIds = new Set(childArr.map(el => Number(el.dataset.id)));
+    const sameSet = currentIds.size === renderedIds.size
+                  && [...currentIds].every(id => renderedIds.has(id));
+    if (!sameSet) { rebuildCmdRows(); return; }
+    for (const char of chars) {
+      const row = cmdList.querySelector(`[data-id="${char.id}"]`);
+      if (!row) continue;
+      (row.querySelector('.cmd-row-hp') as HTMLElement).textContent = hpLabel(char);
+      row.querySelectorAll('.cmd-bhv-btn').forEach(btn => {
+        const b = btn as HTMLButtonElement;
+        b.classList.toggle('is-active', b.dataset.bhv === char.behavior);
+      });
+    }
+  };
+
+  const openCmdModal = () => {
+    // Skip when game-over (no commands to issue) or paused (slow-mo + pause
+    // is incoherent, and the pause overlay would visually conflict).
+    if (cmdOpen || gameOver || game.paused) return;
+    cmdOpen = true;
+    game.setTimeScale(SLOW_MO_SCALE);
+    rebuildCmdRows();
+    cmdModal.style.display = 'flex';
+    refreshT = window.setInterval(refreshCmdRows, REFRESH_MS);
+  };
+
+  const closeCmdModal = () => {
+    if (!cmdOpen) return;
+    cmdOpen = false;
+    game.setTimeScale(1);
+    cmdModal.style.display = 'none';
+    if (refreshT !== null) { window.clearInterval(refreshT); refreshT = null; }
+  };
+
+  // Bulk-set: header buttons set the same behavior on every live player char.
+  document.querySelectorAll('.cmd-bulk .cmd-bhv-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const bhv = (btn as HTMLElement).dataset.bulk as Bhv | undefined;
+      if (!bhv) return;
+      for (const char of game.playerCharacters) char.behavior = bhv;
+      refreshCmdRows();
+    });
+  });
+
+  // Click on the translucent backdrop (outside the card) closes — standard
+  // modal UX. Clicks on the card itself bubble to children but not to the
+  // backdrop, so they don't trigger close.
+  cmdModal.addEventListener('click', (e) => {
+    if (e.target === cmdModal) closeCmdModal();
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'z' || e.key === 'Z') {
+      if (cmdOpen) closeCmdModal();
+      else         openCmdModal();
+    } else if (e.key === 'Escape' && cmdOpen) {
+      closeCmdModal();
+    }
+  });
+}
+
 // ── Mute indicator ────────────────────────────────────────────────────────
 const muteIndicator = document.getElementById('mute-indicator')!;
 const muteIcon      = document.getElementById('mute-icon')!;
