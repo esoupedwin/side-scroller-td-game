@@ -30,7 +30,7 @@ export const TRIBES: Record<Tribe, TribeInfo> = {
  * order arrays mention one but the tribe has the other.
  */
 export const TRIBE_ROSTERS: Record<Tribe, readonly string[]> = {
-  tomaro: ['conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'viking', 'grenadier', 'rocketeer'],
+  tomaro: ['conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'viking', 'shocktrooper', 'grenadier', 'rocketeer'],
   meowee: ['conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'knight', 'grenadier', 'rocketeer'],
 };
 

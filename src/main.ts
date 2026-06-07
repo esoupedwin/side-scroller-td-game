@@ -33,7 +33,7 @@ const enemyTowerHpEl  = document.getElementById('enemy-tower-hp')!;
 // roster, so it stays hidden until a tribe lists it.
 const UNIT_TYPES = [
   'conscript', 'warrior', 'archer', 'rifleman', 'sniper',
-  'viking', 'knight', 'heavy', 'grenadier', 'rocketeer',
+  'viking', 'shocktrooper', 'knight', 'heavy', 'grenadier', 'rocketeer',
 ] as const;
 type UnitType = typeof UNIT_TYPES[number];
 

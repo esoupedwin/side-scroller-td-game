@@ -68,7 +68,7 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 
 export interface CharacterConfig {
-  type:        'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'viking' | 'knight' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer';
+  type:        'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'viking' | 'knight' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer' | 'shocktrooper';
   hp:          number;
   speed:       number;
   attackRange: number;
@@ -197,6 +197,9 @@ export class Character {
     delay:    number;
     onTower?: (dmg: number) => void;
   } | null = null;
+  // Shotgun blast (shock trooper): resolved against ALL enemies in a short frontal
+  // cone when the wind-up lands. Visual-only timing mirrors the melee swing.
+  private pendingBlast: { damage: number; delay: number; dir: 1 | -1 } | null = null;
   // Seconds since the character's x last changed. Used by selectAnimations to
   // fall back to 'idle' when the state machine still says 'marching' but the
   // character is effectively stationary (blocked, no target, etc.).
@@ -424,6 +427,7 @@ export class Character {
     else if (this.config.type === 'tanker')     this.buildTankerSprite();
     else if (this.config.type === 'grenadier')  this.buildGrenadierSprite();
     else if (this.config.type === 'rocketeer')  this.buildRocketeerSprite();
+    else if (this.config.type === 'shocktrooper') this.buildShockTrooperSprite();
     else                                         this.buildWarriorSprite();
   }
 
@@ -780,6 +784,60 @@ export class Character {
     // Muzzle
     g.beginFill(0x1a1a1a);
     g.drawRect(dir > 0 ? dir * 26 : dir * 26 - 3, ry, 3, 6);
+    g.endFill();
+
+    this.container.addChild(g);
+  }
+
+  private buildShockTrooperSprite() {
+    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const w = this.config.width, h = this.config.height;
+    const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.31, w * 0.31, w * 0.38, h * 0.45, 0.5);
+
+    const g = new PIXI.Graphics();
+    // Heavy tactical torso
+    g.beginFill(color, 0.92);
+    g.drawRoundedRect(-w * 0.50, h * 0.16, w * 1.0, h * 0.46, 3);
+    g.endFill();
+    // Diagonal bandolier of shells
+    g.lineStyle(2, 0x222222, 0.5);
+    g.moveTo(-w * 0.40, h * 0.20); g.lineTo(w * 0.40, h * 0.55);
+    g.lineStyle(0);
+
+    // Head
+    g.beginFill(color, 0.85);
+    g.drawCircle(0, h * 0.1, w * 0.36);
+    g.endFill();
+    // Wide combat helmet
+    g.beginFill(color);
+    g.drawRoundedRect(-w * 0.44, h * 0.02 - 9, w * 0.88, 11, 3);
+    g.endFill();
+
+    // Pump-action shotgun: short stock + short fat barrel + pump grip
+    const ry = h * 0.32;
+    const stockL = Math.min(-dir * 12, -dir * 2);
+    const stockW = Math.abs(-dir * 12 - (-dir * 2));
+    g.beginFill(0x4a3219);
+    g.drawRoundedRect(stockL, ry, stockW, 8, 2);   // wooden stock
+    g.endFill();
+    const recvL = Math.min(-dir * 2, dir * 10);
+    const recvW = Math.abs(-dir * 2 - dir * 10);
+    g.beginFill(0x303030);
+    g.drawRect(recvL, ry - 1, recvW, 8);           // chunky receiver
+    g.endFill();
+    const barlL = Math.min(dir * 10, dir * 22);
+    const barlW = Math.abs(dir * 10 - dir * 22);
+    g.beginFill(0x1f1f1f);
+    g.drawRect(barlL, ry - 1, barlW, 7);           // short fat barrel
+    g.endFill();
+    g.beginFill(0x4a3219);
+    g.drawRoundedRect(dir > 0 ? dir * 12 : dir * 12 - 6, ry + 7, 6, 4, 1); // pump grip
+    g.endFill();
+    // Twin muzzle holes
+    g.beginFill(0x000000);
+    g.drawCircle(dir * 23, ry + 0.5, 1.6);
+    g.drawCircle(dir * 23, ry + 4.5, 1.6);
     g.endFill();
 
     this.container.addChild(g);
@@ -1621,6 +1679,7 @@ export class Character {
     this.attackTimer        = 0;
     this.attackFacingTimer  = 0;
     this.pendingMeleeSwing  = null;
+    this.pendingBlast       = null;
     this.pendingHitJump     = false;
     this.path               = [];
     this.pathIdx            = 0;
@@ -1694,7 +1753,7 @@ export class Character {
   }
 
   private static isMeleeType(type: CharacterConfig['type']) {
-    return type === 'conscript' || type === 'warrior' || type === 'viking' || type === 'knight' || type === 'heavy';
+    return type === 'conscript' || type === 'warrior' || type === 'viking' || type === 'knight' || type === 'heavy' || type === 'shocktrooper';
   }
 
   update(ctx: UpdateContext) {
@@ -1704,6 +1763,7 @@ export class Character {
     this.evasiveJumpTimer   = Math.max(0, this.evasiveJumpTimer   - ctx.dt);
     this.attackFacingTimer  = Math.max(0, this.attackFacingTimer  - ctx.dt);
     this.tickPendingMeleeSwing(ctx);
+    this.tickPendingBlast(ctx);
 
     if (this.powerUpSpeedTimer > 0) {
       this.powerUpSpeedTimer -= ctx.dt;
@@ -2756,15 +2816,52 @@ export class Character {
     }
   }
 
+  /**
+   * Resolve a queued shotgun blast (shock trooper). When the wind-up lands it
+   * strikes EVERY live enemy in a short frontal cone — same horizontal reach as
+   * attackRange, within a vertical band of ~config.height — dealing damage and
+   * the same viking-style knockback to each. Visual-only timing; no projectile.
+   */
+  private tickPendingBlast(ctx: UpdateContext) {
+    const blast = this.pendingBlast;
+    if (!blast) return;
+    blast.delay -= ctx.dt;
+    if (blast.delay > 0) return;
+    this.pendingBlast = null;
+    if (this.isDead || blast.damage <= 0) return;   // damage 0 = crit miss → whole blast fizzles
+
+    const dir   = blast.dir;
+    const range = this.config.attackRange + this.config.width * 0.5;
+    const back  = this.config.width * 0.5;           // allow point-blank / slightly behind
+    const vBand = this.config.height;                // same-plane tolerance
+    const decay = Math.exp(-ATTACK_KNOCKBACK_DECAY * ctx.dt);
+    for (const e of ctx.enemies) {
+      if (e.isDead) continue;
+      const fwd = dir * (e.x - this.x);              // >= 0 when the enemy is in the firing direction
+      if (fwd < -back || fwd > range) continue;
+      if (Math.abs(e.floorY - this.floorY) > vBand) continue;
+      e.takeDamage(blast.damage, this);
+      spawnHitSpark(e.x, e.y - e.config.height * 0.5);
+      if (this.config.knockback > 0 && !e.isDead) {
+        e.applyKnockback(this.config.knockback * dir, ATTACK_KNOCKBACK_VY, ctx.dt, decay);
+      }
+    }
+  }
+
   private attackEnemy(target: Character, onFire?: (r: FireRequest) => void) {
     if (this.attackTimer > 0) return;
-    if (this.pendingMeleeSwing) return;  // wait for the previous swing to land
+    if (this.pendingMeleeSwing || this.pendingBlast) return;  // wait for the previous swing/blast to land
     const dirSign = Math.sign(target.x - this.x);
     if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
     const windUp = this.beginAttack();
     const miss   = Math.random() < this.config.critical;
     const damage = miss ? 0 : this.effectiveAtk;
-    if (this.config.type === 'conscript' || this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'knight' || this.config.type === 'heavy') {
+    if (this.config.type === 'shocktrooper') {
+      // Shotgun: no projectile — queue a short-range blast that hits EVERY enemy in
+      // the frontal cone when the wind-up lands (resolved in tickPendingMeleeSwing).
+      this.pendingBlast = { damage, delay: windUp, dir: this.lastAttackDir };
+      spawnMuzzleGlow(this.x + this.lastAttackDir * 16, this.bowY, this.lastAttackDir);
+    } else if (this.config.type === 'conscript' || this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'knight' || this.config.type === 'heavy') {
       this.pendingMeleeSwing = { target, damage, delay: windUp };
       spawnSlashArc(this.x, this.y - this.config.height * 0.4, this.lastAttackDir, this.side);
     } else if (onFire) {
@@ -2822,7 +2919,11 @@ export class Character {
     const windUp = this.beginAttack();
     this.attackTimer = this.config.fireRate;
     if (Math.random() < this.config.critical) return;  // miss â€” silent, towers have no label system
-    if (this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'knight' || this.config.type === 'heavy') {
+    if (this.config.type === 'shocktrooper') {
+      // Short-range shotgun blast on the tower (single target — one swing).
+      this.pendingMeleeSwing = { target: null, damage: this.effectiveAtk, delay: windUp, onTower: onDamageTower };
+      spawnMuzzleGlow(this.x + this.lastAttackDir * 16, this.bowY, this.lastAttackDir);
+    } else if (this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'knight' || this.config.type === 'heavy') {
       this.pendingMeleeSwing = { target: null, damage: this.effectiveAtk, delay: windUp, onTower: onDamageTower };
       spawnSlashArc(this.x, this.y - this.config.height * 0.4, this.lastAttackDir, this.side);
     } else if (onFire) {
@@ -2870,7 +2971,7 @@ export class Character {
    */
   private canSnapHit(target: Character): boolean {
     const t = this.config.type;
-    if (t === 'conscript' || t === 'warrior' || t === 'viking' || t === 'knight' || t === 'heavy' || t === 'grenadier' || t === 'rocketeer') return true;
+    if (t === 'conscript' || t === 'warrior' || t === 'viking' || t === 'knight' || t === 'heavy' || t === 'grenadier' || t === 'rocketeer' || t === 'shocktrooper') return true;
     // Horizontal-only fire â€” the projectile travels along the shooter's bowY
     // without arcing. A target is hittable only when its collision box
     // vertically spans the bow line (i.e. they're on roughly the same plane).

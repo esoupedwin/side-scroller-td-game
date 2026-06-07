@@ -111,6 +111,17 @@ export const GameConfig = {
       critical:    0.12,
       knockback:   400,  // staggers melee victims back a clear ~100 px before decay zeroes vx
     },
+    shocktrooper: {
+      type:        'shocktrooper' as const,
+      hp:          130,
+      speed:       85,
+      attackRange: 95,         // short — must close in, but each shot is an AoE cone
+      attackPower: 14,         // per enemy hit; the shot strikes EVERY enemy in the cone
+      fireRate:    1.2,        // slow pump-action reload
+      cost:        90,
+      critical:    0.10,
+      knockback:   350,        // shotgun blast flings victims back, like the viking
+    },
     knight: {
       type:        'knight'   as const,
       hp:          280,        // plate armour but leaner build than the viking
