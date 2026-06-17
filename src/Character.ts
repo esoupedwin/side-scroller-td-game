@@ -6,7 +6,7 @@ import {
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
   SAFE_ZONE_HEAL_RATE, HIT_JUMP_CHANCE,
-  ATTACK_KNOCKBACK_VY, ATTACK_KNOCKBACK_DECAY,
+  ATTACK_KNOCKBACK_VY,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST, COIN_THROW_MAX_Y_GAP,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
@@ -114,6 +114,11 @@ export interface UpdateContext {
   onDamageTower?:    (dmg: number) => void;
   onDepositCoin:     (value: number) => void;
   onMeleeHit?:       (unitType: string, x: number) => void;
+  /** Precomputed `Math.exp(-ATTACK_KNOCKBACK_DECAY * dt)` shared by every
+   *  melee-swing and shotgun-blast hit landed this tick. Identical for every
+   *  character in the same tick — caller computes once per frame to avoid
+   *  one `Math.exp` per hit. Mirrors the documented grenade pattern. */
+  attackKnockbackDecay: number;
 }
 
 type State = 'marching' | 'fighting' | 'collecting' | 'returning' | 'dead';
@@ -216,6 +221,11 @@ export class Character {
   private legsSprite:       PIXI.AnimatedSprite | null = null;
   private bodyBaseScale     = 1;
   private legsBaseScale     = 1;
+  // Last facing direction applied to sprite.scale.x. 0 = uninitialised, forces
+  // the first apply. Used by tickAnimSprite to skip the per-tick scale write
+  // (which dirties PIXI's _transformID) when neither facing nor base scale
+  // changed this frame.
+  private lastAppliedFacingDir: 0 | 1 | -1 = 0;
   private currentBodyAnim:  BodyAnimName | null = null;
   private currentLegsAnim:  LegsAnimName | null = null;
   private coinPickupCooldown = 0;
@@ -247,8 +257,12 @@ export class Character {
   // â”€â”€ Pathfinding state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   private path:        PathStep[] = [];
   private pathIdx      = 0;
-  // Key of the last requested target â€” avoids rebuilding the path every tick.
-  private pathTargetKey = '';
+  // Quantised target of the last path request — avoids rebuilding the path every
+  // tick. Stored as two numbers (not a template-literal key string) so the cache
+  // check is a pair of cheap eq compares instead of per-tick string allocation.
+  // NaN is the "no cached target" sentinel (NaN !== NaN forces a rebuild).
+  private pathTargetQx = NaN;
+  private pathTargetQy = NaN;
   // Seconds since path was built; stale paths are discarded and rebuilt.
   private pathAge      = 0;
   private readonly PATH_TTL = 8;   // s â€” re-plan after this many seconds
@@ -583,6 +597,15 @@ export class Character {
     const legs = this.legsSprite;
     if (!body || !legs) return;
 
+    // Switch anims FIRST so the base scale is current before we apply scale.x.
+    // Previously the order was reversed and the new base-scale was visible only
+    // on the *next* tick.
+    const target = this.selectAnimations();
+    const bodyChanged = target.body !== this.currentBodyAnim;
+    const legsChanged = target.legs !== this.currentLegsAnim;
+    if (bodyChanged) this.switchBodyAnimation(target.body);
+    if (legsChanged) this.switchLegsAnimation(target.legs);
+
     // Face the attack target while fighting OR within the brief post-fire window
     // (Rush/Collect fire opportunistically without entering fighting state).
     // Otherwise face the actual travel direction. Sprites are drawn facing right.
@@ -591,12 +614,13 @@ export class Character {
       : this.coinThrowTimer > 0
         ? this.throwFacingDir
         : this.lastMoveDir;
-    body.scale.x = this.bodyBaseScale * facingDir;
-    legs.scale.x = this.legsBaseScale * facingDir;
-
-    const target = this.selectAnimations();
-    if (target.body !== this.currentBodyAnim) this.switchBodyAnimation(target.body);
-    if (target.legs !== this.currentLegsAnim) this.switchLegsAnimation(target.legs);
+    // Skip the scale.x writes when nothing relevant changed — `scale.x = …` on
+    // a PIXI.Sprite dirties _transformID even when assigning the same value,
+    // costing one transform recalc per character per frame.
+    const facingChanged = facingDir !== this.lastAppliedFacingDir;
+    if (bodyChanged || facingChanged) body.scale.x = this.bodyBaseScale * facingDir;
+    if (legsChanged || facingChanged) legs.scale.x = this.legsBaseScale * facingDir;
+    this.lastAppliedFacingDir = facingDir;
 
     this.updateLocomotionFps();
   }
@@ -2054,14 +2078,16 @@ export class Character {
   private requestPath(toX: number, toFloorY: number, navGraph: NavGraph, dt: number): void {
     // Quantise target to a 20 px grid so minor positional drift (e.g. an enemy
     // character drifting a few pixels) doesn't trigger a full path rebuild every tick.
-    const key = `${Math.round(toX / 20) * 20},${Math.round(toFloorY)}`;
+    const qx = Math.round(toX / 20) * 20;
+    const qy = Math.round(toFloorY);
     this.pathAge += dt;
     const navStale = navGraph.version !== this.pathNavVersion;
-    if (!navStale && key === this.pathTargetKey && this.pathAge < this.PATH_TTL && this.path.length > 0) return;
+    if (!navStale && qx === this.pathTargetQx && qy === this.pathTargetQy && this.pathAge < this.PATH_TTL && this.path.length > 0) return;
 
     this.path         = navGraph.findPath(this.x, this.floorY, toX, toFloorY, this.moveSpeed);
     this.pathIdx      = 0;
-    this.pathTargetKey = key;
+    this.pathTargetQx = qx;
+    this.pathTargetQy = qy;
     this.pathAge      = 0;
     this.pathNavVersion = navGraph.version;
     this.pathRebuildCount++;
@@ -2072,7 +2098,8 @@ export class Character {
   clearPath(): void {
     this.path           = [];
     this.pathIdx        = 0;
-    this.pathTargetKey  = '';
+    this.pathTargetQx   = NaN;
+    this.pathTargetQy   = NaN;
     this.pathNavVersion = -1;
   }
 
@@ -2804,9 +2831,8 @@ export class Character {
         spawnHitSpark(swing.target.x, swing.target.y - swing.target.config.height * 0.5);
         // Knockback the victim in the attack direction (relative x).
         if (this.config.knockback > 0 && !swing.target.isDead) {
-          const dir   = Math.sign(swing.target.x - this.x) || this.lastAttackDir;
-          const decay = Math.exp(-ATTACK_KNOCKBACK_DECAY * ctx.dt);
-          swing.target.applyKnockback(this.config.knockback * dir, ATTACK_KNOCKBACK_VY, ctx.dt, decay);
+          const dir = Math.sign(swing.target.x - this.x) || this.lastAttackDir;
+          swing.target.applyKnockback(this.config.knockback * dir, ATTACK_KNOCKBACK_VY, ctx.dt, ctx.attackKnockbackDecay);
         }
       }
     } else if (swing.onTower) {
@@ -2834,7 +2860,6 @@ export class Character {
     const range = this.config.attackRange + this.config.width * 0.5;
     const back  = this.config.width * 0.5;           // allow point-blank / slightly behind
     const vBand = this.config.height;                // same-plane tolerance
-    const decay = Math.exp(-ATTACK_KNOCKBACK_DECAY * ctx.dt);
     for (const e of ctx.enemies) {
       if (e.isDead) continue;
       const fwd = dir * (e.x - this.x);              // >= 0 when the enemy is in the firing direction
@@ -2843,7 +2868,7 @@ export class Character {
       e.takeDamage(blast.damage, this);
       spawnHitSpark(e.x, e.y - e.config.height * 0.5);
       if (this.config.knockback > 0 && !e.isDead) {
-        e.applyKnockback(this.config.knockback * dir, ATTACK_KNOCKBACK_VY, ctx.dt, decay);
+        e.applyKnockback(this.config.knockback * dir, ATTACK_KNOCKBACK_VY, ctx.dt, ctx.attackKnockbackDecay);
       }
     }
   }

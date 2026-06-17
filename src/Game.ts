@@ -13,7 +13,6 @@ import { Physics } from './Physics';
 import { buildBackground, buildGround, buildTowerRangeMarkers, buildCoinBox, buildParallaxMountains } from './Background';
 import { DEFAULT_MAP, loadMapWithOverride, type MapDefinition } from './maps';
 import { Tower } from './Tower';
-import type { TowerShot } from './Tower';
 import { Character, RANK_NAMES, type CharacterConfig, type FireRequest, type UpdateContext } from './Character';
 import { Projectile } from './Projectile';
 import { Grenade } from './Grenade';
@@ -41,7 +40,7 @@ import {
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, SNIPER, VIKING, KNIGHT, HEAVY, TANKER, GRENADIER, ROCKETEER, SHOCKTROOPER,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
-  GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY,
+  GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY, ATTACK_KNOCKBACK_DECAY,
   ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX, ROCKET_SPLASH_MIN_FRAC,
   ROCKET_HIT_RADIUS, ROCKET_KNOCKBACK_MAX_VX, ROCKET_KNOCKBACK_MAX_VY, ROCKET_KNOCKBACK_DECAY,
   CPU_SPAWN_MIN_MS, CPU_SPAWN_MAX_MS, CPU_FIRST_SPAWN_MAX,
@@ -105,6 +104,11 @@ export class Game {
   private devMode = false;
   private playerTower!: Tower;
   private enemyTower!:  Tower;
+  // Cached tower AABBs, populated in build(). Both sides have identical shape
+  // and are stable for the lifetime of the map, so rocket / AoE hot paths
+  // read these instead of recomputing 4 subtractions per call.
+  private playerTowerAABB!: { left: number; right: number; top: number; bottom: number };
+  private enemyTowerAABB!:  { left: number; right: number; top: number; bottom: number };
   private characters:   Character[]  = [];
   private projectiles:  Projectile[] = [];
   private grenades:     Grenade[]    = [];
@@ -317,6 +321,11 @@ export class Game {
   private notifyCpuCharsMs    = 0;
   private notifyCpuStrategyMs = 0;
   private cpuStanceMs         = 0;
+  // Throttle for tickCpuCollectAI — runs at ~4 Hz instead of every frame.
+  // Collector reassignment decisions don't need 60 Hz precision; carrying
+  // collectors still tick their behavior every frame, so the throttle only
+  // affects the assign/recall switches.
+  private cpuCollectAIMs      = 0;
   private cullingFrame        = 0;
 
   // Performance: cached values recomputed at lower frequency than 60 fps
@@ -477,6 +486,19 @@ export class Game {
     this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerY  ?? this.mapGroundY, getEnemyTribe());
     this.world.addChild(this.playerTower.container);
     this.world.addChild(this.enemyTower.container);
+    const towerTop = this.mapGroundY - TOWER_HEIGHT;
+    this.playerTowerAABB = {
+      left:  m.playerTowerX - TOWER_WIDTH / 2,
+      right: m.playerTowerX + TOWER_WIDTH / 2,
+      top:   towerTop,
+      bottom: this.mapGroundY,
+    };
+    this.enemyTowerAABB = {
+      left:  m.enemyTowerX - TOWER_WIDTH / 2,
+      right: m.enemyTowerX + TOWER_WIDTH / 2,
+      top:   towerTop,
+      bottom: this.mapGroundY,
+    };
 
     // Navigation graph — built from current platforms; rebuild whenever map changes.
     this.navGraph = new NavGraph();
@@ -613,6 +635,7 @@ export class Game {
       onFire:               (req) => this.fireProjectile(req),
       onDamageTower:        (dmg) => this.enemyTower.takeDamage(dmg),
       onMeleeHit:       (unitType, x) => playSoundAt(unitType === 'conscript' ? 'punch' : 'sword_slash', x),
+      attackKnockbackDecay: 1,   // patched each tick in patchCtx()
       onDepositCoin:    (value) => {
         this.coinBalance += value;
         this.notifyCoins();
@@ -641,6 +664,7 @@ export class Game {
       onFire:               (req) => this.fireProjectile(req),
       onDamageTower:        (dmg) => this.playerTower.takeDamage(dmg),
       onMeleeHit:       (unitType, x) => playSoundAt(unitType === 'conscript' ? 'punch' : 'sword_slash', x),
+      attackKnockbackDecay: 1,   // patched each tick in patchCtx()
       onDepositCoin:    (value) => {
         this.cpuCoinBalance += value;
         const c = this.updateChar;
@@ -1044,31 +1068,32 @@ export class Game {
     ctx.worldWidth           = this.mapDef.worldWidth;
   }
 
+  /**
+   * Carry any character or settled coin that sat on a surface which just
+   * moved. Compared against the PRE-MOVE surface top so characters whose
+   * floorY hasn't been updated yet are still matched correctly. Hoisted
+   * out of tickBlocks so the closure isn't allocated every tick.
+   */
+  private carryStanders(newX: number, newY: number, width: number, dx: number, dy: number) {
+    const oldTop  = newY - dy;
+    const oldLeft = newX - dx;
+    const right   = oldLeft + width;
+    for (const c of this.characters) {
+      if (c.isDead || c.airborne) continue;
+      if (Math.abs(c.currentFloorY - oldTop) > 1) continue;
+      if (c.x < oldLeft || c.x > right) continue;
+      c.carryWith(dx, dy);
+    }
+    for (const coin of this.coins) {
+      if (coin.isDead || coin.isPickedUp || !coin.isOnGround) continue;
+      if (Math.abs(coin.floorY - oldTop) > 1) continue;
+      if (coin.x < oldLeft || coin.x > right) continue;
+      coin.carryWith(dx, dy);
+    }
+  }
+
   private tickBlocks(dt: number): void {
     let anyMoved = false;
-
-    // Helper: carry any character or settled coin that sat on a surface which
-    // just moved.  We compare against the PRE-MOVE surface top so characters
-    // whose floorY hasn't been updated yet are still matched correctly.
-    const carryStanders = (
-      newX: number, newY: number, width: number, dx: number, dy: number,
-    ) => {
-      const oldTop  = newY - dy;
-      const oldLeft = newX - dx;
-      const right   = oldLeft + width;
-      for (const c of this.characters) {
-        if (c.isDead || c.airborne) continue;
-        if (Math.abs(c.currentFloorY - oldTop) > 1) continue;
-        if (c.x < oldLeft || c.x > right) continue;
-        c.carryWith(dx, dy);
-      }
-      for (const coin of this.coins) {
-        if (coin.isDead || coin.isPickedUp || !coin.isOnGround) continue;
-        if (Math.abs(coin.floorY - oldTop) > 1) continue;
-        if (coin.x < oldLeft || coin.x > right) continue;
-        coin.carryWith(dx, dy);
-      }
-    };
 
     for (let i = 0; i < this.blocks.length; i++) {
       const blk = this.blocks[i];
@@ -1080,7 +1105,7 @@ export class Game {
         x: blk.data.x + blk.data.width  / 2,
         y: blk.data.y + blk.data.height / 2,
       });
-      carryStanders(blk.data.x, blk.data.y, blk.data.width, dx, dy);
+      this.carryStanders(blk.data.x, blk.data.y, blk.data.width, dx, dy);
     }
 
     const platformBodies = this.physics.platformBodies;
@@ -1094,7 +1119,7 @@ export class Game {
         x: plat.data.x + plat.data.width  / 2,
         y: plat.data.y + plat.data.height / 2,
       });
-      carryStanders(plat.data.x, plat.data.y, plat.data.width, dx, dy);
+      this.carryStanders(plat.data.x, plat.data.y, plat.data.width, dx, dy);
     }
 
     // Any animated surface that actually moved this tick invalidates the NavGraph.
@@ -1366,10 +1391,15 @@ export class Game {
     for (const c of this.coins) { if (!c.isDead) this.liveCoins.push(c); }
     const liveCoins = this.liveCoins;
 
-    this.tickCpuCollectAI('enemy', this.enemyLive, liveCoins);
+    // Throttle the collect-AI assign/recall pass; ~4 Hz is plenty for the
+    // strategic decision and removes a per-tick `.filter()` + closure × 2 sides.
+    this.cpuCollectAIMs += ticker.deltaMS;
+    const runCollectAI = this.cpuCollectAIMs >= 250;
+    if (runCollectAI) this.cpuCollectAIMs = 0;
+    if (runCollectAI) this.tickCpuCollectAI('enemy', this.enemyLive, liveCoins);
     this.tickCpuBehaviorAI('enemy', this.enemyLive);
     if (this.cpuVsCpu) {
-      this.tickCpuCollectAI('player', this.playerLive, liveCoins);
+      if (runCollectAI) this.tickCpuCollectAI('player', this.playerLive, liveCoins);
       this.tickCpuBehaviorAI('player', this.playerLive);
     }
 
@@ -1379,8 +1409,12 @@ export class Game {
 
     // Update characters — reuse pre-allocated ctx objects; patch only the fields
     // that change each tick to eliminate per-character object + closure allocation.
+    // Per-frame precompute shared by every melee swing / shotgun blast this tick.
+    const attackKnockbackDecay = Math.exp(-ATTACK_KNOCKBACK_DECAY * dt);
     this.patchCtx(this.playerCtx, this.playerTower, this.enemyTower, dt);
     this.patchCtx(this.enemyCtx,  this.enemyTower,  this.playerTower, dt);
+    this.playerCtx.attackKnockbackDecay = attackKnockbackDecay;
+    this.enemyCtx.attackKnockbackDecay  = attackKnockbackDecay;
 
     for (const c of liveChars) {
       this.updateChar = c;
@@ -1402,13 +1436,17 @@ export class Game {
       blocks:    this.blockData,
     });
 
-    // Tower fire
-    const fireShot = (shot: TowerShot, side: 'player' | 'enemy') =>
-      this.fireProjectile({ ...shot, side, projectileKind: 'arrow' });
+    // Tower fire — inline both branches; no per-tick closure or object spread.
     const shotP = this.playerTower.tryFire(dt, this.enemyLive);
-    if (shotP) fireShot(shotP, 'player');
+    if (shotP) this.fireProjectile({
+      sx: shotP.sx, sy: shotP.sy, tx: shotP.tx, ty: shotP.ty, damage: shotP.damage,
+      side: 'player', projectileKind: 'arrow',
+    });
     const shotE = this.enemyTower.tryFire(dt, this.playerLive);
-    if (shotE) fireShot(shotE, 'enemy');
+    if (shotE) this.fireProjectile({
+      sx: shotE.sx, sy: shotE.sy, tx: shotE.tx, ty: shotE.ty, damage: shotE.damage,
+      side: 'enemy', projectileKind: 'arrow',
+    });
 
     // Spawn coins dropped or thrown by characters (scan all — some may have just died)
     for (const c of this.characters) {
@@ -1480,13 +1518,10 @@ export class Game {
           }
         }
       }
-      // Detonate on enemy tower contact (AABB)
+      // Detonate on enemy tower contact (AABB) — read the cached struct
       if (!r.isDead) {
-        const targetTower = r.side === 'player' ? this.enemyTower : this.playerTower;
-        const tLeft = targetTower.x - TOWER_WIDTH / 2;
-        const tRight = targetTower.x + TOWER_WIDTH / 2;
-        const tTop  = this.mapGroundY - TOWER_HEIGHT;
-        if (r.x >= tLeft && r.x <= tRight && r.y >= tTop) {
+        const tab = r.side === 'player' ? this.enemyTowerAABB : this.playerTowerAABB;
+        if (r.x >= tab.left && r.x <= tab.right && r.y >= tab.top) {
           r.triggerHit();
         }
       }
@@ -1814,13 +1849,11 @@ export class Game {
         );
       }
     }
-    // Tower damage: use closest point on the tower AABB to the blast centre
+    // Tower damage: use closest point on the cached tower AABB to the blast centre
     const targetTower = sourceSide === 'player' ? this.enemyTower : this.playerTower;
-    const towerLeft   = targetTower.x - TOWER_WIDTH / 2;
-    const towerRight  = targetTower.x + TOWER_WIDTH / 2;
-    const towerTop    = this.mapGroundY - TOWER_HEIGHT;
-    const nearX = Math.max(towerLeft,  Math.min(towerRight, ex.x));
-    const nearY = Math.max(towerTop,   Math.min(this.mapGroundY, ex.y));
+    const tab         = sourceSide === 'player' ? this.enemyTowerAABB : this.playerTowerAABB;
+    const nearX = Math.max(tab.left, Math.min(tab.right,  ex.x));
+    const nearY = Math.max(tab.top,  Math.min(tab.bottom, ex.y));
     if (Math.hypot(nearX - ex.x, nearY - ex.y) <= ex.radius) {
       targetTower.takeDamage(ex.damage);
     }
@@ -2104,6 +2137,7 @@ export class Game {
     this.notifyCpuCharsMs    = 0;
     this.notifyCpuStrategyMs = 0;
     this.cpuStanceMs         = 0;
+    this.cpuCollectAIMs      = 0;
     this.cullingFrame        = 0;
     this.cameraX = 0;
     // cameraY default is set by build() based on mapGroundY
