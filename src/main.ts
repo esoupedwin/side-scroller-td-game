@@ -58,6 +58,12 @@ container.insertBefore(canvas, container.firstChild);
 
 let gameOver = false;
 
+// Cache the last-applied `.disabled` per button so the per-balance update
+// only writes when the threshold is actually crossed. Must be declared BEFORE
+// `new Game(...)` because the Game constructor synchronously fires
+// handleCoinsChanged via notifyCoins() — TDZ otherwise.
+const lastDisabledByBtn = new Map<HTMLButtonElement, boolean>();
+
 let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged, handleEnemyTowerHpChanged);
 
 for (const t of UNIT_TYPES) {
@@ -570,12 +576,6 @@ function handleCpuStrategyChanged(info: CpuStrategyInfo) {
 
   cpuDecisionEl.textContent = info.decision;
 }
-
-// Cache the last-applied `.disabled` per button so the per-balance update
-// only writes when the threshold is actually crossed — most coin floors
-// don't change anyone's afford state, but the previous code wrote 11
-// .disabled attrs every floor change anyway.
-const lastDisabledByBtn = new Map<HTMLButtonElement, boolean>();
 
 function handleCoinsChanged(coins: number) {
   coinAmountEl.textContent = String(coins);
