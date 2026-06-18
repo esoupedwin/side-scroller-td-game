@@ -2063,9 +2063,21 @@ export class Character {
       // Match only the surface at this character's current floorY; a different
       // platform/block below that happens to overlap in x must not count, or the
       // character keeps walking at the higher floorY in mid-air.
-      const onPlat  = platforms.some(p => this.x >= p.x && this.x <= p.x + p.width && Math.abs(p.y - this.floorY) < 1);
-      const onBlock = blocks.some(b => this.x >= b.x && this.x <= b.x + b.width && Math.abs(b.y - this.floorY) < 1);
-      if (!onPlat && !onBlock) this.isAirborne = true;
+      // Plain for-loops with early break — avoids two .some() closure
+      // allocations per character per tick.
+      let onSurface = false;
+      const x = this.x, fy = this.floorY;
+      for (let i = 0; i < platforms.length; i++) {
+        const p = platforms[i];
+        if (x >= p.x && x <= p.x + p.width && Math.abs(p.y - fy) < 1) { onSurface = true; break; }
+      }
+      if (!onSurface) {
+        for (let i = 0; i < blocks.length; i++) {
+          const b = blocks[i];
+          if (x >= b.x && x <= b.x + b.width && Math.abs(b.y - fy) < 1) { onSurface = true; break; }
+        }
+      }
+      if (!onSurface) this.isAirborne = true;
     }
   }
 
@@ -2082,7 +2094,17 @@ export class Character {
     const qy = Math.round(toFloorY);
     this.pathAge += dt;
     const navStale = navGraph.version !== this.pathNavVersion;
-    if (!navStale && qx === this.pathTargetQx && qy === this.pathTargetQy && this.pathAge < this.PATH_TTL && this.path.length > 0) return;
+    if (!navStale && this.pathAge < this.PATH_TTL && this.path.length > 0) {
+      // Cheap path-reuse: same 20-px grid cell as the last request.
+      if (qx === this.pathTargetQx && qy === this.pathTargetQy) return;
+      // Hysteresis: harass/defend pass live moving-enemy positions every tick,
+      // so the 20-px bucket flips every 100-250 ms even when the target is
+      // effectively stable. Reuse the existing path when the new request is
+      // within ~40 px horizontally and ~30 px vertically of the cached target —
+      // the cached path's final walk step already covers drift within one
+      // surface. Cuts harass/defend rebuild rate from ~5/s to ~1/s per char.
+      if (Math.abs(toX - this.pathTargetQx) < 40 && Math.abs(toFloorY - this.pathTargetQy) < 30) return;
+    }
 
     this.path         = navGraph.findPath(this.x, this.floorY, toX, toFloorY, this.moveSpeed);
     this.pathIdx      = 0;

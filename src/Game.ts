@@ -1169,7 +1169,7 @@ export class Game {
     // Coin physics + visuals
     for (const coin of this.coins) coin.update(dt, this.platformData, this.blockData);
     for (const coin of this.coins) {
-      if (!coin.isDead && !coin.isPickedUp) this.physics.updatePlatformPassthrough(coin.body);
+      if (!coin.isDead && !coin.isPickedUp && !coin.isOnGround) this.physics.updatePlatformPassthrough(coin.body);
     }
 
     // Animate moving blocks (and carry any units still standing on them).
@@ -1423,7 +1423,10 @@ export class Game {
 
     // Physics step: push AI positions → engine → read results back
     for (const c of liveChars) c.syncToBody(dt);
-    for (const coin of this.coins) if (!coin.isDead && !coin.isPickedUp) this.physics.updatePlatformPassthrough(coin.body);
+    // Skip settled (isOnGround) coins — their bodies are static, can't rise,
+    // so the mask flip is a no-op every tick. Matches the existing power-up
+    // filter on the line below.
+    for (const coin of this.coins) if (!coin.isDead && !coin.isPickedUp && !coin.isOnGround) this.physics.updatePlatformPassthrough(coin.body);
     for (const pu of this.powerUps) if (!pu.isDead && !pu.isPickedUp && !pu.isOnGround) this.physics.updatePlatformPassthrough(pu.body);
     if (this.sheep) this.physics.updatePlatformPassthrough(this.sheep.body);
     this.physics.step(dt);
@@ -1829,36 +1832,43 @@ export class Game {
     dt: number,
     liveChars: Character[],
   ): void {
+    // Squared-distance early-reject: most enemies are outside the blast radius
+    // on any given explosion, and Math.hypot is ~3-5× slower than dx*dx+dy*dy
+    // because of its overflow protection. Only pay the sqrt for the hits.
+    const radiusSq = ex.radius * ex.radius;
     for (const c of liveChars) {
       if (c.side === sourceSide) continue;
-      const dist = Math.hypot(c.x - ex.x, c.y - ex.y);
-      if (dist <= ex.radius) {
-        // Damage falls off linearly from full at the centre to splashMinFrac at the edge
-        const frac = 1 - (dist / ex.radius) * (1 - splashMinFrac);
-        c.takeDamage(Math.round(ex.damage * frac), ex.shooter ?? undefined);
-        // Knockback: outward from blast centre, stronger at closer range
-        const kFrac = 1 - dist / ex.radius;
-        const dx    = c.x - ex.x;
-        const dy    = c.y - ex.y;
-        const len   = dist || 1;
-        c.applyKnockback(
-          (dx / len) * knockbackMaxVx * kFrac,
-          (dy / len) * knockbackMaxVy * kFrac,
-          dt,
-          knockbackDecay,
-        );
-      }
+      const dx = c.x - ex.x;
+      const dy = c.y - ex.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > radiusSq) continue;
+      const dist = Math.sqrt(d2);
+      // Damage falls off linearly from full at the centre to splashMinFrac at the edge
+      const frac = 1 - (dist / ex.radius) * (1 - splashMinFrac);
+      c.takeDamage(Math.round(ex.damage * frac), ex.shooter ?? undefined);
+      // Knockback: outward from blast centre, stronger at closer range
+      const kFrac = 1 - dist / ex.radius;
+      const len   = dist || 1;
+      c.applyKnockback(
+        (dx / len) * knockbackMaxVx * kFrac,
+        (dy / len) * knockbackMaxVy * kFrac,
+        dt,
+        knockbackDecay,
+      );
     }
     // Tower damage: use closest point on the cached tower AABB to the blast centre
     const targetTower = sourceSide === 'player' ? this.enemyTower : this.playerTower;
     const tab         = sourceSide === 'player' ? this.enemyTowerAABB : this.playerTowerAABB;
     const nearX = Math.max(tab.left, Math.min(tab.right,  ex.x));
     const nearY = Math.max(tab.top,  Math.min(tab.bottom, ex.y));
-    if (Math.hypot(nearX - ex.x, nearY - ex.y) <= ex.radius) {
+    const tdx = nearX - ex.x, tdy = nearY - ex.y;
+    if (tdx * tdx + tdy * tdy <= radiusSq) {
       targetTower.takeDamage(ex.damage);
     }
-    if (this.sheep && Math.hypot(this.sheep.x - ex.x, this.sheep.y - ex.y) <= ex.radius + 20) {
-      this.sheep.reactToHit(ex.x);
+    if (this.sheep) {
+      const sdx = this.sheep.x - ex.x, sdy = this.sheep.y - ex.y;
+      const sheepR = ex.radius + 20;
+      if (sdx * sdx + sdy * sdy <= sheepR * sheepR) this.sheep.reactToHit(ex.x);
     }
   }
 
@@ -1896,8 +1906,17 @@ export class Game {
   private notifyCpuChars() {
     // Walk the prepooled enemyLive array once. Build a change-detection signature
     // by string-concatenation in a single pass (no intermediate filter/map array).
+    // Collapse behavior to the same 3 buckets the dev panel renders
+    // ('Collect' | 'Harass' | 'Attack' — defend / rush / attacking all show as
+    // 'Attack'), so stance-driven defend↔attacking flips across the whole
+    // roster don't force a wasted innerHTML rewrite on the consumer side.
     let sig = '';
-    for (const c of this.enemyLive) sig += c.id + ':' + c.behavior + ',';
+    for (const c of this.enemyLive) {
+      const bucket = c.behavior === 'collecting' ? 'C'
+                   : c.behavior === 'harass'     ? 'H'
+                   : 'A';
+      sig += c.id + ':' + bucket + ',';
+    }
     if (sig === this.lastCpuCharsSig) return;
     this.lastCpuCharsSig = sig;
     // Only allocate the snapshot array on the change path.

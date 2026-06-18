@@ -344,8 +344,10 @@ export class NavGraph {
     for (let i = 0; i < surfPath.length - 1; i++) {
       const curId  = surfPath[i];
       const nextId = surfPath[i + 1];
-      const cur    = this.surfaces.find(s => s.id === curId)!;
-      const next   = this.surfaces.find(s => s.id === nextId)!;
+      // O(1) surface lookups via the existing surfaceById map. Avoids two
+      // linear `surfaces.find()` scans per path step.
+      const cur    = this.surfaceById.get(curId)!;
+      const next   = this.surfaceById.get(nextId)!;
 
       // Pick the edge that connects curId → nextId
       const edge = (this.edges.get(curId) ?? []).find(e => e.toId === nextId);

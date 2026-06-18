@@ -1,6 +1,29 @@
 import * as PIXI from 'pixi.js';
 import { DMG_LABEL_LIFETIME, DMG_LABEL_RISE } from './constants';
 
+// Per-color TextStyle cache. Each PIXI.Text otherwise wraps its inline style
+// object in a fresh TextStyle and re-resolves font metrics on construction;
+// sharing a cached style across labels of the same color elides that work
+// and the inline object allocation per label. There are typically only
+// 3 colors in flight (player, enemy, miss-grey).
+const TEXT_STYLE_CACHE = new Map<number, PIXI.TextStyle>();
+function getDamageStyle(color: number): PIXI.TextStyle {
+  let s = TEXT_STYLE_CACHE.get(color);
+  if (!s) {
+    s = new PIXI.TextStyle({
+      fontSize:        13,
+      fontWeight:      'bold',
+      fontFamily:      'Segoe UI, sans-serif',
+      fill:            color,
+      stroke:          0x000000,
+      strokeThickness: 3,
+      dropShadow:      false,
+    });
+    TEXT_STYLE_CACHE.set(color, s);
+  }
+  return s;
+}
+
 export class DamageLabel {
   readonly container: PIXI.Container;
   isDead = false;
@@ -12,15 +35,7 @@ export class DamageLabel {
     this.startY    = y;
     this.container = new PIXI.Container();
 
-    const text = new PIXI.Text(label ?? String(Math.round(amount)), {
-      fontSize:        13,
-      fontWeight:      'bold',
-      fontFamily:      'Segoe UI, sans-serif',
-      fill:            color,
-      stroke:          0x000000,
-      strokeThickness: 3,
-      dropShadow:      false,
-    });
+    const text = new PIXI.Text(label ?? String(Math.round(amount)), getDamageStyle(color));
     text.anchor.set(0.5, 1);
     this.container.addChild(text);
     this.container.x = x;

@@ -571,12 +571,21 @@ function handleCpuStrategyChanged(info: CpuStrategyInfo) {
   cpuDecisionEl.textContent = info.decision;
 }
 
+// Cache the last-applied `.disabled` per button so the per-balance update
+// only writes when the threshold is actually crossed — most coin floors
+// don't change anyone's afford state, but the previous code wrote 11
+// .disabled attrs every floor change anyway.
+const lastDisabledByBtn = new Map<HTMLButtonElement, boolean>();
+
 function handleCoinsChanged(coins: number) {
   coinAmountEl.textContent = String(coins);
 
   // Disable spawn buttons when game is over OR when there aren't enough coins
   for (const [t, btn] of spawnBtns) {
-    btn.disabled = gameOver || coins < CHAR_COST[t];
+    const next = gameOver || coins < CHAR_COST[t];
+    if (lastDisabledByBtn.get(btn) === next) continue;
+    btn.disabled = next;
+    lastDisabledByBtn.set(btn, next);
   }
 }
 

@@ -31,15 +31,23 @@ export function initAfterImageLayer(layer: PIXI.Container): void {
 }
 
 export function tickVfx(dt: number): void {
-  for (let i = effects.length - 1; i >= 0; i--) {
-    const e = effects[i];
+  // Single forward pass with read-index/write-index compaction. Each .splice()
+  // on a long effects array (after volleys: speed-streaks at 50ms cadence
+  // plus explosion sparks) shifts the entire tail — multiple splices in one
+  // frame are O(n×k). This is O(n) regardless of how many die.
+  let w = 0;
+  for (let r = 0; r < effects.length; r++) {
+    const e = effects[r];
     e.update(dt);
     if (e.isDone) {
       e.container.parent?.removeChild(e.container);
       e.container.destroy({ children: true });
-      effects.splice(i, 1);
+    } else {
+      if (r !== w) effects[w] = e;
+      w++;
     }
   }
+  effects.length = w;
 }
 
 /** Destroy every active VFX. Called on Game.reset(). */
