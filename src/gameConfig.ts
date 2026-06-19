@@ -116,8 +116,8 @@ export const GameConfig = {
       hp:          130,
       speed:       85,
       attackRange: 95,         // short — must close in, but each shot is an AoE cone
-      attackPower: 14,         // per enemy hit; the shot strikes EVERY enemy in the cone
-      fireRate:    1.2,        // slow pump-action reload
+      attackPower: 20,         // per enemy hit; the shot strikes EVERY enemy in the cone
+      fireRate:    0.9,        // pump-action reload — quicker than a slow shotgun
       cost:        90,
       critical:    0.10,
       knockback:   350,        // shotgun blast flings victims back, like the viking
