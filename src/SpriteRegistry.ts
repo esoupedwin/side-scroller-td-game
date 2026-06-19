@@ -84,6 +84,7 @@ const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>>
     rocketeer: makeTypeDefs('tomaro', 'rocketeer'),
     grenadier: makeTypeDefs('tomaro', 'grenadier'),
     viking:    makeTypeDefs('tomaro', 'viking'),
+    shocktrooper: makeTypeDefs('tomaro', 'shocktrooper'),
   },
   meowee: {
     conscript: makeTypeDefs('meowee', 'conscript'),
