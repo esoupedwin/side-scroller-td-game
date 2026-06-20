@@ -32,8 +32,8 @@ export interface MapDefinition {
    * Tower skin + W + H come from per-tribe templates in TribeTowerTemplates,
    * NOT from this map.
    */
-  playerTowerTribe?: Tribe;  // default 'tomaro'
-  enemyTowerTribe?:  Tribe;  // default 'meowee'
+  playerTowerTribe?: Tribe;  // default 'kattgard'
+  enemyTowerTribe?:  Tribe;  // default 'lapinor'
   playerTowerZ?:     number; // render layer order relative to blocks & platforms (default 0)
   enemyTowerZ?:      number;
   platforms:       PlatformData[];

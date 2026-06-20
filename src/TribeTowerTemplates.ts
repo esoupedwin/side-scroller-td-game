@@ -28,8 +28,8 @@ export interface TowerTemplate {
 const KEY = 'coin_tribe_tower_templates';
 
 const cache: Record<Tribe, TowerTemplate> = {
-  tomaro: {},
-  meowee: {},
+  kattgard: {},
+  lapinor: {},
 };
 
 export function loadTemplates(): void {

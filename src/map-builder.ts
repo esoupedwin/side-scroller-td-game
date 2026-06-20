@@ -352,8 +352,8 @@ class MapBuilder {
     };
     const pBaseY = m.playerTowerY ?? this.groundTopY;
     const eBaseY = m.enemyTowerY  ?? this.groundTopY;
-    const pTpl   = getTowerTemplate(m.playerTowerTribe ?? 'tomaro');
-    const eTpl   = getTowerTemplate(m.enemyTowerTribe  ?? 'meowee');
+    const pTpl   = getTowerTemplate(m.playerTowerTribe ?? 'kattgard');
+    const eTpl   = getTowerTemplate(m.enemyTowerTribe  ?? 'lapinor');
 
     // Unified z-sorted draw list: blocks, platforms, and towers share the same
     // z-index space so towers can be layered relative to environment elements.
@@ -1991,13 +1991,13 @@ class MapBuilder {
       (document.getElementById('input-player-x')      as HTMLInputElement).value  = String(m.playerTowerX);
       (document.getElementById('input-player-y')      as HTMLInputElement).value  = String(m.playerTowerY ?? this.groundTopY);
       (document.getElementById('input-player-z')      as HTMLInputElement).value  = String(m.playerTowerZ ?? 0);
-      (document.getElementById('input-player-tribe')  as HTMLSelectElement).value = m.playerTowerTribe ?? 'tomaro';
+      (document.getElementById('input-player-tribe')  as HTMLSelectElement).value = m.playerTowerTribe ?? 'kattgard';
     }
     if (enemySel) {
       (document.getElementById('input-enemy-x')      as HTMLInputElement).value  = String(m.enemyTowerX);
       (document.getElementById('input-enemy-y')      as HTMLInputElement).value  = String(m.enemyTowerY  ?? this.groundTopY);
       (document.getElementById('input-enemy-z')      as HTMLInputElement).value  = String(m.enemyTowerZ  ?? 0);
-      (document.getElementById('input-enemy-tribe')  as HTMLSelectElement).value = m.enemyTowerTribe ?? 'meowee';
+      (document.getElementById('input-enemy-tribe')  as HTMLSelectElement).value = m.enemyTowerTribe ?? 'lapinor';
     }
     if (coinSel) {
       const cb = m.coinBox;

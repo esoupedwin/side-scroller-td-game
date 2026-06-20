@@ -67,8 +67,8 @@ Per-layer animation lets any body pose pair with any leg state. A marching rifle
 2. Add an entry to `SPRITE_DEFS` in `src/SpriteRegistry.ts`. The convenience helper `makeTypeDefs(tribe, type)` emits both layers in one call with shared default fps/spriteScale:
 
 ```typescript
-tomaro: {
-  warrior: makeTypeDefs('tomaro', 'warrior'),
+kattgard: {
+  warrior: makeTypeDefs('kattgard', 'warrior'),
   // …
 },
 ```

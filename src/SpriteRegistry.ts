@@ -26,7 +26,7 @@ const FRAME_HEIGHT_PX = 512;
 const DEBUG_SPRITES = false;
 
 export interface SpriteLayerAnimDef {
-  path:        string;  // URL served from /public, e.g. '/sprites/tomaro/warrior/body/walk.png'
+  path:        string;  // URL served from /public, e.g. '/sprites/kattgard/warrior/body/walk.png'
   fps:         number;  // desired playback speed in frames per second
   spriteScale: number;  // height = config.height * spriteScale (compensates for frame padding)
   feetAnchorY?: number; // 0..1; where in the frame the character's feet sit (default 1 = bottom edge).
@@ -75,26 +75,26 @@ function makeTypeDefs(tribe: Tribe, type: string): SpriteSetDef {
 // entry (or one whose layered assets fail to load) falls back to Graphics
 // rendering. Add new tribes here as their sheets are produced.
 const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>> = {
-  tomaro: {
-    conscript: makeTypeDefs('tomaro', 'conscript'),
-    warrior:   makeTypeDefs('tomaro', 'warrior'),
-    rifleman:  makeTypeDefs('tomaro', 'rifleman'),
-    sniper:    makeTypeDefs('tomaro', 'sniper'),
-    archer:    makeTypeDefs('tomaro', 'archer'),
-    rocketeer: makeTypeDefs('tomaro', 'rocketeer'),
-    grenadier: makeTypeDefs('tomaro', 'grenadier'),
-    viking:    makeTypeDefs('tomaro', 'viking'),
-    shocktrooper: makeTypeDefs('tomaro', 'shocktrooper'),
+  kattgard: {
+    conscript: makeTypeDefs('kattgard', 'conscript'),
+    warrior:   makeTypeDefs('kattgard', 'warrior'),
+    rifleman:  makeTypeDefs('kattgard', 'rifleman'),
+    sniper:    makeTypeDefs('kattgard', 'sniper'),
+    archer:    makeTypeDefs('kattgard', 'archer'),
+    rocketeer: makeTypeDefs('kattgard', 'rocketeer'),
+    grenadier: makeTypeDefs('kattgard', 'grenadier'),
+    viking:    makeTypeDefs('kattgard', 'viking'),
+    shocktrooper: makeTypeDefs('kattgard', 'shocktrooper'),
   },
-  meowee: {
-    conscript: makeTypeDefs('meowee', 'conscript'),
-    warrior:   makeTypeDefs('meowee', 'warrior'),
-    rifleman:  makeTypeDefs('meowee', 'rifleman'),
-    sniper:    makeTypeDefs('meowee', 'Sniper'),
-    archer:    makeTypeDefs('meowee', 'archer'),
-    rocketeer: makeTypeDefs('meowee', 'rocketeer'),
-    grenadier: makeTypeDefs('meowee', 'grenadier'),
-    knight:    makeTypeDefs('meowee', 'knight'),
+  lapinor: {
+    conscript: makeTypeDefs('lapinor', 'conscript'),
+    warrior:   makeTypeDefs('lapinor', 'warrior'),
+    rifleman:  makeTypeDefs('lapinor', 'rifleman'),
+    sniper:    makeTypeDefs('lapinor', 'Sniper'),
+    archer:    makeTypeDefs('lapinor', 'archer'),
+    rocketeer: makeTypeDefs('lapinor', 'rocketeer'),
+    grenadier: makeTypeDefs('lapinor', 'grenadier'),
+    knight:    makeTypeDefs('lapinor', 'knight'),
   },
 };
 

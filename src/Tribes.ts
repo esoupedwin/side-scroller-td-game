@@ -8,7 +8,7 @@ import type { Side } from './Tower';
  *
  * Sprite assets live under `public/sprites/<tribe>/<type>/<anim>.png`.
  */
-export type Tribe = 'tomaro' | 'meowee';
+export type Tribe = 'kattgard' | 'lapinor';
 
 export interface TribeInfo {
   id:          Tribe;
@@ -16,8 +16,8 @@ export interface TribeInfo {
 }
 
 export const TRIBES: Record<Tribe, TribeInfo> = {
-  tomaro: { id: 'tomaro', displayName: 'Tomaro' },
-  meowee: { id: 'meowee', displayName: 'Meowee' },
+  kattgard: { id: 'kattgard', displayName: 'Kattgard' },
+  lapinor: { id: 'lapinor', displayName: 'Lapinor' },
 };
 
 /**
@@ -25,17 +25,17 @@ export const TRIBES: Record<Tribe, TribeInfo> = {
  * spawn buttons for types not in the active tribe's roster, and the CPU AI
  * filters its spawn-order arrays through the same list.
  *
- * Heavy melee differs per tribe (Viking for Tomaro, Knight for Meowee) — the
+ * Heavy melee differs per tribe (Viking for Kattgard, Knight for Lapinor) — the
  * `heavyMeleeForTribe` helper translates between them when the AI's pre-baked
  * order arrays mention one but the tribe has the other.
  */
 export const TRIBE_ROSTERS: Record<Tribe, readonly string[]> = {
-  tomaro: ['conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'viking', 'shocktrooper', 'grenadier', 'rocketeer'],
-  meowee: ['conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'knight', 'grenadier', 'rocketeer'],
+  kattgard: ['conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'viking', 'shocktrooper', 'grenadier', 'rocketeer'],
+  lapinor: ['conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'knight', 'grenadier', 'rocketeer'],
 };
 
 export function heavyMeleeForTribe(t: Tribe): 'viking' | 'knight' {
-  return t === 'tomaro' ? 'viking' : 'knight';
+  return t === 'kattgard' ? 'viking' : 'knight';
 }
 
 // ── Runtime tribe state ─────────────────────────────────────────────────────
@@ -44,8 +44,8 @@ export function heavyMeleeForTribe(t: Tribe): 'viking' | 'knight' {
 // The dev panel can still override the player tribe afterwards; the enemy
 // tribe is set only via map load today (no dev-panel knob).
 
-let _playerTribe: Tribe = 'tomaro';
-let _enemyTribe:  Tribe = 'meowee';
+let _playerTribe: Tribe = 'kattgard';
+let _enemyTribe:  Tribe = 'lapinor';
 
 export function getPlayerTribe(): Tribe { return _playerTribe; }
 export function getEnemyTribe():  Tribe { return _enemyTribe; }

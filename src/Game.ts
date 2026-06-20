@@ -366,8 +366,8 @@ export class Game {
 
     // Seed tribes from the initial map's defaults so build() reads the
     // correct tribe for each side. Mirrors the same logic in reset().
-    setPlayerTribe(this.mapDef.playerTowerTribe ?? 'tomaro');
-    setEnemyTribe(this.mapDef.enemyTowerTribe   ?? 'meowee');
+    setPlayerTribe(this.mapDef.playerTowerTribe ?? 'kattgard');
+    setEnemyTribe(this.mapDef.enemyTowerTribe   ?? 'lapinor');
 
     this.build();
     window.addEventListener('keydown', this.onKeyDown);
@@ -934,7 +934,7 @@ export class Game {
       }
     }
 
-    // Translate AI orders (which were authored around the Meowee roster with
+    // Translate AI orders (which were authored around the Lapinor roster with
     // 'knight' as the heavy melee) into the actual CPU tribe's roster:
     //   - 'knight' / 'viking' both resolve to the tribe's own heavy melee
     //   - anything else not in the tribe's roster is dropped
@@ -2108,8 +2108,8 @@ export class Game {
       // "Map drives both sides": loading a map seeds both tribes from its
       // per-placeholder defaults. The dev panel may override the player tribe
       // afterwards via its own setPlayerTribe + restart.
-      setPlayerTribe(mapDef.playerTowerTribe ?? 'tomaro');
-      setEnemyTribe(mapDef.enemyTowerTribe   ?? 'meowee');
+      setPlayerTribe(mapDef.playerTowerTribe ?? 'kattgard');
+      setEnemyTribe(mapDef.enemyTowerTribe   ?? 'lapinor');
     }
     this.app.ticker.remove(this.tickFn);
 
