@@ -2,11 +2,7 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 import type { DecorData } from './Decor';
 import type { Tribe } from './Tribes';
-import { GameConfig } from './gameConfig';
-
-const G  = GameConfig;
-const W  = G.worldWidth;
-const GY = G.canvas.height - 80;   // GROUND_Y
+import defaultMapData from './defaultMapData.json';
 
 export interface CoinBoxDef {
   x:         number;   // centre x in world space
@@ -57,81 +53,24 @@ export interface WorldDef {
   readonly maps: readonly MapDefinition[];
 }
 
-// ── World 1: Grasslands ───────────────────────────────────────────────────────
+// ── Map definitions ───────────────────────────────────────────────────────────
+//
+// The four base maps (geometry + platform/decor/background/ground skins) are
+// baked from the map-builder export in `defaultMapData.json` — the committed
+// default layout. `loadMapWithOverride` still lets a localStorage edit win at
+// runtime, so editing in the map builder continues to work on top of these.
+const RAW_MAPS = defaultMapData.maps as unknown as MapDefinition[];
 
-const W1M1: MapDefinition = {
-  id:           'w1m1',
-  name:         'Classic Battlefield',
-  worldWidth:   2808,
-  playerTowerX: 60,
-  enemyTowerX:  2748,
-  platforms: [
-    { id: 'p1', x: 1219, y: 330, width: 390, height: 70 },
-    { id: 'p2', x: 1293, y: 224, width: 240, height: 14 },
-  ],
-  blocks: [
-    { x:  540, y: 360, width: 200, height: 40 },
-    { x: 2112, y: 360, width: 200, height: 40 },
-  ],
-  coinBox: { x: 1404, y: 30, width: 48, height: 48, spreadDeg: 25 },
-};
+function mapById(id: string): MapDefinition {
+  const m = RAW_MAPS.find(x => x.id === id);
+  if (!m) throw new Error(`defaultMapData.json is missing map '${id}'`);
+  return m;
+}
 
-const W1M2: MapDefinition = {
-  id:           'w1m2',
-  name:         'Divided Plains',
-  worldWidth:   3200,
-  playerTowerX: 70,
-  enemyTowerX:  3130,
-  platforms: [
-    { id: 'p1', x:  780, y: GY - 130, width: 280, height: 18 },
-    { id: 'p2', x: 1460, y: GY - 240, width: 380, height: 18 },
-    { id: 'p3', x: 2140, y: GY - 130, width: 280, height: 18 },
-    { id: 'p4', x: 1540, y: GY - 360, width: 180, height: 14 },
-  ],
-  blocks: [
-    { x: 1240, y: GY - 70, width: 180, height: 40 },
-    { x: 1780, y: GY - 70, width: 180, height: 40 },
-  ],
-  coinBox: { x: 1600, y: 30, width: 48, height: 48, spreadDeg: 30 },
-};
-
-// ── World 2: Highlands ────────────────────────────────────────────────────────
-
-const W2M1: MapDefinition = {
-  id:           'w2m1',
-  name:         'Highlands',
-  worldWidth:   W,
-  playerTowerX: 80,
-  enemyTowerX:  W - 80,
-  platforms: [
-    { id: 'p1', x: W / 2 - 260, y: GY - 110, width: 200, height: 14 },
-    { id: 'p2', x: W / 2 +  60, y: GY - 110, width: 200, height: 14 },
-    { id: 'p3', x: W / 2 -  80, y: GY - 240, width: 160, height: 14 },
-  ],
-  blocks: [],
-  coinBox: { x: W / 2, y: GY - 360, width: 48, height: 48, spreadDeg: 30 },
-};
-
-const W2M2: MapDefinition = {
-  id:           'w2m2',
-  name:         'Mountain Pass',
-  worldWidth:   3600,
-  playerTowerX: 80,
-  enemyTowerX:  3520,
-  platforms: [
-    { id: 'p1', x:  560, y: GY - 130, width: 240, height: 18 },
-    { id: 'p2', x: 1120, y: GY - 250, width: 200, height: 14 },
-    { id: 'p3', x: 1680, y: GY - 150, width: 280, height: 18 },
-    { id: 'p4', x: 2200, y: GY - 280, width: 200, height: 14 },
-    { id: 'p5', x: 2800, y: GY - 130, width: 240, height: 18 },
-    { id: 'p6', x: 1760, y: GY - 310, width: 140, height: 14 },
-  ],
-  blocks: [
-    { x:  880, y: GY - 60, width: 200, height: 40 },
-    { x: 2520, y: GY - 60, width: 200, height: 40 },
-  ],
-  coinBox: { x: 1800, y: 30, width: 48, height: 48, spreadDeg: 35 },
-};
+const W1M1 = mapById('w1m1');
+const W1M2 = mapById('w1m2');
+const W2M1 = mapById('w2m1');
+const W2M2 = mapById('w2m2');
 
 // ── Campaign structure ────────────────────────────────────────────────────────
 

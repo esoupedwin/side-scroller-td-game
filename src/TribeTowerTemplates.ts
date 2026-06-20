@@ -1,4 +1,5 @@
 import type { Tribe } from './Tribes';
+import defaultMapData from './defaultMapData.json';
 
 /**
  * Per-tribe tower visuals. Shared across all maps — the map only stores
@@ -27,9 +28,15 @@ export interface TowerTemplate {
 
 const KEY = 'coin_tribe_tower_templates';
 
+// Committed default tower visuals, baked from the map-builder export in
+// `defaultMapData.json`. `loadTemplates()` overlays any localStorage edits on
+// top of these, so the builder's Save path still wins at runtime.
+const DEFAULT_TEMPLATES =
+  defaultMapData.towerTemplates as unknown as Record<Tribe, TowerTemplate>;
+
 const cache: Record<Tribe, TowerTemplate> = {
-  kattgard: {},
-  lapinor: {},
+  kattgard: { ...DEFAULT_TEMPLATES.kattgard },
+  lapinor:  { ...DEFAULT_TEMPLATES.lapinor },
 };
 
 export function loadTemplates(): void {
