@@ -791,6 +791,13 @@
               <input type="file" id="input-plat-skin" accept="image/*" />
               <img id="preview-plat-skin" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
               <button id="btn-clear-plat-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
+              <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:4px;">
+                <label>Tile W:</label>
+                <input type="number" id="input-plat-tile-w" style="width:80px;" placeholder="stretch" min="1" />
+                <label>Tile H:</label>
+                <input type="number" id="input-plat-tile-h" style="width:80px;" placeholder="stretch" min="1" />
+              </div>
+              <span class="hint" style="width:100%;">Leave blank to stretch the skin; set a value to tile it</span>
             </div>
             <!-- Animation: oscillate between (x, y) and (endX, endY) at the given speed -->
             <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">

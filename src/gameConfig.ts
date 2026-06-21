@@ -115,7 +115,7 @@ export const GameConfig = {
       type:        'shocktrooper' as const,
       hp:          130,
       speed:       85,
-      attackRange: 95,         // short — must close in, but each shot is an AoE cone
+      attackRange: 190,        // doubled — still closes in, but each shot is an AoE cone
       attackPower: 20,         // per enemy hit; the shot strikes EVERY enemy in the cone
       fireRate:    0.9,        // pump-action reload — quicker than a slow shotgun
       cost:        90,

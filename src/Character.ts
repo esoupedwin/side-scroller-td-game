@@ -22,7 +22,7 @@ import {
   getLegsAnimFps, getLegsSpriteScale, getLegsFeetAnchorY,
 } from './SpriteRegistry';
 import { type Tribe, tribeForSide } from './Tribes';
-import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow, spawnSpeedStreak, spawnAfterImage, type AfterImagePart } from './Vfx';
+import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow, spawnShotgunBlast, spawnSpeedStreak, spawnAfterImage, type AfterImagePart } from './Vfx';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
 
@@ -2094,7 +2094,14 @@ export class Character {
     const qy = Math.round(toFloorY);
     this.pathAge += dt;
     const navStale = navGraph.version !== this.pathNavVersion;
-    if (!navStale && this.pathAge < this.PATH_TTL && this.path.length > 0) {
+    // Only reuse a path that still has unconsumed steps. A *fully consumed*
+    // path (pathIdx === path.length) can occur when followPath skips every
+    // remaining step as floor-mismatched (e.g. the degenerate single-walk
+    // fallback whose floorY targets a surface the character isn't standing on).
+    // Treating that as a live path froze the unit in place until PATH_TTL
+    // elapsed — gate on pathIdx so an exhausted path always forces a rebuild.
+    const hasLivePath = this.pathIdx < this.path.length;
+    if (!navStale && this.pathAge < this.PATH_TTL && hasLivePath) {
       // Cheap path-reuse: same 20-px grid cell as the last request.
       if (qx === this.pathTargetQx && qy === this.pathTargetQy) return;
       // Hysteresis: harass/defend pass live moving-enemy positions every tick,
@@ -2860,6 +2867,10 @@ export class Character {
     } else if (swing.onTower) {
       swing.onTower(swing.damage);
       ctx.onMeleeHit?.(this.config.type, this.x);
+      if (this.config.type === 'shocktrooper') {
+        const range = this.config.attackRange + this.config.width * 0.5;
+        spawnShotgunBlast(this.x + this.lastAttackDir * 16, this.bowY, this.lastAttackDir, range);
+      }
       spawnHitSpark(this.x + this.lastAttackDir * this.config.attackRange, this.y - this.config.height * 0.5);
     }
   }
@@ -2876,10 +2887,15 @@ export class Character {
     blast.delay -= ctx.dt;
     if (blast.delay > 0) return;
     this.pendingBlast = null;
-    if (this.isDead || blast.damage <= 0) return;   // damage 0 = crit miss → whole blast fizzles
+    if (this.isDead) return;
 
     const dir   = blast.dir;
     const range = this.config.attackRange + this.config.width * 0.5;
+    // The gun fires the instant the wind-up lands: muzzle flash + pellet cone show
+    // even on a crit miss (only the damage fizzles below).
+    spawnShotgunBlast(this.x + dir * 16, this.bowY, dir, range);
+    if (blast.damage <= 0) return;   // crit miss → pellets fly but deal no damage
+
     const back  = this.config.width * 0.5;           // allow point-blank / slightly behind
     const vBand = this.config.height;                // same-plane tolerance
     for (const e of ctx.enemies) {
@@ -2905,9 +2921,9 @@ export class Character {
     const damage = miss ? 0 : this.effectiveAtk;
     if (this.config.type === 'shocktrooper') {
       // Shotgun: no projectile — queue a short-range blast that hits EVERY enemy in
-      // the frontal cone when the wind-up lands (resolved in tickPendingMeleeSwing).
+      // the frontal cone when the wind-up lands (resolved in tickPendingBlast, which
+      // also fires the muzzle-flash + pellet-cone VFX at the moment of the shot).
       this.pendingBlast = { damage, delay: windUp, dir: this.lastAttackDir };
-      spawnMuzzleGlow(this.x + this.lastAttackDir * 16, this.bowY, this.lastAttackDir);
     } else if (this.config.type === 'conscript' || this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'knight' || this.config.type === 'heavy') {
       this.pendingMeleeSwing = { target, damage, delay: windUp };
       spawnSlashArc(this.x, this.y - this.config.height * 0.4, this.lastAttackDir, this.side);
@@ -2967,9 +2983,9 @@ export class Character {
     this.attackTimer = this.config.fireRate;
     if (Math.random() < this.config.critical) return;  // miss â€” silent, towers have no label system
     if (this.config.type === 'shocktrooper') {
-      // Short-range shotgun blast on the tower (single target — one swing).
+      // Short-range shotgun blast on the tower (single target — one swing). The
+      // shotgun VFX fires when the swing lands (tickPendingMeleeSwing).
       this.pendingMeleeSwing = { target: null, damage: this.effectiveAtk, delay: windUp, onTower: onDamageTower };
-      spawnMuzzleGlow(this.x + this.lastAttackDir * 16, this.bowY, this.lastAttackDir);
     } else if (this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'knight' || this.config.type === 'heavy') {
       this.pendingMeleeSwing = { target: null, damage: this.effectiveAtk, delay: windUp, onTower: onDamageTower };
       spawnSlashArc(this.x, this.y - this.config.height * 0.4, this.lastAttackDir, this.side);
