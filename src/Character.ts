@@ -2582,9 +2582,17 @@ export class Character {
     const atkNearX = Math.min(homeTowerFrontX, homeTowerFrontX + dir * DEFEND_PURSUIT_RANGE);
     const atkFarX  = Math.max(homeTowerFrontX, homeTowerFrontX + dir * DEFEND_PURSUIT_RANGE);
 
+    // Auto-attack: the nearest enemy within personal weapon range with a clean
+    // shot (nearestEnemy applies LOS / canSnapHit gating). A defender always
+    // fires at anything it can hit -- regardless of zone or whether another
+    // defender has already claimed it.
+    const target = this.nearestEnemy(enemies, this.config.attackRange, blocks);
+
     // Collect intruders already being pursued by other defenders so we don't
-    // dog-pile on the same enemy. Each defender exposes its pursuit target
-    // via claimedIntruder; we filter those out when picking our own target.
+    // dog-pile on the same enemy *while other threats remain*. Each defender
+    // exposes its pursuit target via claimedIntruder; we filter those out when
+    // picking our own -- but fall back to a claimed enemy below when there is
+    // nothing else to engage.
     const claimed = new Set<Character>();
     for (const c of allies) {
       if (c === this || c.isDead) continue;
@@ -2593,9 +2601,12 @@ export class Character {
       if (t) claimed.add(t);
     }
 
-    // Find the nearest *unclaimed* intruder in the attack zone. If we're
-    // already pursuing one, keep it (so the rest of the defending group can
-    // continue to ignore it).
+    // Pick an intruder to pursue, in priority order:
+    //   1. the one we're already pursuing (if alive & still in the attack zone),
+    //   2. the nearest *unclaimed* intruder in the attack zone,
+    //   3. the nearest intruder inside the *defence zone* even if another
+    //      defender already has it -- so a spare defender still engages an enemy
+    //      that has penetrated the core zone rather than idling at rally.
     let intruder: Character | null = null;
     if (this.defendTargetIntruder && !this.defendTargetIntruder.isDead &&
         this.defendTargetIntruder.x >= atkNearX && this.defendTargetIntruder.x <= atkFarX) {
@@ -2609,31 +2620,42 @@ export class Character {
         const d = Math.abs(c.x - this.x);
         if (d < minDist) { minDist = d; intruder = c; }
       }
+      // Fallback -- nothing unclaimed: engage an already-targeted enemy inside
+      // the defence zone (gang up when it is the only threat present).
+      if (!intruder) {
+        let minClaimed = Infinity;
+        for (const c of enemies) {
+          if (c.isDead) continue;
+          if (c.x < defNearX || c.x > defFarX) continue;
+          const d = Math.abs(c.x - this.x);
+          if (d < minClaimed) { minClaimed = d; intruder = c; }
+        }
+      }
+    }
+
+    // Engage: if any enemy is in weapon range, fire -- even when we have no
+    // pursuit target. This is the automatic defence of the line.
+    if (target) {
+      if (intruder) { this.defendTargetIntruder = intruder; this.defendWasPursuing = true; }
+      this.state = 'fighting';
+      this.attackEnemy(target, onFire);
+
+      // Ranged: kite back from closing melee, stay within own safe zone
+      if (this.isRanged) {
+        const isMelee = Character.isMeleeType(target.config.type);
+        if (isMelee && Math.abs(this.x - target.x) < RANGED_KITE_THRESHOLD) {
+          const retreatX = this.x - dir * this.moveSpeed * dt;
+          this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
+        }
+      }
+      return;
     }
 
     if (intruder) {
       this.defendTargetIntruder = intruder;
       this.defendWasPursuing    = true;
 
-      // Within personal attack range â€” fire (uses nearestEnemy so LOS / canSnapHit
-      // gating still applies; falls through to pursuit if the geometry blocks the shot).
-      const target = this.nearestEnemy(enemies, this.config.attackRange, blocks);
-      if (target) {
-        this.state = 'fighting';
-        this.attackEnemy(target, onFire);
-
-        // Ranged: kite back from closing melee, stay within own safe zone
-        if (this.isRanged) {
-          const isMelee = Character.isMeleeType(target.config.type);
-          if (isMelee && Math.abs(this.x - target.x) < RANGED_KITE_THRESHOLD) {
-            const retreatX = this.x - dir * this.moveSpeed * dt;
-            this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
-          }
-        }
-        return;
-      }
-
-      // Intruder in attack zone but no clean shot â€” pursue at the intruder's
+      // Intruder in zone but no clean shot -- pursue at the intruder's
       // elevation. Clamp to the *attack* zone so the defender can leave the
       // defence zone to engage, but never wanders past the pursuit boundary.
       const pursueX = Math.max(atkNearX, Math.min(atkFarX, intruder.x));

@@ -1751,9 +1751,6 @@ class MapBuilder {
 
     this.bindTribeSkinsModal();
 
-    // Fit View button
-    document.getElementById('btn-fit-view')!.addEventListener('click', () => this.fitView());
-
     this.bindKeyboardShortcuts();
   }
 
@@ -2083,8 +2080,6 @@ class MapBuilder {
       (document.getElementById('gc-jump-height')   as HTMLElement).textContent = `≈ ${jumpH} px`;
     }
 
-    document.getElementById('plat-count')!.textContent  = `${m.platforms.length} platform(s)`;
-    document.getElementById('block-count')!.textContent = `${m.blocks.length} block(s)`;
     // Note: previously also called syncSkinPreviews() for tower skins; that
     // now lives in the per-tribe modal and is wired separately.
 
