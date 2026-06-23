@@ -2094,7 +2094,18 @@ export class Character {
     const qy = Math.round(toFloorY);
     this.pathAge += dt;
     const navStale = navGraph.version !== this.pathNavVersion;
-    if (!navStale && this.pathAge < this.PATH_TTL && this.path.length > 0) {
+    // A fully-consumed path (pathIdx at the end) that did NOT leave the character
+    // at the destination means the last plan couldn't be executed from here — the
+    // classic case is a unit stranded on a platform whose only step was an
+    // un-walkable cross-floor fallback. followPath bumps pathIdx past it without
+    // moving, and the old `path.length > 0` reuse guard then kept handing back the
+    // dead path forever. Force a fresh A* from the current position instead.
+    // (Reuse still applies when the character is parked AT its goal, so harass /
+    // defend units idling on a rally point don't thrash-rebuild every tick.)
+    const consumedButNotArrived =
+      this.pathIdx >= this.path.length &&
+      (Math.abs(this.x - toX) > 12 || Math.abs(this.floorY - toFloorY) > 20);
+    if (!navStale && this.pathAge < this.PATH_TTL && this.path.length > 0 && !consumedButNotArrived) {
       // Cheap path-reuse: same 20-px grid cell as the last request.
       if (qx === this.pathTargetQx && qy === this.pathTargetQy) return;
       // Hysteresis: harass/defend pass live moving-enemy positions every tick,

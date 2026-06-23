@@ -43,6 +43,7 @@ interface CharTrack {
   lastAirborneLogTime: number;
   lastStuckLogTime:    number;
   lastThrashLogTime:   number;
+  lastStrandedLogTime: number;
   lastBehavior:        string;
   lastState:           string;
   noMoveSince:         number;
@@ -121,6 +122,7 @@ export class Diagnostics {
           lastAirborneLogTime: -Infinity,
           lastStuckLogTime:    -Infinity,
           lastThrashLogTime:   -Infinity,
+          lastStrandedLogTime: -Infinity,
           lastBehavior:        c.behavior,
           lastState:           c.state,
           noMoveSince:         time,
@@ -197,6 +199,26 @@ export class Diagnostics {
           this.note(time, 'anomaly', `Walking in air: #${c.id} ${c.name}`, {
             x: round(c.x), y: round(c.y), floorY: round(info.floorY),
             behavior: c.behavior, state: c.state,
+          });
+        }
+      }
+
+      // Stranded-fallback anomaly: the character is parked on an elevated
+      // surface but the planner's LAST built path is a single cross-floor walk
+      // step it can't execute — A* failed to connect this surface to the
+      // destination, so findPath returned its degenerate fallback. This is the
+      // signature of the "idle on a platform" freeze and is invisible to the
+      // Stuck check (the dead path is consumed, so pathLen reads 0).
+      if (!info.isAirborne && info.floorY < GROUND_Y - 0.5) {
+        const lb = info.lastBuiltPath;
+        const isFallback = lb.length === 1 && lb[0].action === 'walk'
+          && Math.abs(lb[0].floorY - info.floorY) > 20;
+        if (isFallback && time - track.lastStrandedLogTime > ANOMALY_DEBOUNCE_S) {
+          track.lastStrandedLogTime = time;
+          this.note(time, 'anomaly', `Stranded (planner fallback): #${c.id} ${c.name}`, {
+            x: round(c.x), y: round(c.y), floorY: round(info.floorY),
+            behavior: c.behavior, state: c.state,
+            fallbackTargetX: round(lb[0].targetX), fallbackFloorY: round(lb[0].floorY),
           });
         }
       }
