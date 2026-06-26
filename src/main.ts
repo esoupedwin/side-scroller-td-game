@@ -84,8 +84,17 @@ function restartCurrentGame(mapDef?: ReturnType<typeof loadMapWithOverride>) {
 
 restartBtn.addEventListener('click', () => restartCurrentGame());
 
+// Developer bar (#dev-panel) is hidden by default; P toggles its visibility.
+const devPanel = document.getElementById('dev-panel')!;
+
 window.addEventListener('keydown', (e) => {
   if (e.key === 'p' || e.key === 'P') {
+    devPanel.style.display = devPanel.style.display === 'none' ? 'flex' : 'none';
+  }
+  // Spacebar pauses. preventDefault stops the page from scrolling and stops a
+  // focused spawn button from being "clicked" by the space key.
+  if (e.code === 'Space' || e.key === ' ') {
+    e.preventDefault();
     game.togglePause();
     pauseOverlay.style.display  = game.paused ? 'block'   : 'none';
     uiOverlay.style.visibility  = game.paused ? 'hidden'  : 'visible';
