@@ -44,6 +44,9 @@ export const GameConfig = {
     hitJumpChance:    0.75,  // probability of jumping when struck by a projectile
     attackKnockbackVy:    80,  // px/s — small upward impulse applied with every per-character knockback
     attackKnockbackDecay: 4.0, // multiplied against knockbackVx each second (e^-decay); shared by melee + projectile hits
+    lowHealthRatio:     0.3,      // hp/maxHp at or below which the body blinks a red tint
+    lowHealthBlinkColor: 0xff2b2b, // tint colour pulsed onto the body while low on health
+    lowHealthBlinkHz:    2.4,     // blink pulses per second
 
     conscript: {
       type:        'conscript' as const,
@@ -88,6 +91,19 @@ export const GameConfig = {
       cost:        70,
       critical:    0.07, // 7 % miss chance
       knockback:   0,
+    },
+    gunslinger: {
+      type:        'gunslinger' as const,
+      hp:          85,
+      speed:       92,         // nimble pistolero — quicker than the rifleman
+      attackRange: 200,        // pistol — shorter reach than the rifle (280)
+      attackPower: 7,          // per round; a full 3-round burst lands 21
+      fireRate:    1.4,        // seconds between bursts (longer cooldown — fires 3 at once)
+      cost:        75,
+      critical:    0.09,
+      knockback:   0,
+      burstCount:       3,     // rounds fired per trigger pull
+      burstIntervalSec: 0.09,  // seconds between rounds within a burst
     },
     sniper: {
       type:        'sniper' as const,

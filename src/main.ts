@@ -32,7 +32,7 @@ const enemyTowerHpEl  = document.getElementById('enemy-tower-hp')!;
 // (CPU-only) and Heavy is present in the HTML but not in either tribe's
 // roster, so it stays hidden until a tribe lists it.
 const UNIT_TYPES = [
-  'conscript', 'warrior', 'archer', 'rifleman', 'sniper',
+  'conscript', 'warrior', 'archer', 'rifleman', 'gunslinger', 'sniper',
   'viking', 'shocktrooper', 'knight', 'heavy', 'grenadier', 'rocketeer',
 ] as const;
 type UnitType = typeof UNIT_TYPES[number];
@@ -522,6 +522,24 @@ const dropPowerUpBtn = document.getElementById('dev-drop-powerup-btn') as HTMLBu
 dropPowerUpBtn.addEventListener('click', () => {
   game.forceDropPowerUp(powerUpSelect.value as PowerUpType);
 });
+
+// ── Game Shark: force the CPU to buy a specific unit type ─────────────────
+const cpuForceSelect = document.getElementById('dev-cpu-force-select') as HTMLSelectElement;
+{
+  const autoOpt = document.createElement('option');
+  autoOpt.value = '';
+  autoOpt.textContent = 'AI (auto)';
+  cpuForceSelect.appendChild(autoOpt);
+  for (const t of UNIT_TYPES) {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = `${TYPE_ICON[t] ?? ''} ${t.charAt(0).toUpperCase()}${t.slice(1)}`.trim();
+    cpuForceSelect.appendChild(opt);
+  }
+  cpuForceSelect.addEventListener('change', () => {
+    game.setCpuForcedType(cpuForceSelect.value ? (cpuForceSelect.value as UnitType) : null);
+  });
+}
 
 function handleCpuCoinsChanged(coins: number) {
   cpuCoinAmountEl.textContent = String(coins);

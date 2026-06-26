@@ -6,6 +6,7 @@ import {
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
   SAFE_ZONE_HEAL_RATE, HIT_JUMP_CHANCE,
+  CHAR_LOW_HEALTH_RATIO, CHAR_LOW_HEALTH_BLINK_COLOR, CHAR_LOW_HEALTH_BLINK_HZ,
   ATTACK_KNOCKBACK_VY,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST, COIN_THROW_MAX_Y_GAP,
@@ -13,6 +14,7 @@ import {
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
   POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
   GRENADE_MAX_VX,
+  GUNSLINGER_BURST_COUNT, GUNSLINGER_BURST_INTERVAL,
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
@@ -68,7 +70,7 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 
 export interface CharacterConfig {
-  type:        'conscript' | 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'viking' | 'knight' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer' | 'shocktrooper';
+  type:        'conscript' | 'warrior' | 'archer' | 'rifleman' | 'gunslinger' | 'sniper' | 'viking' | 'knight' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer' | 'shocktrooper';
   hp:          number;
   speed:       number;
   attackRange: number;
@@ -122,6 +124,16 @@ export interface UpdateContext {
 }
 
 type State = 'marching' | 'fighting' | 'collecting' | 'returning' | 'dead';
+
+/** Linear-interpolate two 0xRRGGBB colours (t in [0,1]). */
+function lerpColor(a: number, b: number, t: number): number {
+  const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff;
+  const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff;
+  const r = (ar + (br - ar) * t) & 0xff;
+  const g = (ag + (bg - ag) * t) & 0xff;
+  const bl = (ab + (bb - ab) * t) & 0xff;
+  return (r << 16) | (g << 8) | bl;
+}
 
 export class Character {
   readonly side:   Side;
@@ -205,6 +217,16 @@ export class Character {
   // Shotgun blast (shock trooper): resolved against ALL enemies in a short frontal
   // cone when the wind-up lands. Visual-only timing mirrors the melee swing.
   private pendingBlast: { damage: number; delay: number; dir: 1 | -1 } | null = null;
+  // Burst fire (gunslinger): after the first round fires immediately, the
+  // remaining rounds are queued here and released one per `delay` window by
+  // tickPendingBurst. `target` is null for a tower burst (use towerX/towerY).
+  private pendingBurst: {
+    shotsLeft: number;
+    delay:     number;
+    target:    Character | null;
+    towerX:    number;
+    towerY:    number;
+  } | null = null;
   // Seconds since the character's x last changed. Used by selectAnimations to
   // fall back to 'idle' when the state machine still says 'marching' but the
   // character is effectively stationary (blocked, no target, etc.).
@@ -221,6 +243,17 @@ export class Character {
   private legsSprite:       PIXI.AnimatedSprite | null = null;
   private bodyBaseScale     = 1;
   private legsBaseScale     = 1;
+  // Body display-leaves (sprites + graphics, both render paths) whose `.tint` the
+  // low-health blink pulses. Snapshotted right after buildSprite(), before the HP
+  // bar / rank badge / id label are added — so those never pick up the red tint.
+  private tintTargets:      (PIXI.Sprite | PIXI.Graphics)[] = [];
+  private lowHealthPhase    = 0;     // advances while low on health; drives the pulse
+  private isLowHealthTinted = false; // true while a non-white tint is applied (skip redundant resets)
+  // Sweat droplets that bead beside the head and drip while low on health.
+  // Created lazily (most characters never get this low), cleared when healed/dead.
+  private sweatGfx:         PIXI.Graphics | null = null;
+  private sweatDrops:       { x: number; y: number; vx: number; vy: number; age: number; ttl: number; r: number }[] = [];
+  private sweatSpawnTimer   = 0;
   // Last facing direction applied to sprite.scale.x. 0 = uninitialised, forces
   // the first apply. Used by tickAnimSprite to skip the per-tick scale write
   // (which dirties PIXI's _transformID) when neither facing nor base scale
@@ -332,6 +365,10 @@ export class Character {
 
     this.container = new PIXI.Container();
     this.buildSprite();
+    // Capture every body leaf (sprites + graphics, recursing through leg sub-
+    // containers) before the HP bar / label are added, so the low-health blink
+    // only ever tints the character itself.
+    this.gatherTintTargets(this.container);
 
     this.barBg = new PIXI.Graphics();
     this.barBg.beginFill(0x333333);
@@ -434,6 +471,7 @@ export class Character {
     if      (this.config.type === 'conscript')  this.buildConscriptSprite();
     else if (this.config.type === 'archer')     this.buildArcherSprite();
     else if (this.config.type === 'rifleman')   this.buildRiflemanSprite();
+    else if (this.config.type === 'gunslinger') this.buildGunslingerSprite();
     else if (this.config.type === 'sniper')     this.buildSniperSprite();
     else if (this.config.type === 'viking')     this.buildVikingSprite();
     else if (this.config.type === 'knight')     this.buildKnightSprite();
@@ -808,6 +846,54 @@ export class Character {
     // Muzzle
     g.beginFill(0x1a1a1a);
     g.drawRect(dir > 0 ? dir * 26 : dir * 26 - 3, ry, 3, 6);
+    g.endFill();
+
+    this.container.addChild(g);
+  }
+
+  private buildGunslingerSprite() {
+    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const w = this.config.width, h = this.config.height;
+    const dir = this.side === 'player' ? 1 : -1;
+    this.buildAnimLegs(-w * 0.29, w * 0.29, w * 0.36, h * 0.45, 0.5);
+
+    const g = new PIXI.Graphics();
+    // Lean duster torso
+    g.beginFill(color, 0.9);
+    g.drawRoundedRect(-w * 0.42, h * 0.18, w * 0.84, h * 0.42, 3);
+    g.endFill();
+    // Bandolier across the chest
+    g.lineStyle(2, 0x2a2a2a, 0.5);
+    g.moveTo(-w * 0.34, h * 0.22); g.lineTo(w * 0.34, h * 0.52);
+    g.lineStyle(0);
+
+    // Head
+    g.beginFill(color, 0.85);
+    g.drawCircle(0, h * 0.1, w * 0.34);
+    g.endFill();
+    // Wide-brimmed cowboy hat: brim + crown
+    g.beginFill(0x3a2a18);
+    g.drawRoundedRect(-w * 0.52, h * 0.02 - 2, w * 1.04, 4, 2);   // brim
+    g.drawRoundedRect(-w * 0.24, h * 0.02 - 11, w * 0.48, 10, 2); // crown
+    g.endFill();
+
+    // Revolver: short grip + cylinder + stubby barrel, held forward at hip height
+    const ry = h * 0.32;
+    // Grip (angled down, behind the cylinder)
+    g.beginFill(0x4a3219);
+    g.drawRoundedRect(dir > 0 ? -2 : -6, ry + 3, 8, 6, 1);
+    g.endFill();
+    // Cylinder/frame
+    g.beginFill(0x3a3a3a);
+    g.drawRect(Math.min(dir * 4, dir * 12), ry, Math.abs(dir * 4 - dir * 12), 6);
+    g.endFill();
+    // Short barrel
+    g.beginFill(0x2a2a2a);
+    g.drawRect(Math.min(dir * 12, dir * 20), ry + 1, Math.abs(dir * 12 - dir * 20), 4);
+    g.endFill();
+    // Muzzle
+    g.beginFill(0x1a1a1a);
+    g.drawRect(dir > 0 ? dir * 20 : dir * 20 - 2, ry, 2, 6);
     g.endFill();
 
     this.container.addChild(g);
@@ -1704,6 +1790,7 @@ export class Character {
     this.attackFacingTimer  = 0;
     this.pendingMeleeSwing  = null;
     this.pendingBlast       = null;
+    this.pendingBurst       = null;
     this.pendingHitJump     = false;
     this.path               = [];
     this.pathIdx            = 0;
@@ -1730,6 +1817,8 @@ export class Character {
     if (this.hp <= 0) {
       this.state = 'dead';
       this.removeCoinCarry();
+      if (this.isLowHealthTinted) this.clearLowHealthTint();  // don't carry the red tint into the death fade
+      this.clearSweat();
       killer?.earnAP(PROMO_KILL_AP);
       this.killedBy = killer ? 'character' : 'tower';
     }
@@ -1773,7 +1862,7 @@ export class Character {
 
   private get isRanged() {
     const t = this.config.type;
-    return t === 'archer' || t === 'rifleman' || t === 'sniper' || t === 'grenadier' || t === 'rocketeer';
+    return t === 'archer' || t === 'rifleman' || t === 'gunslinger' || t === 'sniper' || t === 'grenadier' || t === 'rocketeer';
   }
 
   private static isMeleeType(type: CharacterConfig['type']) {
@@ -1788,6 +1877,7 @@ export class Character {
     this.attackFacingTimer  = Math.max(0, this.attackFacingTimer  - ctx.dt);
     this.tickPendingMeleeSwing(ctx);
     this.tickPendingBlast(ctx);
+    this.tickPendingBurst(ctx);
 
     if (this.powerUpSpeedTimer > 0) {
       this.powerUpSpeedTimer -= ctx.dt;
@@ -1844,6 +1934,10 @@ export class Character {
     this.tickLegs(ctx.dt);
     this.tickAnimSprite();
     this.tickPromoAnim(ctx.dt);
+    // update() already returned for dead characters, so this is "alive & hurt".
+    const lowHealth = this.hp <= this.maxHp * CHAR_LOW_HEALTH_RATIO;
+    this.tickLowHealthBlink(ctx.dt, lowHealth);
+    this.tickSweat(ctx.dt, lowHealth);
 
     // Hard boundary: characters are blocked at each tower's front face (solid collision).
     this.boundL = Math.min(ctx.homeTowerFrontX, ctx.enemyTowerFrontX);
@@ -2702,6 +2796,111 @@ export class Character {
     }
   }
 
+  /** Recursively collect tintable leaves (Sprite / Graphics) under `root` into
+   *  `tintTargets`. AnimatedSprite extends Sprite, so the sprite path is covered;
+   *  the graphics path's body Graphics and leg-container Graphics are too. */
+  private gatherTintTargets(root: PIXI.Container): void {
+    for (const child of root.children) {
+      if (child instanceof PIXI.Sprite || child instanceof PIXI.Graphics) {
+        this.tintTargets.push(child);
+      }
+      if (child instanceof PIXI.Container) this.gatherTintTargets(child);
+    }
+  }
+
+  /** Pulse a red tint over the body while low on health. The tint lerps between
+   *  the body's natural colour (white = none) at the pulse trough and full red at
+   *  the peak, so the character visibly blinks red. */
+  private tickLowHealthBlink(dt: number, low: boolean): void {
+    if (!low) {
+      // Clear the tint once when leaving the low-health state (e.g. healed).
+      if (this.isLowHealthTinted) this.clearLowHealthTint();
+      return;
+    }
+    this.lowHealthPhase += dt * CHAR_LOW_HEALTH_BLINK_HZ * Math.PI * 2;
+    const k    = 0.5 - 0.5 * Math.cos(this.lowHealthPhase);   // 0 at trough → 1 at peak
+    const tint = lerpColor(0xffffff, CHAR_LOW_HEALTH_BLINK_COLOR, k);
+    for (const t of this.tintTargets) t.tint = tint;
+    this.isLowHealthTinted = true;
+  }
+
+  /** Reset the body tint to its natural colour (no tint). */
+  private clearLowHealthTint(): void {
+    for (const t of this.tintTargets) t.tint = 0xffffff;
+    this.isLowHealthTinted = false;
+    this.lowHealthPhase    = 0;
+  }
+
+  /** Emit anxious sweat beads beside the head while low on health. A bead forms
+   *  at the temple, then drips down the side and fades. Anchored in container
+   *  space (not flipped by facing), so it stays put beside the head. */
+  private tickSweat(dt: number, low: boolean): void {
+    if (!low) { if (this.sweatGfx) this.clearSweat(); return; }
+
+    if (!this.sweatGfx) {
+      this.sweatGfx = new PIXI.Graphics();
+      // Render above the body but below the HP bar / label.
+      const idx = this.barBg ? this.container.getChildIndex(this.barBg) : this.container.children.length;
+      this.container.addChildAt(this.sweatGfx, idx);
+    }
+
+    // Bead source: beside the head, on the character's rear side (player faces
+    // right → sweat flings off the left temple; enemy mirrors it).
+    const sideSign = this.side === 'player' ? -1 : 1;
+    const headY = this.config.height * 0.12;
+
+    const spawnDrop = (sign: number) => {
+      this.sweatDrops.push({
+        x:   sign * this.config.width * 0.5 + (Math.random() - 0.5) * 6,
+        y:   headY + (Math.random() - 0.5) * 5,
+        vx:  sign * (34 + Math.random() * 40),   // flung outward, away from the body
+        vy:  -18 - Math.random() * 16,           // pops up first, then arcs down under gravity
+        age: 0,
+        ttl: 0.55 + Math.random() * 0.25,
+        r:   2.4 + Math.random() * 1.2,
+      });
+    };
+
+    // Spawn faster, allow more concurrent beads, and occasionally fling one off
+    // the opposite temple too — so a badly-hurt unit visibly streams sweat.
+    this.sweatSpawnTimer -= dt;
+    if (this.sweatSpawnTimer <= 0 && this.sweatDrops.length < 8) {
+      this.sweatSpawnTimer = 0.14 + Math.random() * 0.16;
+      spawnDrop(sideSign);
+      if (Math.random() < 0.5 && this.sweatDrops.length < 8) spawnDrop(-sideSign);
+    }
+
+    const g = this.sweatGfx;
+    g.clear();
+    for (let i = this.sweatDrops.length - 1; i >= 0; i--) {
+      const d = this.sweatDrops[i];
+      d.age += dt;
+      if (d.age >= d.ttl) { this.sweatDrops.splice(i, 1); continue; }
+      d.vy += 170 * dt;                  // gravity — bead pops up then arcs back down
+      d.vx *= Math.pow(0.12, dt);        // air drag bleeds the outward fling over time
+      d.x  += d.vx * dt;
+      d.y  += d.vy * dt;
+      const t     = d.age / d.ttl;
+      const alpha = t < 0.15 ? t / 0.15 : (1 - t);   // quick fade-in, fade-out toward the end
+      // Teardrop: round bottom + a pointed top.
+      g.beginFill(0x9fd8ff, alpha * 0.9);
+      g.drawCircle(d.x, d.y, d.r);
+      g.drawPolygon([ d.x - d.r * 0.6, d.y, d.x, d.y - d.r * 1.9, d.x + d.r * 0.6, d.y ]);
+      g.endFill();
+      // Glint highlight.
+      g.beginFill(0xffffff, alpha * 0.8);
+      g.drawCircle(d.x - d.r * 0.32, d.y - d.r * 0.32, d.r * 0.35);
+      g.endFill();
+    }
+  }
+
+  /** Remove all sweat beads (healed above the threshold, or died). */
+  private clearSweat(): void {
+    this.sweatDrops.length = 0;
+    this.sweatGfx?.clear();
+    this.sweatSpawnTimer = 0;
+  }
+
   // â”€â”€ Attack helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private tickHealParticles(dt: number, healing: boolean) {
@@ -2814,7 +3013,7 @@ export class Character {
     const t = this.config.type;
     if (t === 'grenadier') return 'grenade';
     if (t === 'rocketeer') return 'rocket';
-    if (t === 'rifleman' || t === 'sniper' || t === 'tanker') return 'bullet';
+    if (t === 'rifleman' || t === 'gunslinger' || t === 'sniper' || t === 'tanker') return 'bullet';
     return 'arrow';
   }
 
@@ -2937,9 +3136,57 @@ export class Character {
     }
   }
 
+  /**
+   * Fire one horizontal bullet at (tx, ty), rolling this character's crit for the
+   * round. Shared by the gunslinger's immediate shot and each queued burst round.
+   */
+  private fireBullet(tx: number, ty: number, onFire?: (r: FireRequest) => void) {
+    if (!onFire) return;
+    const miss   = Math.random() < this.config.critical;
+    const damage = miss ? 0 : this.effectiveAtk;
+    const snapped = this.snapFireAngle(this.x, this.bowY, tx, ty);
+    onFire({
+      side: this.side, sx: this.x, sy: this.bowY,
+      tx: snapped.tx,  ty: snapped.ty,
+      damage, projectileKind: 'bullet',
+      shooter: miss ? undefined : this,
+    });
+    spawnMuzzleGlow(this.x + this.lastAttackDir * 18, this.bowY, this.lastAttackDir);
+  }
+
+  /**
+   * Release the gunslinger's queued burst rounds — one per GUNSLINGER_BURST_INTERVAL.
+   * A character-targeted burst aborts early if the target dies or flees out of range;
+   * a tower burst fires all rounds at the stored tower position.
+   */
+  private tickPendingBurst(ctx: UpdateContext) {
+    const burst = this.pendingBurst;
+    if (!burst) return;
+    burst.delay -= ctx.dt;
+    if (burst.delay > 0) return;
+    if (this.isDead) { this.pendingBurst = null; return; }
+
+    if (burst.target) {
+      if (burst.target.isDead) { this.pendingBurst = null; return; }
+      const reach = this.config.attackRange + this.config.width;
+      if (Math.abs(burst.target.x - this.x) > reach) { this.pendingBurst = null; return; }
+      const dirSign = Math.sign(burst.target.x - this.x);
+      if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
+      this.fireBullet(burst.target.x, burst.target.bowY, ctx.onFire);
+    } else {
+      this.fireBullet(burst.towerX, burst.towerY, ctx.onFire);
+    }
+
+    // Keep the body in its 'attack' pose through the remainder of the burst.
+    this.attackFacingTimer = Math.max(this.attackFacingTimer, GUNSLINGER_BURST_INTERVAL + 0.05);
+    burst.shotsLeft -= 1;
+    if (burst.shotsLeft <= 0) this.pendingBurst = null;
+    else                      burst.delay = GUNSLINGER_BURST_INTERVAL;
+  }
+
   private attackEnemy(target: Character, onFire?: (r: FireRequest) => void) {
     if (this.attackTimer > 0) return;
-    if (this.pendingMeleeSwing || this.pendingBlast) return;  // wait for the previous swing/blast to land
+    if (this.pendingMeleeSwing || this.pendingBlast || this.pendingBurst) return;  // wait for the previous swing/blast/burst to land
     const dirSign = Math.sign(target.x - this.x);
     if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
     const windUp = this.beginAttack();
@@ -2978,6 +3225,17 @@ export class Character {
           damage, projectileKind: 'rocket',
           shooter: miss ? undefined : this,
         });
+      } else if (this.config.type === 'gunslinger') {
+        // Burst fire: loose the first round now; the remaining rounds are queued
+        // and released one per GUNSLINGER_BURST_INTERVAL by tickPendingBurst.
+        this.fireBullet(target.x, target.bowY, onFire);
+        this.pendingBurst = {
+          shotsLeft: GUNSLINGER_BURST_COUNT - 1,
+          delay:     GUNSLINGER_BURST_INTERVAL,
+          target,
+          towerX:    0,
+          towerY:    0,
+        };
       } else {
         const snapped = this.snapFireAngle(this.x, this.bowY, target.x, target.bowY);
         onFire({
@@ -3002,12 +3260,14 @@ export class Character {
     onDamageTower?: (dmg: number) => void,
   ) {
     if (this.attackTimer > 0) return;
-    if (this.pendingMeleeSwing) return;  // wait for the previous swing to land
+    if (this.pendingMeleeSwing || this.pendingBurst) return;  // wait for the previous swing/burst to land
     const dirSign = Math.sign(towerFrontX - this.x);
     if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
     const windUp = this.beginAttack();
     this.attackTimer = this.config.fireRate;
-    if (Math.random() < this.config.critical) return;  // miss â€” silent, towers have no label system
+    // The gunslinger rolls crit per burst round inside fireBullet, so it skips
+    // this single whole-attack miss roll.
+    if (this.config.type !== 'gunslinger' && Math.random() < this.config.critical) return;  // miss â€” silent, towers have no label system
     if (this.config.type === 'shocktrooper') {
       // Short-range shotgun blast on the tower (single target — one swing). The
       // shotgun VFX fires when the swing lands (tickPendingMeleeSwing).
@@ -3028,6 +3288,16 @@ export class Character {
           tx: towerFrontX, ty: towerY,
           damage: this.effectiveAtk, projectileKind: 'rocket',
         });
+      } else if (this.config.type === 'gunslinger') {
+        // Burst fire on the tower — first round now, the rest via tickPendingBurst.
+        this.fireBullet(towerFrontX, towerY, onFire);
+        this.pendingBurst = {
+          shotsLeft: GUNSLINGER_BURST_COUNT - 1,
+          delay:     GUNSLINGER_BURST_INTERVAL,
+          target:    null,
+          towerX:    towerFrontX,
+          towerY,
+        };
       } else {
         const snapped = this.snapFireAngle(this.x, this.bowY, towerFrontX, towerY);
         onFire({

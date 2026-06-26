@@ -31,7 +31,7 @@ export const TRIBES: Record<Tribe, TribeInfo> = {
  */
 export const TRIBE_ROSTERS: Record<Tribe, readonly string[]> = {
   kattgard: ['conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'viking', 'shocktrooper', 'grenadier', 'rocketeer'],
-  lapinor: ['conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'knight', 'grenadier', 'rocketeer'],
+  lapinor: ['conscript', 'warrior', 'archer', 'rifleman', 'gunslinger', 'sniper', 'knight', 'grenadier', 'rocketeer'],
 };
 
 export function heavyMeleeForTribe(t: Tribe): 'viking' | 'knight' {

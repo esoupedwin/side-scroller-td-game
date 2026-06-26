@@ -154,6 +154,9 @@ export const PROMO_THRESHOLDS: number[] = [...promo.thresholds];
 // ── Characters ───────────────────────────────────────────────────────────────
 export const SAFE_ZONE_HEAL_RATE      = ch.safeZoneHealRate;
 export const HIT_JUMP_CHANCE        = ch.hitJumpChance;
+export const CHAR_LOW_HEALTH_RATIO       = ch.lowHealthRatio;
+export const CHAR_LOW_HEALTH_BLINK_COLOR = ch.lowHealthBlinkColor;
+export const CHAR_LOW_HEALTH_BLINK_HZ    = ch.lowHealthBlinkHz;
 export const ATTACK_KNOCKBACK_VY    = ch.attackKnockbackVy;
 export const ATTACK_KNOCKBACK_DECAY = ch.attackKnockbackDecay;
 export const HARASS_SAFETY_BUFFER   = ch.harassSafetyBuffer;
@@ -171,6 +174,7 @@ export const CHAR_COST = {
   warrior:   ch.warrior.cost,
   archer:    ch.archer.cost,
   rifleman:  ch.rifleman.cost,
+  gunslinger: ch.gunslinger.cost,
   sniper:    ch.sniper.cost,
   viking:    ch.viking.cost,
   shocktrooper: ch.shocktrooper.cost,
@@ -235,6 +239,23 @@ export const RIFLEMAN = {
   height:      ch.height,
   knockback:   ch.rifleman.knockback,
 };
+
+export const GUNSLINGER = {
+  type:        ch.gunslinger.type,
+  hp:          ch.gunslinger.hp,
+  speed:       ch.gunslinger.speed,
+  attackRange: ch.gunslinger.attackRange,
+  attackPower: ch.gunslinger.attackPower,
+  fireRate:    ch.gunslinger.fireRate,
+  critical:    ch.gunslinger.critical,
+  width:       ch.width,
+  height:      ch.height,
+  knockback:   ch.gunslinger.knockback,
+};
+// Burst-fire tunables — the gunslinger fires `burstCount` rounds spaced
+// `burstIntervalSec` apart on each trigger pull (see Character.tickPendingBurst).
+export const GUNSLINGER_BURST_COUNT    = ch.gunslinger.burstCount;
+export const GUNSLINGER_BURST_INTERVAL = ch.gunslinger.burstIntervalSec;
 
 export const SNIPER = {
   type:        ch.sniper.type,

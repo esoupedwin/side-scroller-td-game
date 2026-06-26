@@ -90,6 +90,7 @@ const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>>
     conscript: makeTypeDefs('lapinor', 'conscript'),
     warrior:   makeTypeDefs('lapinor', 'warrior'),
     rifleman:  makeTypeDefs('lapinor', 'rifleman'),
+    gunslinger: makeTypeDefs('lapinor', 'gunslinger'),
     sniper:    makeTypeDefs('lapinor', 'Sniper'),
     archer:    makeTypeDefs('lapinor', 'archer'),
     rocketeer: makeTypeDefs('lapinor', 'rocketeer'),

@@ -38,7 +38,7 @@ import {
   VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, SNIPER, VIKING, KNIGHT, HEAVY, TANKER, GRENADIER, ROCKETEER, SHOCKTROOPER,
+  CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, GUNSLINGER, SNIPER, VIKING, KNIGHT, HEAVY, TANKER, GRENADIER, ROCKETEER, SHOCKTROOPER,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
   GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY, ATTACK_KNOCKBACK_DECAY,
   ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX, ROCKET_SPLASH_MIN_FRAC,
@@ -82,6 +82,7 @@ const CHAR_CONFIGS = {
   warrior:   WARRIOR,
   archer:    ARCHER,
   rifleman:  RIFLEMAN,
+  gunslinger: GUNSLINGER,
   sniper:    SNIPER,
   viking:    VIKING,
   shocktrooper: SHOCKTROOPER,
@@ -297,6 +298,9 @@ export class Game {
   private playerSpawnInterval = 0;
   private cpuVsCpu            = false;
   private gameShark           = false;
+  // Dev override: when set, the CPU (enemy) buys this unit type every spawn,
+  // bypassing the stance-driven AI order. null = normal AI behavior.
+  private cpuForcedType: CharacterConfig['type'] | null = null;
   private timeRemaining    = this.mapDurationSec;
   private lastNotifiedTime = -1;
   private cpuStrategyInfo: CpuStrategyInfo = {
@@ -794,6 +798,11 @@ export class Game {
 
   isCpuVsCpu(): boolean { return this.cpuVsCpu; }
 
+  /** Dev: force the CPU (enemy) to purchase a specific unit type every spawn,
+   *  bypassing its stance-driven AI order. Pass null to restore normal AI. */
+  setCpuForcedType(type: CharacterConfig['type'] | null): void { this.cpuForcedType = type; }
+  getCpuForcedType(): CharacterConfig['type'] | null { return this.cpuForcedType; }
+
   /** Dev cheat: when ON the player's coin balance is pinned to 9999. */
   setGameShark(on: boolean): void { this.gameShark = on; }
 
@@ -836,6 +845,7 @@ export class Game {
       type === 'heavy'    ? 1.8 :
       type === 'sniper'   ? 1.4 :
       type === 'rifleman' ? 1.3 :
+      type === 'gunslinger' ? 1.3 :
       type === 'archer'   ? 1.2 : 1.0;
     const threat = (chars: Character[], discountCollecting: boolean) =>
       chars.reduce((s, c) => {
@@ -892,9 +902,25 @@ export class Game {
     // spawnX is computed per unit type (width varies) — see cpuSpawnX below
     const spawnY    = self === 'enemy' ? this.enemyTower.spawnY : this.playerTower.spawnY;
 
+    // Dev override: force the CPU (enemy) to buy a specific type, bypassing the
+    // stance AI and roster filter entirely. Saves toward it when it can't afford.
+    if (self === 'enemy' && this.cpuForcedType) {
+      const type = this.cpuForcedType;
+      const cost = CHAR_COST[type];
+      if (this.cpuCoinBalance >= cost) {
+        this.cpuCoinBalance -= cost;
+        const c = this.spawnCpuUnit(self, type, spawnY);
+        this.cpuStrategyInfo.decision = `Forced ${type} #${c.id}`;
+      } else {
+        this.cpuStrategyInfo.decision = `Saving (forced ${type}) — need ${cost} (have ${Math.floor(this.cpuCoinBalance)})`;
+      }
+      this.resetSpawnTimer(self, pressure);
+      return;
+    }
+
     // Tanker is intentionally excluded from every order array — it's hidden
     // from both the player UI and the CPU until further notice.
-    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'sniper' | 'viking' | 'knight' | 'heavy' | 'rocketeer' | 'grenadier';
+    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'gunslinger' | 'sniper' | 'viking' | 'knight' | 'heavy' | 'rocketeer' | 'grenadier';
     let order: UnitType[];
 
     // Opponent cluster result is pre-computed every 500 ms alongside the stance
@@ -911,7 +937,7 @@ export class Game {
         order = ['grenadier', 'rifleman', 'knight', 'heavy', 'warrior', 'archer'];
       } else {
         // Aggressive push: flood high-damage units; knight leads the melee wedge
-        order = ['knight', 'rifleman', 'heavy', 'warrior', 'archer'];
+        order = ['knight', 'rifleman', 'gunslinger', 'heavy', 'warrior', 'archer'];
       }
     } else if (stance === 'defend') {
       if (pressure >= 3) {
@@ -926,9 +952,9 @@ export class Game {
       if (balance >= CHAR_COST.sniper && selfChars.length >= 3) {
         order = ['sniper', 'rifleman', 'knight', 'archer', 'heavy', 'warrior'];
       } else if (balance >= CHAR_COST.knight) {
-        order = ['knight', 'rifleman', 'archer', 'heavy', 'warrior'];
+        order = ['knight', 'rifleman', 'gunslinger', 'archer', 'heavy', 'warrior'];
       } else if (balance >= CHAR_COST.rifleman) {
-        order = ['rifleman', 'archer', 'heavy', 'warrior'];
+        order = ['rifleman', 'gunslinger', 'archer', 'heavy', 'warrior'];
       } else {
         order = ['archer', 'heavy', 'warrior'];
       }
@@ -958,17 +984,7 @@ export class Game {
         this.coinBalance -= cost;
         this.notifyCoins();
       }
-      const cpuConfig = withSpawnBoosts(CHAR_CONFIGS[type]);
-      // Place the unit's tower-side body edge (not centre) at the tribe's
-      // configured spawn point so it never overlaps the tower physics body.
-      const towerSpawnX = self === 'enemy' ? this.enemyTower.spawnX : this.playerTower.spawnX;
-      const cpuSpawnX   = self === 'enemy'
-        ? towerSpawnX - cpuConfig.width / 2
-        : towerSpawnX + cpuConfig.width / 2;
-      const c = new Character(self, cpuSpawnX, spawnY, cpuConfig, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type), this.mapGroundY);
-      this.characters.push(c);
-      this.unitLayer.addChild(c.container);
-      if (self === 'player') this.hud.add(c);
+      const c = this.spawnCpuUnit(self, type, spawnY);
       if (self === 'enemy')  this.cpuStrategyInfo.decision = `Spawned ${type} #${c.id}`;
       this.resetSpawnTimer(self, pressure);
       return;
@@ -978,6 +994,24 @@ export class Game {
       this.cpuStrategyInfo.decision = `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
     }
     this.resetSpawnTimer(self, pressure);
+  }
+
+  /** Construct a CPU-side Character of `type` at the side's tower spawn point and
+   *  register it with the world. Shared by the AI spawn loop and the dev forced-type
+   *  override. Does not deduct coins or reset the spawn timer — the caller owns that. */
+  private spawnCpuUnit(self: 'player' | 'enemy', type: CharacterConfig['type'], spawnY: number): Character {
+    const cpuConfig = withSpawnBoosts(CHAR_CONFIGS[type]);
+    // Place the unit's tower-side body edge (not centre) at the tribe's
+    // configured spawn point so it never overlaps the tower physics body.
+    const towerSpawnX = self === 'enemy' ? this.enemyTower.spawnX : this.playerTower.spawnX;
+    const cpuSpawnX   = self === 'enemy'
+      ? towerSpawnX - cpuConfig.width / 2
+      : towerSpawnX + cpuConfig.width / 2;
+    const c = new Character(self, cpuSpawnX, spawnY, cpuConfig, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type), this.mapGroundY);
+    this.characters.push(c);
+    this.unitLayer.addChild(c.container);
+    if (self === 'player') this.hud.add(c);
+    return c;
   }
 
   private allocateCharId(): number {
@@ -1988,7 +2022,7 @@ export class Game {
     const noteDecision = (msg: string) => { if (self === 'enemy') this.cpuStrategyInfo.decision = msg; };
 
     const isMelee = (type: string) => type === 'warrior' || type === 'knight' || type === 'heavy' || type === 'tanker';
-    const isRangedUnit = (type: string) => type === 'archer' || type === 'rifleman' || type === 'sniper';
+    const isRangedUnit = (type: string) => type === 'archer' || type === 'rifleman' || type === 'gunslinger' || type === 'sniper';
 
     // ── Low-HP retreat (highest priority) ─────────────────────────────────────
     // A combat unit that drops to critical HP falls back to 'defend', pulling it
