@@ -2094,14 +2094,18 @@ export class Character {
     const qy = Math.round(toFloorY);
     this.pathAge += dt;
     const navStale = navGraph.version !== this.pathNavVersion;
-    // Only reuse a path that still has unconsumed steps. A *fully consumed*
-    // path (pathIdx === path.length) can occur when followPath skips every
-    // remaining step as floor-mismatched (e.g. the degenerate single-walk
-    // fallback whose floorY targets a surface the character isn't standing on).
-    // Treating that as a live path froze the unit in place until PATH_TTL
-    // elapsed — gate on pathIdx so an exhausted path always forces a rebuild.
-    const hasLivePath = this.pathIdx < this.path.length;
-    if (!navStale && this.pathAge < this.PATH_TTL && hasLivePath) {
+    // A fully-consumed path (pathIdx at the end) that did NOT leave the character
+    // at the destination means the last plan couldn't be executed from here — the
+    // classic case is a unit stranded on a platform whose only step was an
+    // un-walkable cross-floor fallback. followPath bumps pathIdx past it without
+    // moving, and the old `path.length > 0` reuse guard then kept handing back the
+    // dead path forever. Force a fresh A* from the current position instead.
+    // (Reuse still applies when the character is parked AT its goal, so harass /
+    // defend units idling on a rally point don't thrash-rebuild every tick.)
+    const consumedButNotArrived =
+      this.pathIdx >= this.path.length &&
+      (Math.abs(this.x - toX) > 12 || Math.abs(this.floorY - toFloorY) > 20);
+    if (!navStale && this.pathAge < this.PATH_TTL && this.path.length > 0 && !consumedButNotArrived) {
       // Cheap path-reuse: same 20-px grid cell as the last request.
       if (qx === this.pathTargetQx && qy === this.pathTargetQy) return;
       // Hysteresis: harass/defend pass live moving-enemy positions every tick,
@@ -2589,9 +2593,17 @@ export class Character {
     const atkNearX = Math.min(homeTowerFrontX, homeTowerFrontX + dir * DEFEND_PURSUIT_RANGE);
     const atkFarX  = Math.max(homeTowerFrontX, homeTowerFrontX + dir * DEFEND_PURSUIT_RANGE);
 
+    // Auto-attack: the nearest enemy within personal weapon range with a clean
+    // shot (nearestEnemy applies LOS / canSnapHit gating). A defender always
+    // fires at anything it can hit -- regardless of zone or whether another
+    // defender has already claimed it.
+    const target = this.nearestEnemy(enemies, this.config.attackRange, blocks);
+
     // Collect intruders already being pursued by other defenders so we don't
-    // dog-pile on the same enemy. Each defender exposes its pursuit target
-    // via claimedIntruder; we filter those out when picking our own target.
+    // dog-pile on the same enemy *while other threats remain*. Each defender
+    // exposes its pursuit target via claimedIntruder; we filter those out when
+    // picking our own -- but fall back to a claimed enemy below when there is
+    // nothing else to engage.
     const claimed = new Set<Character>();
     for (const c of allies) {
       if (c === this || c.isDead) continue;
@@ -2600,9 +2612,12 @@ export class Character {
       if (t) claimed.add(t);
     }
 
-    // Find the nearest *unclaimed* intruder in the attack zone. If we're
-    // already pursuing one, keep it (so the rest of the defending group can
-    // continue to ignore it).
+    // Pick an intruder to pursue, in priority order:
+    //   1. the one we're already pursuing (if alive & still in the attack zone),
+    //   2. the nearest *unclaimed* intruder in the attack zone,
+    //   3. the nearest intruder inside the *defence zone* even if another
+    //      defender already has it -- so a spare defender still engages an enemy
+    //      that has penetrated the core zone rather than idling at rally.
     let intruder: Character | null = null;
     if (this.defendTargetIntruder && !this.defendTargetIntruder.isDead &&
         this.defendTargetIntruder.x >= atkNearX && this.defendTargetIntruder.x <= atkFarX) {
@@ -2616,31 +2631,42 @@ export class Character {
         const d = Math.abs(c.x - this.x);
         if (d < minDist) { minDist = d; intruder = c; }
       }
+      // Fallback -- nothing unclaimed: engage an already-targeted enemy inside
+      // the defence zone (gang up when it is the only threat present).
+      if (!intruder) {
+        let minClaimed = Infinity;
+        for (const c of enemies) {
+          if (c.isDead) continue;
+          if (c.x < defNearX || c.x > defFarX) continue;
+          const d = Math.abs(c.x - this.x);
+          if (d < minClaimed) { minClaimed = d; intruder = c; }
+        }
+      }
+    }
+
+    // Engage: if any enemy is in weapon range, fire -- even when we have no
+    // pursuit target. This is the automatic defence of the line.
+    if (target) {
+      if (intruder) { this.defendTargetIntruder = intruder; this.defendWasPursuing = true; }
+      this.state = 'fighting';
+      this.attackEnemy(target, onFire);
+
+      // Ranged: kite back from closing melee, stay within own safe zone
+      if (this.isRanged) {
+        const isMelee = Character.isMeleeType(target.config.type);
+        if (isMelee && Math.abs(this.x - target.x) < RANGED_KITE_THRESHOLD) {
+          const retreatX = this.x - dir * this.moveSpeed * dt;
+          this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
+        }
+      }
+      return;
     }
 
     if (intruder) {
       this.defendTargetIntruder = intruder;
       this.defendWasPursuing    = true;
 
-      // Within personal attack range â€” fire (uses nearestEnemy so LOS / canSnapHit
-      // gating still applies; falls through to pursuit if the geometry blocks the shot).
-      const target = this.nearestEnemy(enemies, this.config.attackRange, blocks);
-      if (target) {
-        this.state = 'fighting';
-        this.attackEnemy(target, onFire);
-
-        // Ranged: kite back from closing melee, stay within own safe zone
-        if (this.isRanged) {
-          const isMelee = Character.isMeleeType(target.config.type);
-          if (isMelee && Math.abs(this.x - target.x) < RANGED_KITE_THRESHOLD) {
-            const retreatX = this.x - dir * this.moveSpeed * dt;
-            this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
-          }
-        }
-        return;
-      }
-
-      // Intruder in attack zone but no clean shot â€” pursue at the intruder's
+      // Intruder in zone but no clean shot -- pursue at the intruder's
       // elevation. Clamp to the *attack* zone so the defender can leave the
       // defence zone to engage, but never wanders past the pursuit boundary.
       const pursueX = Math.max(atkNearX, Math.min(atkFarX, intruder.x));
