@@ -788,6 +788,13 @@
               <input type="file" id="input-plat-skin" accept="image/*" />
               <img id="preview-plat-skin" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
               <button id="btn-clear-plat-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
+              <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:4px;">
+                <label>Tile W:</label>
+                <input type="number" id="input-plat-tile-w" style="width:80px;" placeholder="stretch" min="1" />
+                <label>Tile H:</label>
+                <input type="number" id="input-plat-tile-h" style="width:80px;" placeholder="stretch" min="1" />
+              </div>
+              <span class="hint" style="width:100%;">Leave blank to stretch the skin; set a value to tile it</span>
             </div>
             <!-- Animation: oscillate between (x, y) and (endX, endY) at the given speed -->
             <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
@@ -810,6 +817,7 @@
             <div class="section-title">Ground</div>
             <label>W:</label><input type="number" id="display-ground-w" readonly style="color:var(--muted-fg); cursor:default;" />
             <label>H:</label><input type="number" id="display-ground-h" readonly style="color:var(--muted-fg); cursor:default;" />
+            <label>Z:</label><input type="number" id="input-ground-z" step="1" style="width:80px;" title="Render order in the shared scene z-space (platforms / blocks / decor). Higher = on top." />
             <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
               <span class="skin-label">Skin (tiled)</span>
               <input type="file" id="input-ground-skin" accept="image/*" />
@@ -953,6 +961,11 @@
               <span>Infront of Characters</span>
             </label>
             <span class="hint" style="width:100%;">Off: z orders it among platforms &amp; blocks (behind characters). On: forces z = 999 so characters are always behind it.</span>
+            <div style="width:100%; display:flex; align-items:center; gap:8px; margin-top:6px;">
+              <label title="Decor transparency (0 = invisible, 100 = opaque)">Opacity:</label>
+              <input type="range" id="input-decor-opacity" min="0" max="100" step="1" value="100" style="flex:1; min-width:80px;" />
+              <span id="display-decor-opacity" style="width:42px; text-align:right; color:var(--muted-fg);">100%</span>
+            </div>
             <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
               <span class="skin-label">Skin</span>
               <input type="file" id="input-decor-skin" accept="image/*" />

@@ -15,7 +15,31 @@ export interface PlatformData {
   height:  number;
   zIndex?: number;  // render order among platforms; higher = in front (default 0)
   skin?:   string;  // data URL (data:image/...;base64,…)
+  skinTileW?: number;  // tile width  in world px — when set, skin is tiled instead of stretched (default: stretch to width)
+  skinTileH?: number;  // tile height in world px — when set, skin is tiled instead of stretched (default: stretch to height)
   anim?:   PlatformAnim;
+}
+
+// Slight rounding applied to the two TOP corners of every platform (bottom stays
+// square so platforms still read as resting flat). Mirrored in map-builder.ts.
+const PLATFORM_TOP_RADIUS = 8;
+
+/** A white mask Graphics shaped like the platform but with only the TOP corners
+ *  rounded. `extra` extends the square bottom past `height` so drop shadows drawn
+ *  below the surface survive the mask. */
+function makeRoundedTopMask(width: number, height: number, extra = 0): PIXI.Graphics {
+  const r = Math.max(0, Math.min(PLATFORM_TOP_RADIUS, width / 2, height));
+  const g = new PIXI.Graphics();
+  g.beginFill(0xffffff);
+  g.moveTo(0, height + extra);
+  g.lineTo(0, r);
+  g.arcTo(0, 0, r, 0, r);
+  g.lineTo(width - r, 0);
+  g.arcTo(width, 0, width, r, r);
+  g.lineTo(width, height + extra);
+  g.closePath();
+  g.endFill();
+  return g;
 }
 
 export class Platform {
@@ -46,15 +70,32 @@ export class Platform {
     this.gfx              = this.draw();
 
     if (data.skin) {
+      const { skinTileW, skinTileH } = this.data;
       PIXI.Assets.load<PIXI.Texture>(data.skin)
         .then(tex => {
           this.gfx.visible = false;
-          const sprite     = new PIXI.Sprite(tex);
-          sprite.x      = 0;
-          sprite.y      = 0;
-          sprite.width  = this.data.width;
-          sprite.height = this.data.height;
-          this.container.addChildAt(sprite, 0);
+          let layer: PIXI.Sprite | PIXI.TilingSprite;
+          if (skinTileW !== undefined || skinTileH !== undefined) {
+            // Tiled skin: repeat the image across the platform instead of stretching.
+            const ts = new PIXI.TilingSprite(tex, this.data.width, this.data.height);
+            ts.x = 0;
+            ts.y = 0;
+            if (skinTileW !== undefined) ts.tileScale.x = skinTileW / tex.width;
+            if (skinTileH !== undefined) ts.tileScale.y = skinTileH / tex.height;
+            layer = ts;
+          } else {
+            const sprite  = new PIXI.Sprite(tex);
+            sprite.x      = 0;
+            sprite.y      = 0;
+            sprite.width  = this.data.width;
+            sprite.height = this.data.height;
+            layer = sprite;
+          }
+          this.container.addChildAt(layer, 0);
+          // Round the top corners by clipping the skin to a rounded-top mask.
+          const mask = makeRoundedTopMask(this.data.width, this.data.height);
+          this.container.addChild(mask);
+          layer.mask = mask;
         })
         .catch(() => { /* keep Graphics fallback */ });
     }
@@ -118,6 +159,11 @@ export class Platform {
     g.endFill();
 
     this.container.addChild(g);
+    // Clip the top corners round. The mask extends past the bottom so the drop
+    // shadow (drawn below `height`) is preserved.
+    const mask = makeRoundedTopMask(width, height, 8);
+    this.container.addChild(mask);
+    g.mask = mask;
     return g;
   }
 }

@@ -255,6 +255,135 @@ class MuzzleGlow implements VfxEffect {
   }
 }
 
+// ── ShotgunBlast ──────────────────────────────────────────────────────────────
+// The shock trooper's shotgun: a punchy muzzle flash plus a forward-fanning cone
+// of pellet streaks and a drifting powder-smoke puff. The pellet spread visualises
+// the AoE cone the blast actually strikes (same forward reach as attackRange).
+// Anchored in world space at the gun tip — does not follow the shooter.
+
+const SHOTGUN_DUR       = 0.24;    // overall lifetime (smoke is the longest layer)
+const SHOTGUN_PELLETS   = 16;
+const SHOTGUN_CONE_HALF = 0.42;    // half-angle of the pellet fan (radians) ≈ 24°
+const SHOTGUN_TAIL      = 0.030;   // seconds of velocity drawn as each pellet's streak
+const SHOTGUN_FLASH_DUR = 0.10;    // muzzle flash holds briefly then snaps out
+const SHOTGUN_RING_DUR  = 0.17;    // concussive shockwave ring lifetime
+
+interface Pellet { x: number; y: number; vx: number; vy: number; }
+
+class ShotgunBlast implements VfxEffect {
+  container: PIXI.Container;
+  isDone   = false;
+  private smokeG:  PIXI.Graphics;  // normal-blend powder smoke (behind)
+  private ringG:   PIXI.Graphics;  // additive concussive shockwave ring
+  private pelletG: PIXI.Graphics;  // additive pellet streaks
+  private flashG:  PIXI.Graphics;  // additive muzzle flash (front)
+  private life = 0;
+  private dir:    1 | -1;
+  private range:  number;
+  private pellets: Pellet[] = [];
+  private puffs:   { x: number; y: number; r: number }[] = [];
+
+  constructor(x: number, y: number, dir: 1 | -1, range: number) {
+    this.dir = dir;
+    this.range = range;
+    this.container = new PIXI.Container();
+    this.container.x = x;
+    this.container.y = y;
+
+    this.smokeG  = new PIXI.Graphics();
+    this.ringG   = new PIXI.Graphics(); this.ringG.blendMode   = PIXI.BLEND_MODES.ADD;
+    this.pelletG = new PIXI.Graphics(); this.pelletG.blendMode = PIXI.BLEND_MODES.ADD;
+    this.flashG  = new PIXI.Graphics(); this.flashG.blendMode  = PIXI.BLEND_MODES.ADD;
+    this.container.addChild(this.smokeG, this.ringG, this.pelletG, this.flashG);
+
+    // Pellets fan out within the cone, the fastest just reaching `range` by end of
+    // life. Speed varies so the spread reads as a scattered burst, not a ring.
+    const baseSpeed = range / SHOTGUN_DUR;
+    for (let i = 0; i < SHOTGUN_PELLETS; i++) {
+      const a  = (Math.random() * 2 - 1) * SHOTGUN_CONE_HALF;
+      const sp = baseSpeed * (0.55 + Math.random() * 0.5);
+      this.pellets.push({ x: 0, y: 0, vx: dir * Math.cos(a) * sp, vy: Math.sin(a) * sp });
+    }
+    // A few smoke puffs lingering at the barrel.
+    for (let i = 0; i < 3; i++) {
+      this.puffs.push({
+        x: dir * (10 + Math.random() * 14),
+        y: (Math.random() - 0.5) * 14,
+        r: 7 + Math.random() * 6,
+      });
+    }
+  }
+
+  update(dt: number): void {
+    this.life += dt;
+    const t = this.life / SHOTGUN_DUR;
+    if (t >= 1) { this.isDone = true; return; }
+
+    // ── Powder smoke (normal blend) — ramps in as the flash dies, drifts forward. ──
+    this.smokeG.clear();
+    const ramp = Math.min(1, this.life / 0.08);
+    const ma   = 0.40 * ramp * (1 - t) * (1 - t);
+    if (ma > 0.01) {
+      const grow = 0.85 + t * 1.6;
+      for (const p of this.puffs) {
+        this.smokeG.beginFill(0x6b6b6b, ma);
+        this.smokeG.drawCircle(p.x + this.dir * t * 20, p.y - t * 6, p.r * grow);
+        this.smokeG.endFill();
+      }
+    }
+
+    // ── Concussive shockwave ring (additive) — a fast forward-stretched ellipse
+    // that snaps outward then fades, giving the blast a percussive "kick". ──
+    this.ringG.clear();
+    const rt = this.life / SHOTGUN_RING_DUR;
+    if (rt < 1) {
+      const ease  = 1 - (1 - rt) * (1 - rt);            // ease-out expansion
+      const rr    = 10 + (this.range * 0.42) * ease;    // scales with the gun's reach
+      const ra    = (1 - rt) * 0.7;
+      // Stretched along the barrel (wider forward) so it reads as directional recoil.
+      this.ringG.lineStyle(Math.max(1, 5 * (1 - rt)), 0xffe2a8, ra);
+      this.ringG.drawEllipse(this.dir * rr * 0.35, 0, rr * 1.15, rr * 0.7);
+      this.ringG.lineStyle(0);
+    }
+
+    // ── Pellet streaks (additive) ──
+    this.pelletG.clear();
+    const pa = 1 - t * t;   // hold bright, fade toward the end
+    for (const p of this.pellets) { p.x += p.vx * dt; p.y += p.vy * dt; }
+    this.pelletG.lineStyle(2.3, 0xffedc0, pa);
+    for (const p of this.pellets) {
+      this.pelletG.moveTo(p.x - p.vx * SHOTGUN_TAIL, p.y - p.vy * SHOTGUN_TAIL);
+      this.pelletG.lineTo(p.x, p.y);
+    }
+    this.pelletG.lineStyle(0);
+    this.pelletG.beginFill(0xfff6df, pa);
+    for (const p of this.pellets) this.pelletG.drawCircle(p.x, p.y, 2.0);
+    this.pelletG.endFill();
+
+    // ── Muzzle flash (additive, front-loaded) ──
+    this.flashG.clear();
+    const ft = this.life / SHOTGUN_FLASH_DUR;
+    if (ft < 1) {
+      const fa   = 1 - ft;
+      const grow = 0.7 + 0.3 * fa;
+      const fwd  = this.dir;
+      this.flashG.beginFill(0xffd0a0, fa * 0.95); this.flashG.drawCircle(0, 0, 32 * grow); this.flashG.endFill();
+      this.flashG.beginFill(0xffb060, fa * 0.95); this.flashG.drawCircle(0, 0, 20 * grow); this.flashG.endFill();
+      // Forward flash star — long down-barrel spike, short rear + vertical spikes,
+      // plus a pair of diagonal spikes for a more ragged, energetic burst.
+      const spikeL = 56 * fa + 14;
+      const spikeS = 19;
+      this.flashG.beginFill(0xfff0c0, fa);
+      this.flashG.drawPolygon([ fwd * spikeL, 0,  0, -spikeS * 0.5,  -fwd * spikeS * 0.7, 0,  0, spikeS * 0.5 ]);
+      this.flashG.drawPolygon([ 0, -spikeS,  spikeS * 0.32, 0,  0, spikeS,  -spikeS * 0.32, 0 ]);
+      const dl = spikeL * 0.5;
+      this.flashG.drawPolygon([ fwd * dl, -dl * 0.5,  0, -spikeS * 0.3,  0, spikeS * 0.3,  fwd * dl, dl * 0.5 ]);
+      this.flashG.endFill();
+      this.flashG.beginFill(0xffffff, fa * 0.9); this.flashG.drawCircle(0, 0, 10 * grow); this.flashG.endFill();
+    }
+  }
+}
+
 // ── SpeedStreak ──────────────────────────────────────────────────────────────
 // A burst of horizontal lines anchored in world space as the character moves.
 // Spawned every ~50 ms while a speed power-up is active; because they stay put
@@ -498,6 +627,12 @@ export function spawnHitSpark(x: number, y: number): void {
 
 export function spawnMuzzleGlow(x: number, y: number, dir: 1 | -1 = 1): void {
   register(new MuzzleGlow(x, y, dir));
+}
+
+/** Shock trooper shotgun: muzzle flash + a forward-fanning pellet cone reaching
+ *  roughly `range` px, plus a powder-smoke puff. */
+export function spawnShotgunBlast(x: number, y: number, dir: 1 | -1, range: number): void {
+  register(new ShotgunBlast(x, y, dir, range));
 }
 
 export function spawnSpeedStreak(x: number, feetY: number, charH: number, dir: 1 | -1): void {

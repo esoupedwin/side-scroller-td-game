@@ -28,16 +28,19 @@ type DragKind =
   | { kind: 'platform-right';  idx: number; origW: number }
   | { kind: 'platform-top';    idx: number; origY: number; origH: number }
   | { kind: 'platform-bottom'; idx: number }
+  | { kind: 'platform-corner'; idx: number; hx: 'l' | 'r'; hy: 't' | 'b'; origX: number; origY: number; origW: number; origH: number }
   | { kind: 'block-move';      idx: number; ox: number; oy: number }
   | { kind: 'block-left';      idx: number; origX: number; origW: number }
   | { kind: 'block-right';     idx: number; origW: number }
   | { kind: 'block-top';       idx: number; origY: number; origH: number }
   | { kind: 'block-bottom';    idx: number }
+  | { kind: 'block-corner';    idx: number; hx: 'l' | 'r'; hy: 't' | 'b'; origX: number; origY: number; origW: number; origH: number }
   | { kind: 'decor-move';      idx: number; ox: number; oy: number }
   | { kind: 'decor-left';      idx: number; origX: number; origW: number }
   | { kind: 'decor-right';     idx: number; origW: number }
   | { kind: 'decor-top';       idx: number; origY: number; origH: number }
   | { kind: 'decor-bottom';    idx: number; origY: number; origH: number }
+  | { kind: 'decor-corner';    idx: number; hx: 'l' | 'r'; hy: 't' | 'b'; origX: number; origY: number; origW: number; origH: number }
   | { kind: 'coinbox';         ox: number; oy: number }
   | { kind: 'tower-player';   ox: number; oy: number }
   | { kind: 'tower-enemy';    ox: number; oy: number };
@@ -273,48 +276,6 @@ class MapBuilder {
       ctx.fill();
     }
 
-    // Ground (world x-span only) — bottom flush with map bottom; top = worldH - groundStripH
-    const groundStripH = this.groundStripH;
-    const groundTopY   = this.groundTopY;
-    const groundH      = this.sh(groundStripH);
-    ctx.fillStyle = '#4a7c59';
-    ctx.fillRect(wx0, this.wy(groundTopY), ww, groundH);
-    ctx.fillStyle = '#3d6b4a';
-    ctx.fillRect(wx0, this.wy(groundTopY), ww, Math.min(this.sh(6), groundH));
-
-    // Ground skin (tiling pattern)
-    if (m.groundSkin) {
-      const img = this.getSkinImage(m.groundSkin);
-      if (img.complete && img.naturalWidth > 0) {
-        const pat = ctx.createPattern(img, 'repeat');
-        if (pat) {
-          const tileW = m.groundSkinTileW ?? img.naturalWidth;
-          const tileH = m.groundSkinTileH ?? img.naturalHeight;
-          pat.setTransform(new DOMMatrix([
-            tileW / img.naturalWidth,  0,
-            0, tileH / img.naturalHeight,
-            0, 0,
-          ]));
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(wx0, this.wy(groundTopY), ww, groundH);
-          ctx.clip();
-          ctx.translate(this.panX, this.wy(groundTopY));
-          ctx.scale(this.scale, this.scale);
-          ctx.fillStyle = pat;
-          ctx.fillRect(0, 0, m.worldWidth, groundStripH);
-          ctx.restore();
-        }
-      }
-    }
-
-    // Ground selection highlight
-    if (this.selectedGround) {
-      ctx.strokeStyle = '#4ade80';
-      ctx.lineWidth   = 2;
-      ctx.strokeRect(wx0, this.wy(groundTopY), ww, groundH);
-    }
-
     // World border
     ctx.strokeStyle = '#2a2a3a';
     ctx.lineWidth   = 1;
@@ -357,17 +318,24 @@ class MapBuilder {
 
     // Unified z-sorted draw list: blocks, platforms, and towers share the same
     // z-index space so towers can be layered relative to environment elements.
-    type LayerKind = 'block' | 'platform' | 'decor' | 'tower-player' | 'tower-enemy';
+    type LayerKind = 'block' | 'platform' | 'decor' | 'ground' | 'tower-player' | 'tower-enemy';
     const layerItems: { kind: LayerKind; idx: number; z: number }[] = [];
     for (let i = 0; i < m.blocks.length;    i++) layerItems.push({ kind: 'block',        idx: i, z: m.blocks[i].zIndex    ?? 0 });
     for (let i = 0; i < m.platforms.length; i++) layerItems.push({ kind: 'platform',     idx: i, z: m.platforms[i].zIndex ?? 0 });
     const decor = m.decor ?? [];
     for (let i = 0; i < decor.length;       i++) layerItems.push({ kind: 'decor',        idx: i, z: decor[i].zIndex      ?? 0 });
+    // Ground sorts in the same scene z-space. Pushed after decor so that, at an
+    // equal z, it renders on top of scene props (matches Game.ts build order).
+    layerItems.push({ kind: 'ground',       idx: 0, z: m.groundZ ?? 0 });
     layerItems.push({ kind: 'tower-player', idx: 0, z: m.playerTowerZ ?? 0 });
     layerItems.push({ kind: 'tower-enemy',  idx: 1, z: m.enemyTowerZ  ?? 0 });
     layerItems.sort((a, b) => a.z - b.z);
 
     for (const item of layerItems) {
+      if (item.kind === 'ground') {
+        this.drawGroundStrip(ctx, wx0, ww);
+        continue;
+      }
       if (item.kind === 'tower-player') {
         drawTower(m.playerTowerX, pBaseY, '#00b4d8', '#007fa3', this.selectedTower === 'player', false, pTpl.skin, pTpl.w, pTpl.h);
         continue;
@@ -413,6 +381,7 @@ class MapBuilder {
           const hw2 = 10, hh2 = 6;
           ctx.fillRect(bx + bw / 2 - hw2 / 2, by - hh2 / 2,      hw2, hh2);
           ctx.fillRect(bx + bw / 2 - hw2 / 2, by + bh - hh2 / 2, hw2, hh2);
+          this.drawCornerHandles(ctx, bx, by, bw, bh);
         }
 
         if (b.anim) {
@@ -430,6 +399,9 @@ class MapBuilder {
         const dw  = this.sw(d.width);
         const dh  = this.sh(d.height);
 
+        // Apply the decor's opacity to its visual only — selection chrome below
+        // stays fully opaque so faint decor is still easy to grab.
+        ctx.globalAlpha = d.opacity ?? 1;
         if (d.skin) {
           const img = this.getSkinImage(d.skin);
           if (img.complete && img.naturalWidth > 0) {
@@ -448,6 +420,7 @@ class MapBuilder {
           ctx.strokeRect(dx, dy, dw, dh);
           ctx.setLineDash([]);
         }
+        ctx.globalAlpha = 1;
 
         if (sel) {
           ctx.strokeStyle = '#34d399';
@@ -460,6 +433,7 @@ class MapBuilder {
           const hw2 = 10, hh2 = 6;
           ctx.fillRect(dx + dw / 2 - hw2 / 2, dy - hh2 / 2,      hw2, hh2);
           ctx.fillRect(dx + dw / 2 - hw2 / 2, dy + dh - hh2 / 2, hw2, hh2);
+          this.drawCornerHandles(ctx, dx, dy, dw, dh);
         }
         continue;
       }
@@ -476,17 +450,43 @@ class MapBuilder {
       if (p.skin) {
         const img = this.getSkinImage(p.skin);
         if (img.complete && img.naturalWidth > 0) {
-          ctx.drawImage(img, px, py, pw, ph);
+          // Clip every skin draw to the rounded-top silhouette.
+          ctx.save();
+          this.roundedTopRectPath(ctx, px, py, pw, ph);
+          ctx.clip();
+          if (p.skinTileW !== undefined || p.skinTileH !== undefined) {
+            // Tiled skin — repeat the image across the platform, matching the
+            // ground-skin tiling approach (DOMMatrix-transformed canvas pattern).
+            const pat = ctx.createPattern(img, 'repeat');
+            if (pat) {
+              const tileW = p.skinTileW ?? img.naturalWidth;
+              const tileH = p.skinTileH ?? img.naturalHeight;
+              pat.setTransform(new DOMMatrix([
+                tileW / img.naturalWidth,  0,
+                0, tileH / img.naturalHeight,
+                0, 0,
+              ]));
+              ctx.translate(px, py);
+              ctx.scale(this.scale, this.scale);
+              ctx.fillStyle = pat;
+              ctx.fillRect(0, 0, p.width, p.height);
+            } else {
+              ctx.drawImage(img, px, py, pw, ph);
+            }
+          } else {
+            ctx.drawImage(img, px, py, pw, ph);
+          }
+          ctx.restore();
         } else {
           ctx.fillStyle = '#444';
-          ctx.fillRect(px, py, pw, ph);
+          this.roundedTopRectPath(ctx, px, py, pw, ph);
+          ctx.fill();
         }
       } else {
         ctx.fillStyle   = sel ? '#f5c542' : '#8B5E3C';
         ctx.strokeStyle = sel ? '#e0a500' : '#5c3322';
         ctx.lineWidth   = sel ? 2 : 1;
-        ctx.beginPath();
-        ctx.rect(px, py, pw, ph);
+        this.roundedTopRectPath(ctx, px, py, pw, ph);
         ctx.fill();
         ctx.stroke();
       }
@@ -502,11 +502,20 @@ class MapBuilder {
         const hw2 = 10, hh2 = 6;
         ctx.fillRect(px + pw / 2 - hw2 / 2, py - hh2 / 2,      hw2, hh2);
         ctx.fillRect(px + pw / 2 - hw2 / 2, py + ph - hh2 / 2, hw2, hh2);
+        this.drawCornerHandles(ctx, px, py, pw, ph);
       }
 
       if (p.anim) {
         this.drawAnimGhost(ctx, p.x, p.y, p.anim.endX, p.anim.endY, p.width, p.height, sel);
       }
+    }
+
+    // Ground selection highlight — drawn after the z-sorted pass so it stays
+    // visible regardless of where the ground sorts.
+    if (this.selectedGround) {
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth   = 2;
+      ctx.strokeRect(wx0, this.wy(this.groundTopY), ww, this.sh(this.groundStripH));
     }
 
     // Coin box
@@ -738,6 +747,44 @@ class MapBuilder {
     this.syncSkinPreview('preview-ground-skin', 'btn-clear-ground-skin', this.map.groundSkin, 'input-ground-skin');
   }
 
+  /** Draw the green ground strip + tiled skin. Called from the z-sorted draw pass. */
+  private drawGroundStrip(ctx: CanvasRenderingContext2D, wx0: number, ww: number) {
+    const m            = this.map;
+    const groundStripH = this.groundStripH;
+    const groundTopY   = this.groundTopY;
+    const groundH      = this.sh(groundStripH);
+    ctx.fillStyle = '#4a7c59';
+    ctx.fillRect(wx0, this.wy(groundTopY), ww, groundH);
+    ctx.fillStyle = '#3d6b4a';
+    ctx.fillRect(wx0, this.wy(groundTopY), ww, Math.min(this.sh(6), groundH));
+
+    // Ground skin (tiling pattern)
+    if (m.groundSkin) {
+      const img = this.getSkinImage(m.groundSkin);
+      if (img.complete && img.naturalWidth > 0) {
+        const pat = ctx.createPattern(img, 'repeat');
+        if (pat) {
+          const tileW = m.groundSkinTileW ?? img.naturalWidth;
+          const tileH = m.groundSkinTileH ?? img.naturalHeight;
+          pat.setTransform(new DOMMatrix([
+            tileW / img.naturalWidth,  0,
+            0, tileH / img.naturalHeight,
+            0, 0,
+          ]));
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(wx0, this.wy(groundTopY), ww, groundH);
+          ctx.clip();
+          ctx.translate(this.panX, this.wy(groundTopY));
+          ctx.scale(this.scale, this.scale);
+          ctx.fillStyle = pat;
+          ctx.fillRect(0, 0, m.worldWidth, groundStripH);
+          ctx.restore();
+        }
+      }
+    }
+  }
+
   // ── Canvas interaction ────────────────────────────────────────────────────
 
   private bindCanvas() {
@@ -826,6 +873,14 @@ class MapBuilder {
       const p  = m.platforms[this.drag.idx];
       p.height = Math.max(20, Math.round(Math.min(wy, this.groundTopY) - p.y));
       this.syncInputsFromMap();
+    } else if (this.drag.kind === 'platform-corner') {
+      const p = m.platforms[this.drag.idx];
+      const { hx, hy, origX, origY, origW, origH } = this.drag;
+      if (hx === 'l') { const right = origX + origW; p.x = Math.round(Math.min(wx, right - 40)); p.width = right - p.x; }
+      else            { p.width = Math.max(40, Math.round(wx - p.x)); }
+      if (hy === 't') { const bottom = origY + origH; p.y = Math.round(Math.min(wy, bottom - 20)); p.height = bottom - p.y; }
+      else            { p.height = Math.max(20, Math.round(Math.min(wy, this.groundTopY) - p.y)); }
+      this.syncInputsFromMap();
     } else if (this.drag.kind === 'block-move') {
       const b = m.blocks[this.drag.idx];
       b.x = Math.round(wx - this.drag.ox);
@@ -850,6 +905,14 @@ class MapBuilder {
     } else if (this.drag.kind === 'block-bottom') {
       const b  = m.blocks[this.drag.idx];
       b.height = Math.max(20, Math.round(Math.min(wy, this.groundTopY) - b.y));
+      this.syncInputsFromMap();
+    } else if (this.drag.kind === 'block-corner') {
+      const b = m.blocks[this.drag.idx];
+      const { hx, hy, origX, origY, origW, origH } = this.drag;
+      if (hx === 'l') { const right = origX + origW; b.x = Math.round(Math.min(wx, right - 40)); b.width = right - b.x; }
+      else            { b.width = Math.max(40, Math.round(wx - b.x)); }
+      if (hy === 't') { const bottom = origY + origH; b.y = Math.round(Math.min(wy, bottom - 20)); b.height = bottom - b.y; }
+      else            { b.height = Math.max(20, Math.round(Math.min(wy, this.groundTopY) - b.y)); }
       this.syncInputsFromMap();
     } else if (this.drag.kind === 'decor-move') {
       const d = (m.decor ?? [])[this.drag.idx];
@@ -877,6 +940,15 @@ class MapBuilder {
       const d  = (m.decor ?? [])[this.drag.idx];
       d.height = Math.max(8, Math.round(wy - d.y));
       this.syncInputsFromMap();
+    } else if (this.drag.kind === 'decor-corner') {
+      const d = (m.decor ?? [])[this.drag.idx];
+      const { hx, hy, origX, origY, origW, origH } = this.drag;
+      // Decor is purely visual — free resize, no ground clamp.
+      if (hx === 'l') { const right = origX + origW; d.x = Math.round(Math.min(wx, right - 8)); d.width = right - d.x; }
+      else            { d.width = Math.max(8, Math.round(wx - d.x)); }
+      if (hy === 't') { const bottom = origY + origH; d.y = Math.round(Math.min(wy, bottom - 8)); d.height = bottom - d.y; }
+      else            { d.height = Math.max(8, Math.round(wy - d.y)); }
+      this.syncInputsFromMap();
     } else if (this.drag.kind === 'coinbox') {
       m.coinBox.x = Math.round(wx - this.drag.ox);
       m.coinBox.y = Math.min(this.groundTopY - m.coinBox.height, Math.round(wy - this.drag.oy));
@@ -895,43 +967,50 @@ class MapBuilder {
     this.canvas.style.cursor = 'grabbing';
   }
 
+  /** Trace a rect path (screen coords) with only the TOP two corners rounded.
+   *  Mirrors the in-game platform rounding (PLATFORM_TOP_RADIUS in Platform.ts). */
+  private roundedTopRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+    const r = Math.max(0, Math.min(this.sw(8), w / 2, h));
+    ctx.beginPath();
+    ctx.moveTo(x, y + h);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h);
+    ctx.closePath();
+  }
+
+  /** Draw the four white corner squares for a selected rect (screen coords). */
+  private drawCornerHandles(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+    const s = 8;
+    ctx.fillStyle = '#ffffff';
+    for (const [hx, hy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]] as const) {
+      ctx.fillRect(hx - s / 2, hy - s / 2, s, s);
+    }
+  }
+
   private hoverCursor(cx: number, cy: number, wx: number, wy: number, m: typeof this.map): string {
     const HANDLE_ZONE = 5;
 
-    // Resize handles on platforms and blocks (edges) + body (grab)
-    for (const p of m.platforms) {
-      const inX = wx >= p.x && wx <= p.x + p.width;
-      const inY = wy >= p.y && wy <= p.y + p.height;
-      if (inY && (Math.abs(cx - this.wx(p.x)) <= HANDLE_ZONE ||
-                  Math.abs(cx - this.wx(p.x + p.width)) <= HANDLE_ZONE))
-        return 'ew-resize';
-      if (inX && (Math.abs(cy - this.wy(p.y)) <= HANDLE_ZONE ||
-                  Math.abs(cy - this.wy(p.y + p.height)) <= HANDLE_ZONE))
-        return 'ns-resize';
+    // Resize handles on platforms, blocks, and decor (corners + edges) + body (grab)
+    const rectCursor = (x: number, y: number, w: number, h: number): string | null => {
+      const inX = wx >= x && wx <= x + w;
+      const inY = wy >= y && wy <= y + h;
+      const atL = Math.abs(cx - this.wx(x))     <= HANDLE_ZONE;
+      const atR = Math.abs(cx - this.wx(x + w)) <= HANDLE_ZONE;
+      const atT = Math.abs(cy - this.wy(y))     <= HANDLE_ZONE;
+      const atB = Math.abs(cy - this.wy(y + h)) <= HANDLE_ZONE;
+      if ((atL && atT) || (atR && atB)) return 'nwse-resize';
+      if ((atR && atT) || (atL && atB)) return 'nesw-resize';
+      if (inY && (atL || atR)) return 'ew-resize';
+      if (inX && (atT || atB)) return 'ns-resize';
       if (inX && inY) return 'grab';
-    }
-    for (const b of m.blocks) {
-      const inX = wx >= b.x && wx <= b.x + b.width;
-      const inY = wy >= b.y && wy <= b.y + b.height;
-      if (inY && (Math.abs(cx - this.wx(b.x)) <= HANDLE_ZONE ||
-                  Math.abs(cx - this.wx(b.x + b.width)) <= HANDLE_ZONE))
-        return 'ew-resize';
-      if (inX && (Math.abs(cy - this.wy(b.y)) <= HANDLE_ZONE ||
-                  Math.abs(cy - this.wy(b.y + b.height)) <= HANDLE_ZONE))
-        return 'ns-resize';
-      if (inX && inY) return 'grab';
-    }
-    for (const d of (m.decor ?? [])) {
-      const inX = wx >= d.x && wx <= d.x + d.width;
-      const inY = wy >= d.y && wy <= d.y + d.height;
-      if (inY && (Math.abs(cx - this.wx(d.x)) <= HANDLE_ZONE ||
-                  Math.abs(cx - this.wx(d.x + d.width)) <= HANDLE_ZONE))
-        return 'ew-resize';
-      if (inX && (Math.abs(cy - this.wy(d.y)) <= HANDLE_ZONE ||
-                  Math.abs(cy - this.wy(d.y + d.height)) <= HANDLE_ZONE))
-        return 'ns-resize';
-      if (inX && inY) return 'grab';
-    }
+      return null;
+    };
+    for (const p of m.platforms)     { const c = rectCursor(p.x, p.y, p.width, p.height); if (c) return c; }
+    for (const b of m.blocks)        { const c = rectCursor(b.x, b.y, b.width, b.height); if (c) return c; }
+    for (const d of (m.decor ?? [])) { const c = rectCursor(d.x, d.y, d.width, d.height); if (c) return c; }
 
     // Coin box
     const cb = m.coinBox;
@@ -1002,6 +1081,14 @@ class MapBuilder {
         this.drag = drag;
         this.syncInputsFromMap(); this.scrollSelectionIntoView();
       };
+      const atL = Math.abs(cx - this.wx(d.x))           <= HANDLE_ZONE;
+      const atR = Math.abs(cx - this.wx(d.x + d.width)) <= HANDLE_ZONE;
+      const atT = Math.abs(cy - this.wy(d.y))           <= HANDLE_ZONE;
+      const atB = Math.abs(cy - this.wy(d.y + d.height))<= HANDLE_ZONE;
+      if ((atL || atR) && (atT || atB)) {
+        startDecor({ kind: 'decor-corner', idx: i, hx: atL ? 'l' : 'r', hy: atT ? 't' : 'b',
+                     origX: d.x, origY: d.y, origW: d.width, origH: d.height }); return;
+      }
       if (Math.abs(cx - this.wx(d.x)) <= HANDLE_ZONE && wy >= d.y && wy <= d.y + d.height) {
         startDecor({ kind: 'decor-left', idx: i, origX: d.x, origW: d.width }); return;
       }
@@ -1025,6 +1112,18 @@ class MapBuilder {
 
     for (const i of platHitOrder) {
       const p = m.platforms[i];
+      const atL = Math.abs(cx - this.wx(p.x))           <= HANDLE_ZONE;
+      const atR = Math.abs(cx - this.wx(p.x + p.width)) <= HANDLE_ZONE;
+      const atT = Math.abs(cy - this.wy(p.y))           <= HANDLE_ZONE;
+      const atB = Math.abs(cy - this.wy(p.y + p.height))<= HANDLE_ZONE;
+      if ((atL || atR) && (atT || atB)) {
+        this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
+        this.pushUndo();
+        this.drag = { kind: 'platform-corner', idx: i, hx: atL ? 'l' : 'r', hy: atT ? 't' : 'b',
+                      origX: p.x, origY: p.y, origW: p.width, origH: p.height };
+        this.syncInputsFromMap(); this.scrollSelectionIntoView();
+        return;
+      }
       if (Math.abs(cx - this.wx(p.x)) <= HANDLE_ZONE &&
           wy >= p.y && wy <= p.y + p.height) {
         this.clearSelection(); this.selected = i; this.selectedKind = 'platform';
@@ -1073,6 +1172,18 @@ class MapBuilder {
 
     for (const i of blockHitOrder) {
       const b = m.blocks[i];
+      const atL = Math.abs(cx - this.wx(b.x))           <= HANDLE_ZONE;
+      const atR = Math.abs(cx - this.wx(b.x + b.width)) <= HANDLE_ZONE;
+      const atT = Math.abs(cy - this.wy(b.y))           <= HANDLE_ZONE;
+      const atB = Math.abs(cy - this.wy(b.y + b.height))<= HANDLE_ZONE;
+      if ((atL || atR) && (atT || atB)) {
+        this.clearSelection(); this.selected = i; this.selectedKind = 'block';
+        this.pushUndo();
+        this.drag = { kind: 'block-corner', idx: i, hx: atL ? 'l' : 'r', hy: atT ? 't' : 'b',
+                      origX: b.x, origY: b.y, origW: b.width, origH: b.height };
+        this.syncInputsFromMap(); this.scrollSelectionIntoView();
+        return;
+      }
       if (Math.abs(cx - this.wx(b.x)) <= HANDLE_ZONE &&
           wy >= b.y && wy <= b.y + b.height) {
         this.clearSelection(); this.selected = i; this.selectedKind = 'block';
@@ -1368,6 +1479,13 @@ class MapBuilder {
       this.syncInputsFromMap();
     });
 
+    // Ground Z-index — sorts the ground within the shared scene z-space. Live
+    // update on every keystroke so the canvas reflects order changes in real time.
+    document.getElementById('input-ground-z')!.addEventListener('input', () => {
+      const z = parseInt((document.getElementById('input-ground-z') as HTMLInputElement).value, 10);
+      this.map.groundZ = isNaN(z) || z === 0 ? undefined : z;
+    });
+
     // Map duration inputs (minutes + seconds → durationSec)
     const readDuration = () => {
       const minStr = (document.getElementById('input-map-duration-min') as HTMLInputElement).value;
@@ -1526,6 +1644,16 @@ class MapBuilder {
       delete this.map.platforms[this.selected].skin;
       this.syncPlatformSkinPreview();
     });
+    (['w', 'h'] as const).forEach(dim => {
+      document.getElementById(`input-plat-tile-${dim}`)!.addEventListener('input', () => {
+        if (this.selected === null || this.selectedKind !== 'platform') return;
+        const p   = this.map.platforms[this.selected];
+        const val = parseInt((document.getElementById(`input-plat-tile-${dim}`) as HTMLInputElement).value, 10);
+        const key = dim === 'w' ? 'skinTileW' : 'skinTileH';
+        if (isNaN(val) || val <= 0) delete p[key];
+        else                        p[key] = val;
+      });
+    });
 
     // Block skin picker
     document.getElementById('input-block-skin')!.addEventListener('change', e => {
@@ -1590,6 +1718,9 @@ class MapBuilder {
       document.getElementById(`input-${id}`)!.addEventListener('change', () => { this.pushUndo(); this.readDecorInputs(); });
     });
     document.getElementById('input-decor-z')!.addEventListener('input', () => this.readDecorInputs());
+    // Opacity slider — live update on drag; snapshot undo once when released.
+    document.getElementById('input-decor-opacity')!.addEventListener('input', () => this.readDecorInputs());
+    document.getElementById('input-decor-opacity')!.addEventListener('change', () => this.pushUndo());
     // "Infront of Characters" — pins zIndex to DECOR_FRONT_Z (so characters always
     // render behind it); unchecking returns it to the shared scene z-space (z = 0).
     document.getElementById('input-decor-front')!.addEventListener('change', () => {
@@ -1674,9 +1805,21 @@ class MapBuilder {
       const m = this.map;
       m.decor ??= [];
       this.pushUndo();
-      // New decor defaults behind characters (z = 0, shared scene space). Use the
-      // "Infront of Characters" toggle to bring it forward.
-      m.decor.push({ id: `d${Date.now()}`, x: cxw - w / 2, y: cyw - h / 2, width: w, height: h, skin: pendingDecorSkin });
+      // Auto z-index: one above the highest scene-layer z among platforms, blocks,
+      // and (non-foreground) decor so the new decor renders on top of everything
+      // already placed instead of hiding behind it. Capped below DECOR_FRONT_Z so
+      // it still sits behind characters — use the "Infront of Characters" toggle
+      // to bring it ahead of units.
+      const sceneZ = (it: { zIndex?: number }) =>
+        (it.zIndex ?? 0) < DECOR_FRONT_Z ? (it.zIndex ?? 0) : 0;
+      const maxSceneZ = Math.max(
+        0,
+        ...m.platforms.map(sceneZ),
+        ...m.blocks.map(sceneZ),
+        ...m.decor.map(sceneZ),
+      );
+      const zIndex = Math.min(maxSceneZ + 1, DECOR_FRONT_Z - 1);
+      m.decor.push({ id: `d${Date.now()}`, x: cxw - w / 2, y: cyw - h / 2, width: w, height: h, zIndex, skin: pendingDecorSkin });
       this.clearSelection();
       this.selected     = m.decor.length - 1;
       this.selectedKind = 'decor';
@@ -1946,6 +2089,9 @@ class MapBuilder {
     d.height = Math.max(1, parseInt((document.getElementById('input-decor-h') as HTMLInputElement).value, 10));
     const z  = parseInt((document.getElementById('input-decor-z') as HTMLInputElement).value, 10);
     d.zIndex = isNaN(z) || z === 0 ? undefined : z;
+    const op = parseInt((document.getElementById('input-decor-opacity') as HTMLInputElement).value, 10);
+    d.opacity = isNaN(op) || op >= 100 ? undefined : Math.max(0, op) / 100;
+    (document.getElementById('display-decor-opacity') as HTMLElement).textContent = `${isNaN(op) ? 100 : op}%`;
   }
 
   private readCoinBoxInputs() {
@@ -2013,6 +2159,8 @@ class MapBuilder {
       (document.getElementById('input-plat-w')  as HTMLInputElement).value = String(p.width);
       (document.getElementById('input-plat-h')  as HTMLInputElement).value = String(p.height);
       (document.getElementById('input-plat-z')  as HTMLInputElement).value = String(p.zIndex ?? 0);
+      (document.getElementById('input-plat-tile-w') as HTMLInputElement).value = p.skinTileW !== undefined ? String(p.skinTileW) : '';
+      (document.getElementById('input-plat-tile-h') as HTMLInputElement).value = p.skinTileH !== undefined ? String(p.skinTileH) : '';
       this.syncAnimToUI('plat', p, p.x + p.width);
       document.getElementById('plat-label')!.textContent = `Platform ${this.selected! + 1}`;
       this.syncPlatformSkinPreview();
@@ -2041,6 +2189,9 @@ class MapBuilder {
       zInput.value    = String(d.zIndex ?? 0);
       zInput.disabled = front;  // when in front of characters, z is pinned to DECOR_FRONT_Z
       (document.getElementById('input-decor-front') as HTMLInputElement).checked = front;
+      const opPct = Math.round((d.opacity ?? 1) * 100);
+      (document.getElementById('input-decor-opacity') as HTMLInputElement).value = String(opPct);
+      (document.getElementById('display-decor-opacity') as HTMLElement).textContent = `${opPct}%`;
       document.getElementById('decor-label')!.textContent = `Decor ${this.selected! + 1}`;
       this.syncDecorSkinPreview();
     }
@@ -2049,6 +2200,7 @@ class MapBuilder {
       (document.getElementById('display-ground-h') as HTMLInputElement).value = String(this.groundStripH);
       (document.getElementById('input-ground-tile-w') as HTMLInputElement).value = m.groundSkinTileW !== undefined ? String(m.groundSkinTileW) : '';
       (document.getElementById('input-ground-tile-h') as HTMLInputElement).value = m.groundSkinTileH !== undefined ? String(m.groundSkinTileH) : '';
+      (document.getElementById('input-ground-z') as HTMLInputElement).value = String(m.groundZ ?? 0);
       this.syncGroundSkinPreview();
     }
     if (bgSel) {

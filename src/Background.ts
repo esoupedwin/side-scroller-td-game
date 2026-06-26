@@ -31,9 +31,13 @@ export function buildBackground(stage: PIXI.Container, worldWidth: number) {
   stage.addChild(g);
 }
 
-/** Ground plane — must be added to stage LAST so it renders above all game objects. */
-export function buildGround(stage: PIXI.Container, worldWidth: number, groundSkin?: string, groundSkinTileW?: number, groundSkinTileH?: number, groundY: number = GROUND_Y, worldHeight: number = GAME_HEIGHT) {
+/**
+ * Ground plane. Returned as a single container so the caller can set its
+ * `zIndex` to sort it within the shared scene z-space (platforms/blocks/decor).
+ */
+export function buildGround(stage: PIXI.Container, worldWidth: number, groundSkin?: string, groundSkinTileW?: number, groundSkinTileH?: number, groundY: number = GROUND_Y, worldHeight: number = GAME_HEIGHT): PIXI.Container {
   const stripH = worldHeight - groundY;
+  const container = new PIXI.Container();
   const g = new PIXI.Graphics();
   g.beginFill(0x4a7c59);
   g.drawRect(0, groundY, worldWidth, stripH);
@@ -41,7 +45,7 @@ export function buildGround(stage: PIXI.Container, worldWidth: number, groundSki
   g.beginFill(0x3d6b4a);
   g.drawRect(0, groundY, worldWidth, 6);
   g.endFill();
-  stage.addChild(g);
+  container.addChild(g);
 
   if (groundSkin) {
     PIXI.Assets.load<PIXI.Texture>(groundSkin)
@@ -51,10 +55,13 @@ export function buildGround(stage: PIXI.Container, worldWidth: number, groundSki
         ts.y = groundY;
         if (groundSkinTileW !== undefined) ts.tileScale.x = groundSkinTileW / tex.width;
         if (groundSkinTileH !== undefined) ts.tileScale.y = groundSkinTileH / tex.height;
-        stage.addChild(ts);
+        container.addChild(ts);
       })
       .catch(() => { /* keep Graphics fallback */ });
   }
+
+  stage.addChild(container);
+  return container;
 }
 
 export function buildTowerRangeMarkers(

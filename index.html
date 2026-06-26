@@ -434,6 +434,7 @@
       #spawn-warrior-btn  { background: linear-gradient(135deg, #00b4d8, #0077b6); box-shadow: 0 4px 12px rgba(0,180,216,0.45); }
       #spawn-archer-btn   { background: linear-gradient(135deg, #43aa8b, #2d7a60); box-shadow: 0 4px 12px rgba(67,170,139,0.45); }
       #spawn-rifleman-btn { background: linear-gradient(135deg, #7a8c42, #4a5c22); box-shadow: 0 4px 12px rgba(122,140,66,0.45); }
+      #spawn-gunslinger-btn { background: linear-gradient(135deg, #d9a514, #8a6608); box-shadow: 0 4px 12px rgba(184,134,11,0.45); }
       #spawn-sniper-btn   { background: linear-gradient(135deg, #e07b39, #a8521a); box-shadow: 0 4px 12px rgba(224,123,57,0.45); }
       #spawn-viking-btn   { background: linear-gradient(135deg, #7a9e7e, #3d6642); box-shadow: 0 4px 12px rgba(122,158,126,0.45); }
       #spawn-shocktrooper-btn { background: linear-gradient(135deg, #c25b3a, #7a2f18); box-shadow: 0 4px 12px rgba(194,91,58,0.45); }
@@ -656,6 +657,10 @@
           <span>🔫 Rifleman</span>
           <span class="btn-cost" id="rifleman-cost"></span>
         </button>
+        <button id="spawn-gunslinger-btn" class="spawn-btn">
+          <span>🤠 Gunslinger</span>
+          <span class="btn-cost" id="gunslinger-cost"></span>
+        </button>
         <button id="spawn-sniper-btn" class="spawn-btn">
           <span>🎯 Sniper</span>
           <span class="btn-cost" id="sniper-cost"></span>
@@ -777,6 +782,10 @@
                 <option value="promote">Promote</option>
               </select>
               <button id="dev-drop-powerup-btn" class="dev-btn">Drop</button>
+            </div>
+            <div class="dev-item" style="gap:4px;">
+              <span class="dev-item-label">CPU buys</span>
+              <select id="dev-cpu-force-select" class="dev-select" style="max-width:110px;"></select>
             </div>
           </div>
         </div>
