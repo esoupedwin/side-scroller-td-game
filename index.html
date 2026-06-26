@@ -451,6 +451,60 @@
       #game-over p  { font-size: 18px; margin-top: 8px; color: #ccc; }
       #restart-btn { margin-top: 16px; pointer-events: all; background: #e63946; color: #fff; border: none; border-radius: 8px; padding: 10px 28px; font-size: 16px; font-weight: 700; cursor: pointer; }
 
+      /* ── Pause menu (Esc) ───────────────────────────────────────────────── */
+      #pause-menu {
+        position: fixed; inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(3px);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 250;
+      }
+      .pm-card {
+        background: rgba(18, 22, 30, 0.95);
+        border: 1px solid rgba(120, 160, 200, 0.35);
+        border-radius: 12px;
+        box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6);
+        color: #e6edf5;
+        width: min(440px, 92vw);
+        padding: 26px 30px;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+      }
+      .pm-view { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+      .pm-title {
+        margin: 0 0 6px; text-align: center;
+        font-size: 26px; font-weight: 800; letter-spacing: 0.06em;
+      }
+      .pm-btn {
+        display: block; width: 100%;
+        background: linear-gradient(135deg, #1f6feb, #0d47a1);
+        color: #fff; border: none; border-radius: 8px;
+        padding: 13px 18px; font-size: 16px; font-weight: 700;
+        cursor: pointer; transition: filter 0.12s ease;
+      }
+      .pm-btn:hover { filter: brightness(1.12); }
+      .pm-btn-secondary { background: linear-gradient(135deg, #444b57, #2b303a); margin-top: 4px; }
+      .pm-hint { margin: 6px 0 0; text-align: center; font-size: 12px; color: #8aa0b6; font-style: italic; }
+      .pm-keys-list { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 8px; }
+      .pm-key-row {
+        display: flex; align-items: center; gap: 12px;
+        padding: 5px 4px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      .pm-key {
+        flex: 0 0 92px; text-align: center;
+        font-family: 'Courier New', monospace; font-size: 12px; font-weight: 700;
+        color: #cfe2ff;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 5px; padding: 4px 6px;
+      }
+      .pm-key-desc { font-size: 13px; color: #c4ccd6; }
+      .pm-key-section {
+        margin-top: 10px; margin-bottom: 2px;
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+        color: #ffcc66;
+      }
+
       /* ── Loading screen ─────────────────────────────────────────────────────── */
       #loading-screen {
         position: fixed;
@@ -801,6 +855,38 @@
             <select id="dev-map-select" class="dev-select"></select>
             <button id="dev-load-map-btn" class="dev-btn">Load</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Pause menu (Esc key) ─────────────────────────────────────────── -->
+    <div id="pause-menu" style="display:none;">
+      <div class="pm-card">
+        <!-- Main view -->
+        <div id="pm-main" class="pm-view">
+          <h2 class="pm-title">Paused</h2>
+          <button id="pm-resume-btn" class="pm-btn">▶ Resume</button>
+          <button id="pm-restart-btn" class="pm-btn">↻ Restart Game</button>
+          <button id="pm-keys-btn" class="pm-btn">⌨ Key Bindings</button>
+          <p class="pm-hint">Press Esc to resume</p>
+        </div>
+        <!-- Key bindings view -->
+        <div id="pm-keys" class="pm-view" style="display:none;">
+          <h2 class="pm-title">Key Bindings</h2>
+          <div class="pm-keys-list">
+            <div class="pm-key-row"><span class="pm-key">Space</span><span class="pm-key-desc">Pause / resume</span></div>
+            <div class="pm-key-row"><span class="pm-key">Esc</span><span class="pm-key-desc">Open this menu</span></div>
+            <div class="pm-key-row"><span class="pm-key">Z</span><span class="pm-key-desc">Character command panel (slow-mo)</span></div>
+            <div class="pm-key-row"><span class="pm-key">P</span><span class="pm-key-desc">Toggle developer bar</span></div>
+            <div class="pm-key-row"><span class="pm-key">M</span><span class="pm-key-desc">Mute / unmute</span></div>
+            <div class="pm-key-row"><span class="pm-key">← ↑ ↓ →</span><span class="pm-key-desc">Pan the camera</span></div>
+            <div class="pm-key-section">Debug / Cheats</div>
+            <div class="pm-key-row"><span class="pm-key">B</span><span class="pm-key-desc">Toggle collision boxes &amp; range markers</span></div>
+            <div class="pm-key-row"><span class="pm-key">K</span><span class="pm-key-desc">Grant coins to player</span></div>
+            <div class="pm-key-row"><span class="pm-key">L</span><span class="pm-key-desc">Grant coins to CPU</span></div>
+            <div class="pm-key-row"><span class="pm-key">J</span><span class="pm-key-desc">Force a coin drop</span></div>
+          </div>
+          <button id="pm-back-btn" class="pm-btn pm-btn-secondary">← Back</button>
         </div>
       </div>
     </div>

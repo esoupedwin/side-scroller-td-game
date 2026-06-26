@@ -87,7 +87,59 @@ restartBtn.addEventListener('click', () => restartCurrentGame());
 // Developer bar (#dev-panel) is hidden by default; P toggles its visibility.
 const devPanel = document.getElementById('dev-panel')!;
 
+// ── Pause menu (Esc) ───────────────────────────────────────────────────────
+// Esc pauses the game and shows a centered menu with Restart and Key Bindings.
+const pauseMenu  = document.getElementById('pause-menu')!;
+const pmMainView = document.getElementById('pm-main')!;
+const pmKeysView = document.getElementById('pm-keys')!;
+const cmdModalEl = document.getElementById('cmd-modal')!;
+let pauseMenuOpen   = false;
+let pauseMenuPaused = false;   // true when the menu itself initiated the pause
+
+function showPauseMenuMain() {
+  pmMainView.style.display = 'flex';
+  pmKeysView.style.display = 'none';
+}
+
+function openPauseMenu() {
+  if (pauseMenuOpen || gameOver) return;
+  pauseMenuOpen = true;
+  showPauseMenuMain();
+  pauseMenu.style.display = 'flex';
+  if (!game.paused) { game.togglePause(); pauseMenuPaused = true; }
+}
+
+function closePauseMenu() {
+  if (!pauseMenuOpen) return;
+  pauseMenuOpen = false;
+  pauseMenu.style.display = 'none';
+  if (pauseMenuPaused && game.paused) game.togglePause();   // resume only if we paused it
+  pauseMenuPaused = false;
+}
+
+document.getElementById('pm-resume-btn')!.addEventListener('click', () => closePauseMenu());
+document.getElementById('pm-restart-btn')!.addEventListener('click', () => {
+  // reset() clears the pause flag, so just drop our menu state and restart.
+  pauseMenuOpen = false;
+  pauseMenuPaused = false;
+  pauseMenu.style.display = 'none';
+  restartCurrentGame();
+});
+document.getElementById('pm-keys-btn')!.addEventListener('click', () => {
+  pmMainView.style.display = 'none';
+  pmKeysView.style.display = 'flex';
+});
+document.getElementById('pm-back-btn')!.addEventListener('click', showPauseMenuMain);
+// Click the backdrop (outside the card) to resume.
+pauseMenu.addEventListener('click', (e) => { if (e.target === pauseMenu) closePauseMenu(); });
+
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    // The Z command modal manages its own Esc-to-close (handler registered later).
+    if (cmdModalEl.style.display !== 'none') return;
+    if (pauseMenuOpen) closePauseMenu(); else openPauseMenu();
+    return;
+  }
   if (e.key === 'p' || e.key === 'P') {
     devPanel.style.display = devPanel.style.display === 'none' ? 'flex' : 'none';
   }
@@ -95,6 +147,7 @@ window.addEventListener('keydown', (e) => {
   // focused spawn button from being "clicked" by the space key.
   if (e.code === 'Space' || e.key === ' ') {
     e.preventDefault();
+    if (pauseMenuOpen) return;   // the menu owns the pause state while it's open
     game.togglePause();
     pauseOverlay.style.display  = game.paused ? 'block'   : 'none';
     uiOverlay.style.visibility  = game.paused ? 'hidden'  : 'visible';
