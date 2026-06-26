@@ -24,6 +24,7 @@ export interface DecorData {
   // Render order in the shared scene z-space (same space as platforms & blocks).
   // zIndex >= DECOR_FRONT_Z renders in front of characters; otherwise behind them.
   zIndex?: number;
+  opacity?: number; // 0 (transparent) .. 1 (opaque); default 1
   skin?:   string;  // data URL (data:image/...;base64,…)
 }
 
@@ -37,6 +38,7 @@ export class Decor {
 
     this.container        = new PIXI.Container();
     this.container.zIndex = this.data.zIndex ?? 0;
+    this.container.alpha  = this.data.opacity ?? 1;
     this.container.x      = this.data.x;
     this.container.y      = this.data.y;
     this.gfx              = this.drawPlaceholder();

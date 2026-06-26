@@ -399,6 +399,9 @@ class MapBuilder {
         const dw  = this.sw(d.width);
         const dh  = this.sh(d.height);
 
+        // Apply the decor's opacity to its visual only — selection chrome below
+        // stays fully opaque so faint decor is still easy to grab.
+        ctx.globalAlpha = d.opacity ?? 1;
         if (d.skin) {
           const img = this.getSkinImage(d.skin);
           if (img.complete && img.naturalWidth > 0) {
@@ -417,6 +420,7 @@ class MapBuilder {
           ctx.strokeRect(dx, dy, dw, dh);
           ctx.setLineDash([]);
         }
+        ctx.globalAlpha = 1;
 
         if (sel) {
           ctx.strokeStyle = '#34d399';
@@ -1714,6 +1718,9 @@ class MapBuilder {
       document.getElementById(`input-${id}`)!.addEventListener('change', () => { this.pushUndo(); this.readDecorInputs(); });
     });
     document.getElementById('input-decor-z')!.addEventListener('input', () => this.readDecorInputs());
+    // Opacity slider — live update on drag; snapshot undo once when released.
+    document.getElementById('input-decor-opacity')!.addEventListener('input', () => this.readDecorInputs());
+    document.getElementById('input-decor-opacity')!.addEventListener('change', () => this.pushUndo());
     // "Infront of Characters" — pins zIndex to DECOR_FRONT_Z (so characters always
     // render behind it); unchecking returns it to the shared scene z-space (z = 0).
     document.getElementById('input-decor-front')!.addEventListener('change', () => {
@@ -2082,6 +2089,9 @@ class MapBuilder {
     d.height = Math.max(1, parseInt((document.getElementById('input-decor-h') as HTMLInputElement).value, 10));
     const z  = parseInt((document.getElementById('input-decor-z') as HTMLInputElement).value, 10);
     d.zIndex = isNaN(z) || z === 0 ? undefined : z;
+    const op = parseInt((document.getElementById('input-decor-opacity') as HTMLInputElement).value, 10);
+    d.opacity = isNaN(op) || op >= 100 ? undefined : Math.max(0, op) / 100;
+    (document.getElementById('display-decor-opacity') as HTMLElement).textContent = `${isNaN(op) ? 100 : op}%`;
   }
 
   private readCoinBoxInputs() {
@@ -2179,6 +2189,9 @@ class MapBuilder {
       zInput.value    = String(d.zIndex ?? 0);
       zInput.disabled = front;  // when in front of characters, z is pinned to DECOR_FRONT_Z
       (document.getElementById('input-decor-front') as HTMLInputElement).checked = front;
+      const opPct = Math.round((d.opacity ?? 1) * 100);
+      (document.getElementById('input-decor-opacity') as HTMLInputElement).value = String(opPct);
+      (document.getElementById('display-decor-opacity') as HTMLElement).textContent = `${opPct}%`;
       document.getElementById('decor-label')!.textContent = `Decor ${this.selected! + 1}`;
       this.syncDecorSkinPreview();
     }

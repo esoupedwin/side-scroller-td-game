@@ -961,6 +961,11 @@
               <span>Infront of Characters</span>
             </label>
             <span class="hint" style="width:100%;">Off: z orders it among platforms &amp; blocks (behind characters). On: forces z = 999 so characters are always behind it.</span>
+            <div style="width:100%; display:flex; align-items:center; gap:8px; margin-top:6px;">
+              <label title="Decor transparency (0 = invisible, 100 = opaque)">Opacity:</label>
+              <input type="range" id="input-decor-opacity" min="0" max="100" step="1" value="100" style="flex:1; min-width:80px;" />
+              <span id="display-decor-opacity" style="width:42px; text-align:right; color:var(--muted-fg);">100%</span>
+            </div>
             <div style="width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
               <span class="skin-label">Skin</span>
               <input type="file" id="input-decor-skin" accept="image/*" />
