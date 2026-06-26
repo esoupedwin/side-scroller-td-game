@@ -537,8 +537,10 @@ export class Game {
       },
     ];
 
-    // Ground plane — drawn above all game objects so units appear grounded.
-    buildGround(this.world, m.worldWidth, m.groundSkin, m.groundSkinTileW, m.groundSkinTileH, this.mapGroundY, m.worldHeight ?? GAME_HEIGHT);
+    // Ground plane — sorts within the shared scene z-space (platforms/blocks/
+    // decor) via groundZ, so decor can be layered in front of or behind it.
+    const groundContainer = buildGround(sceneLayer, m.worldWidth, m.groundSkin, m.groundSkinTileW, m.groundSkinTileH, this.mapGroundY, m.worldHeight ?? GAME_HEIGHT);
+    groundContainer.zIndex = m.groundZ ?? 0;
 
     // Debug overlay — drawn on top of everything in world space.
     this.collisionDebugLayer = new PIXI.Graphics();

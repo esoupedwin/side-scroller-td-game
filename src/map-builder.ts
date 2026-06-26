@@ -276,48 +276,6 @@ class MapBuilder {
       ctx.fill();
     }
 
-    // Ground (world x-span only) — bottom flush with map bottom; top = worldH - groundStripH
-    const groundStripH = this.groundStripH;
-    const groundTopY   = this.groundTopY;
-    const groundH      = this.sh(groundStripH);
-    ctx.fillStyle = '#4a7c59';
-    ctx.fillRect(wx0, this.wy(groundTopY), ww, groundH);
-    ctx.fillStyle = '#3d6b4a';
-    ctx.fillRect(wx0, this.wy(groundTopY), ww, Math.min(this.sh(6), groundH));
-
-    // Ground skin (tiling pattern)
-    if (m.groundSkin) {
-      const img = this.getSkinImage(m.groundSkin);
-      if (img.complete && img.naturalWidth > 0) {
-        const pat = ctx.createPattern(img, 'repeat');
-        if (pat) {
-          const tileW = m.groundSkinTileW ?? img.naturalWidth;
-          const tileH = m.groundSkinTileH ?? img.naturalHeight;
-          pat.setTransform(new DOMMatrix([
-            tileW / img.naturalWidth,  0,
-            0, tileH / img.naturalHeight,
-            0, 0,
-          ]));
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(wx0, this.wy(groundTopY), ww, groundH);
-          ctx.clip();
-          ctx.translate(this.panX, this.wy(groundTopY));
-          ctx.scale(this.scale, this.scale);
-          ctx.fillStyle = pat;
-          ctx.fillRect(0, 0, m.worldWidth, groundStripH);
-          ctx.restore();
-        }
-      }
-    }
-
-    // Ground selection highlight
-    if (this.selectedGround) {
-      ctx.strokeStyle = '#4ade80';
-      ctx.lineWidth   = 2;
-      ctx.strokeRect(wx0, this.wy(groundTopY), ww, groundH);
-    }
-
     // World border
     ctx.strokeStyle = '#2a2a3a';
     ctx.lineWidth   = 1;
@@ -360,17 +318,24 @@ class MapBuilder {
 
     // Unified z-sorted draw list: blocks, platforms, and towers share the same
     // z-index space so towers can be layered relative to environment elements.
-    type LayerKind = 'block' | 'platform' | 'decor' | 'tower-player' | 'tower-enemy';
+    type LayerKind = 'block' | 'platform' | 'decor' | 'ground' | 'tower-player' | 'tower-enemy';
     const layerItems: { kind: LayerKind; idx: number; z: number }[] = [];
     for (let i = 0; i < m.blocks.length;    i++) layerItems.push({ kind: 'block',        idx: i, z: m.blocks[i].zIndex    ?? 0 });
     for (let i = 0; i < m.platforms.length; i++) layerItems.push({ kind: 'platform',     idx: i, z: m.platforms[i].zIndex ?? 0 });
     const decor = m.decor ?? [];
     for (let i = 0; i < decor.length;       i++) layerItems.push({ kind: 'decor',        idx: i, z: decor[i].zIndex      ?? 0 });
+    // Ground sorts in the same scene z-space. Pushed after decor so that, at an
+    // equal z, it renders on top of scene props (matches Game.ts build order).
+    layerItems.push({ kind: 'ground',       idx: 0, z: m.groundZ ?? 0 });
     layerItems.push({ kind: 'tower-player', idx: 0, z: m.playerTowerZ ?? 0 });
     layerItems.push({ kind: 'tower-enemy',  idx: 1, z: m.enemyTowerZ  ?? 0 });
     layerItems.sort((a, b) => a.z - b.z);
 
     for (const item of layerItems) {
+      if (item.kind === 'ground') {
+        this.drawGroundStrip(ctx, wx0, ww);
+        continue;
+      }
       if (item.kind === 'tower-player') {
         drawTower(m.playerTowerX, pBaseY, '#00b4d8', '#007fa3', this.selectedTower === 'player', false, pTpl.skin, pTpl.w, pTpl.h);
         continue;
@@ -539,6 +504,14 @@ class MapBuilder {
       if (p.anim) {
         this.drawAnimGhost(ctx, p.x, p.y, p.anim.endX, p.anim.endY, p.width, p.height, sel);
       }
+    }
+
+    // Ground selection highlight — drawn after the z-sorted pass so it stays
+    // visible regardless of where the ground sorts.
+    if (this.selectedGround) {
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth   = 2;
+      ctx.strokeRect(wx0, this.wy(this.groundTopY), ww, this.sh(this.groundStripH));
     }
 
     // Coin box
@@ -768,6 +741,44 @@ class MapBuilder {
 
   private syncGroundSkinPreview() {
     this.syncSkinPreview('preview-ground-skin', 'btn-clear-ground-skin', this.map.groundSkin, 'input-ground-skin');
+  }
+
+  /** Draw the green ground strip + tiled skin. Called from the z-sorted draw pass. */
+  private drawGroundStrip(ctx: CanvasRenderingContext2D, wx0: number, ww: number) {
+    const m            = this.map;
+    const groundStripH = this.groundStripH;
+    const groundTopY   = this.groundTopY;
+    const groundH      = this.sh(groundStripH);
+    ctx.fillStyle = '#4a7c59';
+    ctx.fillRect(wx0, this.wy(groundTopY), ww, groundH);
+    ctx.fillStyle = '#3d6b4a';
+    ctx.fillRect(wx0, this.wy(groundTopY), ww, Math.min(this.sh(6), groundH));
+
+    // Ground skin (tiling pattern)
+    if (m.groundSkin) {
+      const img = this.getSkinImage(m.groundSkin);
+      if (img.complete && img.naturalWidth > 0) {
+        const pat = ctx.createPattern(img, 'repeat');
+        if (pat) {
+          const tileW = m.groundSkinTileW ?? img.naturalWidth;
+          const tileH = m.groundSkinTileH ?? img.naturalHeight;
+          pat.setTransform(new DOMMatrix([
+            tileW / img.naturalWidth,  0,
+            0, tileH / img.naturalHeight,
+            0, 0,
+          ]));
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(wx0, this.wy(groundTopY), ww, groundH);
+          ctx.clip();
+          ctx.translate(this.panX, this.wy(groundTopY));
+          ctx.scale(this.scale, this.scale);
+          ctx.fillStyle = pat;
+          ctx.fillRect(0, 0, m.worldWidth, groundStripH);
+          ctx.restore();
+        }
+      }
+    }
   }
 
   // ── Canvas interaction ────────────────────────────────────────────────────
@@ -1464,6 +1475,13 @@ class MapBuilder {
       this.syncInputsFromMap();
     });
 
+    // Ground Z-index — sorts the ground within the shared scene z-space. Live
+    // update on every keystroke so the canvas reflects order changes in real time.
+    document.getElementById('input-ground-z')!.addEventListener('input', () => {
+      const z = parseInt((document.getElementById('input-ground-z') as HTMLInputElement).value, 10);
+      this.map.groundZ = isNaN(z) || z === 0 ? undefined : z;
+    });
+
     // Map duration inputs (minutes + seconds → durationSec)
     const readDuration = () => {
       const minStr = (document.getElementById('input-map-duration-min') as HTMLInputElement).value;
@@ -1780,9 +1798,21 @@ class MapBuilder {
       const m = this.map;
       m.decor ??= [];
       this.pushUndo();
-      // New decor defaults behind characters (z = 0, shared scene space). Use the
-      // "Infront of Characters" toggle to bring it forward.
-      m.decor.push({ id: `d${Date.now()}`, x: cxw - w / 2, y: cyw - h / 2, width: w, height: h, skin: pendingDecorSkin });
+      // Auto z-index: one above the highest scene-layer z among platforms, blocks,
+      // and (non-foreground) decor so the new decor renders on top of everything
+      // already placed instead of hiding behind it. Capped below DECOR_FRONT_Z so
+      // it still sits behind characters — use the "Infront of Characters" toggle
+      // to bring it ahead of units.
+      const sceneZ = (it: { zIndex?: number }) =>
+        (it.zIndex ?? 0) < DECOR_FRONT_Z ? (it.zIndex ?? 0) : 0;
+      const maxSceneZ = Math.max(
+        0,
+        ...m.platforms.map(sceneZ),
+        ...m.blocks.map(sceneZ),
+        ...m.decor.map(sceneZ),
+      );
+      const zIndex = Math.min(maxSceneZ + 1, DECOR_FRONT_Z - 1);
+      m.decor.push({ id: `d${Date.now()}`, x: cxw - w / 2, y: cyw - h / 2, width: w, height: h, zIndex, skin: pendingDecorSkin });
       this.clearSelection();
       this.selected     = m.decor.length - 1;
       this.selectedKind = 'decor';
@@ -2157,6 +2187,7 @@ class MapBuilder {
       (document.getElementById('display-ground-h') as HTMLInputElement).value = String(this.groundStripH);
       (document.getElementById('input-ground-tile-w') as HTMLInputElement).value = m.groundSkinTileW !== undefined ? String(m.groundSkinTileW) : '';
       (document.getElementById('input-ground-tile-h') as HTMLInputElement).value = m.groundSkinTileH !== undefined ? String(m.groundSkinTileH) : '';
+      (document.getElementById('input-ground-z') as HTMLInputElement).value = String(m.groundZ ?? 0);
       this.syncGroundSkinPreview();
     }
     if (bgSel) {

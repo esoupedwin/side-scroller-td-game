@@ -18,6 +18,7 @@ export interface MapDefinition {
   worldWidth:   number;
   worldHeight?: number;  // canvas height in px (default: GameConfig.canvas.height)
   groundHeight?: number; // height of the green ground strip below GROUND_Y (default: worldHeight - GROUND_Y)
+  groundZ?:      number; // render order of the ground plane in the shared scene z-space (platforms/blocks/decor). Default 0.
   playerTowerX: number;  // centre x of the player tower
   playerTowerY?: number; // base y (bottom) of the player tower (default: GROUND_Y)
   enemyTowerX:  number;  // centre x of the enemy tower
