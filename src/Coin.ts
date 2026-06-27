@@ -32,6 +32,9 @@ export class Coin {
 
   readonly kind:  CoinKind;
   readonly value: number;
+  /** Effective skin URL (map override or built-in default), or undefined for the
+   *  procedural coin. Read by a carrying character to skin its carry visual. */
+  readonly skin?: string;
 
   readonly container: PIXI.Container;
   private gfx: PIXI.Graphics;
@@ -86,6 +89,7 @@ export class Coin {
     this.container.addChild(this.gfx);
     // Map override wins; otherwise fall back to any built-in default skin for this kind.
     const effectiveSkin = skin ?? DEFAULT_COIN_SKINS[kind];
+    this.skin = effectiveSkin;
     if (effectiveSkin) this.applySkin(effectiveSkin);
     this.container.x = x;
     this.container.y = this.y;

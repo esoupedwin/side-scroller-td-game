@@ -336,6 +336,7 @@ export class Character {
   private carryingCoin  = false;
   private coinCarryValue: number   = 0;
   private coinCarryKind:  CoinKind = 'gold';
+  private coinCarrySkin:  string | undefined = undefined;  // effective skin of the carried coin (matches the on-ground coin)
   private targetCoin:   Coin | null = null;
   private coinCarryGfx: PIXI.Graphics | null = null;
   private lastDrawnHpRatio  = -1;
@@ -1746,6 +1747,22 @@ export class Character {
     g.y = 6;   // held low, around the character's arms/hands while carried
     this.coinCarryGfx = g;
     this.container.addChild(g);
+
+    // Match the on-ground coin's PNG skin when one is set. Loads async — the
+    // procedural circles show until the texture resolves, then are replaced.
+    if (this.coinCarrySkin) {
+      PIXI.Assets.load<PIXI.Texture>(this.coinCarrySkin)
+        .then(tex => {
+          if (this.coinCarryGfx !== g) return;   // carry ended/changed before load resolved
+          const sprite = new PIXI.Sprite(tex);
+          sprite.anchor.set(0.5);
+          sprite.width = 16;   // ≈ the 7px-radius procedural carry coin, padded
+          sprite.height = 16;
+          g.addChild(sprite);  // child of g so removeCoinCarry() disposes it too
+          g.clear();           // drop the procedural circles, keep the sprite child
+        })
+        .catch(() => { /* missing/corrupt skin — keep the procedural carry coin */ });
+    }
   }
 
   private removeCoinCarry() {
@@ -2545,6 +2562,7 @@ export class Character {
       if (dist <= CHAR_PICKUP_DIST && sameSurface && coinReachable && this.coinPickupCooldown <= 0) {
         this.coinCarryValue = this.targetCoin.value;
         this.coinCarryKind  = this.targetCoin.kind;
+        this.coinCarrySkin  = this.targetCoin.skin;
         this.targetCoin.pickup();
         this.targetCoin  = null;
         this.carryingCoin = true;
