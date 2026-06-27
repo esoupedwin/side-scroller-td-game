@@ -70,6 +70,7 @@ class MapBuilder {
   private selectedBackground = false;
   private selectedMapSettings = false;
   private selectedGameConfig  = false;
+  private selectedCoinSkins   = false;
 
   // ── Copy / Paste clipboard ────────────────────────────────────────────────
   private clipboard: {
@@ -518,17 +519,24 @@ class MapBuilder {
       ctx.strokeRect(wx0, this.wy(this.groundTopY), ww, this.sh(this.groundStripH));
     }
 
-    // Coin box
+    // Coin box — custom PNG skin if set, otherwise the procedural box
     const cb = m.coinBox;
-    ctx.fillStyle   = '#c8790a';
-    ctx.strokeStyle = '#7a4a06';
-    ctx.lineWidth   = 2;
-    ctx.fillRect(this.wx(cb.x - cb.width / 2), this.wy(cb.y), this.sw(cb.width), this.sh(cb.height));
-    ctx.strokeRect(this.wx(cb.x - cb.width / 2), this.wy(cb.y), this.sw(cb.width), this.sh(cb.height));
-    ctx.fillStyle = '#fff';
-    ctx.font      = `bold ${Math.max(10, Math.round(14 * this.scale))}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.fillText('★', this.wx(cb.x), this.wy(cb.y + cb.height / 2) + 4);
+    const cbX = this.wx(cb.x - cb.width / 2), cbY = this.wy(cb.y);
+    const cbW = this.sw(cb.width), cbH = this.sh(cb.height);
+    const cbSkinImg = cb.skin ? this.getSkinImage(cb.skin) : null;
+    if (cbSkinImg && cbSkinImg.naturalWidth > 0) {
+      ctx.drawImage(cbSkinImg, cbX, cbY, cbW, cbH);
+    } else {
+      ctx.fillStyle   = '#c8790a';
+      ctx.strokeStyle = '#7a4a06';
+      ctx.lineWidth   = 2;
+      ctx.fillRect(cbX, cbY, cbW, cbH);
+      ctx.strokeRect(cbX, cbY, cbW, cbH);
+      ctx.fillStyle = '#fff';
+      ctx.font      = `bold ${Math.max(10, Math.round(14 * this.scale))}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText('★', this.wx(cb.x), this.wy(cb.y + cb.height / 2) + 4);
+    }
 
     // ── Custom draw silhouette + hint ─────────────────────────────────────
     if (this.customDrawMode !== 'off') {
@@ -745,6 +753,43 @@ class MapBuilder {
 
   private syncGroundSkinPreview() {
     this.syncSkinPreview('preview-ground-skin', 'btn-clear-ground-skin', this.map.groundSkin, 'input-ground-skin');
+  }
+
+  private syncCoinSkinsPreview() {
+    this.syncSkinPreview('preview-coinbox-skin',     'btn-clear-coinbox-skin',     this.map.coinBox.skin,      'input-coinbox-skin');
+    this.syncSkinPreview('preview-coin-gold-skin',   'btn-clear-coin-gold-skin',   this.map.coinSkins?.gold,   'input-coin-gold-skin');
+    this.syncSkinPreview('preview-coin-silver-skin', 'btn-clear-coin-silver-skin', this.map.coinSkins?.silver, 'input-coin-silver-skin');
+    this.syncSkinPreview('preview-coin-blue-skin',   'btn-clear-coin-blue-skin',   this.map.coinSkins?.blue,   'input-coin-blue-skin');
+  }
+
+  /** Wire one coin-skin file input + its clear button. `target` selects the
+   *  storage slot: the coin box, or a coin kind in map.coinSkins. */
+  private wireCoinSkinInput(inputId: string, clearId: string, target: 'box' | 'gold' | 'silver' | 'blue') {
+    const setSkin = (url: string | undefined) => {
+      if (target === 'box') {
+        if (url) this.map.coinBox.skin = url;
+        else     delete this.map.coinBox.skin;
+      } else if (url) {
+        (this.map.coinSkins ??= {})[target] = url;
+      } else if (this.map.coinSkins) {
+        delete this.map.coinSkins[target];
+        if (Object.keys(this.map.coinSkins).length === 0) delete this.map.coinSkins;
+      }
+    };
+    document.getElementById(inputId)!.addEventListener('change', e => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      this.pushUndo();
+      const reader = new FileReader();
+      reader.onload = () => { setSkin(reader.result as string); this.syncCoinSkinsPreview(); };
+      reader.readAsDataURL(file);
+    });
+    document.getElementById(clearId)!.addEventListener('click', () => {
+      this.pushUndo();
+      setSkin(undefined);
+      (document.getElementById(inputId) as HTMLInputElement).value = '';
+      this.syncCoinSkinsPreview();
+    });
   }
 
   /** Draw the green ground strip + tiled skin. Called from the z-sorted draw pass. */
@@ -1291,6 +1336,7 @@ class MapBuilder {
     this.selectedBackground  = false;
     this.selectedMapSettings = false;
     this.selectedGameConfig  = false;
+    this.selectedCoinSkins   = false;
   }
 
   /** Snapshot current map state before a destructive operation. Clears redo stack. */
@@ -1445,6 +1491,20 @@ class MapBuilder {
       this.syncInputsFromMap();
       document.getElementById('section-game-config')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
+
+    // Coin Skins button
+    document.getElementById('btn-coin-skins')!.addEventListener('click', () => {
+      this.clearSelection();
+      this.selectedCoinSkins = true;
+      this.syncInputsFromMap();
+      document.getElementById('section-coin-skins')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+
+    // Coin Skins file inputs — coin box + per-kind coin PNGs
+    this.wireCoinSkinInput('input-coinbox-skin', 'btn-clear-coinbox-skin', 'box');
+    this.wireCoinSkinInput('input-coin-gold-skin',   'btn-clear-coin-gold-skin',   'gold');
+    this.wireCoinSkinInput('input-coin-silver-skin', 'btn-clear-coin-silver-skin', 'silver');
+    this.wireCoinSkinInput('input-coin-blue-skin',   'btn-clear-coin-blue-skin',   'blue');
 
     // World width input
     document.getElementById('input-world-width')!.addEventListener('change', () => {
@@ -2114,6 +2174,7 @@ class MapBuilder {
     const bgSel        = this.selectedBackground;
     const settingsSel  = this.selectedMapSettings;
     const configSel    = this.selectedGameConfig;
+    const coinSkinsSel = this.selectedCoinSkins;
     const platSel    = this.selected !== null && this.selectedKind === 'platform' && this.selected < m.platforms.length;
     const blockSel   = this.selected !== null && this.selectedKind === 'block'    && this.selected < m.blocks.length;
     const decorSel   = this.selected !== null && this.selectedKind === 'decor'    && this.selected < (m.decor ?? []).length;
@@ -2126,6 +2187,7 @@ class MapBuilder {
     document.getElementById('section-background')!  .style.display = bgSel       ? 'flex' : 'none';
     document.getElementById('section-map-settings')!.style.display = settingsSel ? 'flex' : 'none';
     document.getElementById('section-game-config')! .style.display = configSel  ? 'flex' : 'none';
+    document.getElementById('section-coin-skins')!  .style.display = coinSkinsSel ? 'flex' : 'none';
     document.getElementById('section-platforms')!   .style.display = platSel   ? 'flex' : 'none';
     document.getElementById('section-blocks')!      .style.display = blockSel  ? 'flex' : 'none';
     document.getElementById('section-decor')!       .style.display = decorSel  ? 'flex' : 'none';
@@ -2206,6 +2268,9 @@ class MapBuilder {
     if (bgSel) {
       this.syncBackgroundSkinPreview();
       this.syncBackgroundSkin2Preview();
+    }
+    if (coinSkinsSel) {
+      this.syncCoinSkinsPreview();
     }
     if (settingsSel) {
       (document.getElementById('input-world-width')   as HTMLInputElement).value = String(m.worldWidth);

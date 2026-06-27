@@ -200,6 +200,22 @@ export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
   g.drawPolygon(starPts);
   g.endFill();
   g.lineStyle(0);
+
+  // Custom PNG skin (map coinBox.skin): overlay a sprite covering the box and
+  // hide the procedural graphic once it loads. Async — graphic shows meanwhile.
+  if (coinBox.skin) {
+    PIXI.Assets.load<PIXI.Texture>(coinBox.skin)
+      .then(tex => {
+        const sprite  = new PIXI.Sprite(tex);
+        sprite.x      = x - w / 2;
+        sprite.y      = y;
+        sprite.width  = w;
+        sprite.height = h;
+        world.addChild(sprite);
+        g.visible = false;
+      })
+      .catch(() => { /* missing/corrupt data URL — keep the procedural box */ });
+  }
 }
 
 /**

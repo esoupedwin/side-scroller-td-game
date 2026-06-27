@@ -10,6 +10,15 @@ export interface CoinBoxDef {
   width:     number;
   height:    number;
   spreadDeg: number;   // ± degrees coins can spread from vertical
+  skin?:     string;   // data URL; replaces the procedural coin-box graphic, scaled to width×height
+}
+
+/** Optional per-kind coin skin overrides (data URLs). A missing kind falls
+ *  back to the procedural COIN_PALETTE graphic. */
+export interface CoinSkinsDef {
+  gold?:   string;
+  silver?: string;
+  blue?:   string;
 }
 
 export interface MapDefinition {
@@ -37,6 +46,7 @@ export interface MapDefinition {
   blocks:          BlockData[];
   decor?:          DecorData[];  // purely-visual props (flowers, rocks, …); no collision
   coinBox:         CoinBoxDef;
+  coinSkins?:      CoinSkinsDef;  // per-kind coin PNG overrides (gold/silver/blue)
   groundSkin?:       string;  // data URL; tiled across the ground plane
   groundSkinTileW?:  number;  // tile width  in world px (default: image natural width)
   groundSkinTileH?:  number;  // tile height in world px (default: image natural height)

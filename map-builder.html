@@ -696,6 +696,14 @@
         </svg>
         Tribe Tower Skins
       </button>
+      <button id="btn-coin-skins" class="tool-btn" title="Reskin the coins and the coin box with custom PNGs for this map">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <ellipse cx="12" cy="6" rx="7" ry="3"/>
+          <path d="M5 6 v5 c0 1.66 3.13 3 7 3 s7 -1.34 7 -3 V6"/>
+          <path d="M5 11 v5 c0 1.66 3.13 3 7 3 s7 -1.34 7 -3 v-5"/>
+        </svg>
+        Coin Skins
+      </button>
       <button id="btn-game-config" class="tool-btn" title="View global game configuration values">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -856,6 +864,37 @@
               <span class="hint">px</span>
             </div>
             <span class="hint" style="width:100%; margin-top:2px;">Rendered behind the parallax layer; scrolls slower</span>
+          </div>
+
+          <!-- Coin Skins (shown when Coin Skins is clicked) -->
+          <div id="section-coin-skins" class="section" style="display:none;">
+            <div class="section-title">Coin Skins</div>
+            <span class="hint" style="width:100%; margin-bottom:4px;">Custom PNGs for this map. Missing skins fall back to the procedural coin / box art.</span>
+
+            <span class="skin-label">Coin Box PNG</span>
+            <input type="file" id="input-coinbox-skin" accept="image/*" />
+            <img id="preview-coinbox-skin" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
+            <button id="btn-clear-coinbox-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
+            <span class="hint" style="width:100%; margin-top:2px;">Scaled to the coin box width × height</span>
+            <div style="width:100%; height:1px; background:var(--border); margin:8px 0;"></div>
+
+            <span class="skin-label">Gold Coin PNG</span>
+            <input type="file" id="input-coin-gold-skin" accept="image/*" />
+            <img id="preview-coin-gold-skin" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
+            <button id="btn-clear-coin-gold-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
+            <div style="width:100%; height:1px; background:var(--border); margin:8px 0;"></div>
+
+            <span class="skin-label">Silver Coin PNG</span>
+            <input type="file" id="input-coin-silver-skin" accept="image/*" />
+            <img id="preview-coin-silver-skin" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
+            <button id="btn-clear-coin-silver-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
+            <div style="width:100%; height:1px; background:var(--border); margin:8px 0;"></div>
+
+            <span class="skin-label">Blue Coin PNG</span>
+            <input type="file" id="input-coin-blue-skin" accept="image/*" />
+            <img id="preview-coin-blue-skin" style="display:none; height:24px; border:1px solid var(--border); border-radius:3px;" />
+            <button id="btn-clear-coin-blue-skin" class="danger" style="display:none; padding:3px 8px; font-size:17px;">&#x2715;</button>
+            <span class="hint" style="width:100%; margin-top:2px;">Rendered ~22 px in-game, centred on the coin</span>
           </div>
 
           <!-- Map Settings (shown when Map Settings is clicked) -->

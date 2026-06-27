@@ -15,6 +15,15 @@ export const COIN_PALETTE: Record<CoinKind, readonly [number, number, number, nu
   blue:   [0x0d47a1, 0x2196f3, 0x0d47a1, 0xbbe1ff],   // rare, high-value sapphire coin
 };
 
+/**
+ * Built-in default coin skins (PNGs served from public/sprites/coins/). Applied
+ * to every coin of that kind unless the map's own `coinSkins` provides an
+ * override. The blue (jackpot) coin is reskinned as the purple coin art.
+ */
+const DEFAULT_COIN_SKINS: Partial<Record<CoinKind, string>> = {
+  blue: '/sprites/coins/coin_purple.png',
+};
+
 export class Coin {
   x: number;
   y: number;
@@ -56,6 +65,7 @@ export class Coin {
     wallBoundsL = DEFAULT_WALL_L,
     wallBoundsR = DEFAULT_WALL_R,
     groundY     = GROUND_Y,
+    skin?:      string,
   ) {
     this.groundY     = groundY;
     this.landY       = groundY - 14;
@@ -72,6 +82,9 @@ export class Coin {
     this.gfx       = new PIXI.Graphics();
     this.drawCoin();
     this.container.addChild(this.gfx);
+    // Map override wins; otherwise fall back to any built-in default skin for this kind.
+    const effectiveSkin = skin ?? DEFAULT_COIN_SKINS[kind];
+    if (effectiveSkin) this.applySkin(effectiveSkin);
     this.container.x = x;
     this.container.y = this.y;
 
@@ -94,6 +107,22 @@ export class Coin {
     this.gfx.beginFill(mid);        this.gfx.drawCircle(0, 0, 7);      this.gfx.endFill();
     this.gfx.beginFill(inner);      this.gfx.drawCircle(0, 0, 4);      this.gfx.endFill();
     this.gfx.beginFill(hi, 0.85);   this.gfx.drawCircle(-3, -3, 2.5);  this.gfx.endFill();
+  }
+
+  /** Replace the procedural coin graphic with a custom PNG (map coinSkins).
+   *  Loads async — the Graphics shows until the texture resolves, then is hidden. */
+  private applySkin(skin: string) {
+    PIXI.Assets.load<PIXI.Texture>(skin)
+      .then(tex => {
+        if (this.isDead) return;
+        const sprite  = new PIXI.Sprite(tex);
+        sprite.anchor.set(0.5);
+        sprite.width  = 22;   // ≈ the 10px-radius procedural coin, slightly padded
+        sprite.height = 22;
+        this.container.addChildAt(sprite, 0);
+        this.gfx.visible = false;
+      })
+      .catch(() => { /* missing/corrupt data URL — keep the procedural graphic */ });
   }
 
   update(dt: number, platforms: PlatformData[] = [], blocks: PlatformData[] = []) {

@@ -1037,7 +1037,7 @@ export class Game {
     const spreadRad = cb.spreadDeg * (Math.PI / 180);
     const vxMax     = Math.tan(spreadRad) * Math.sqrt(Math.max(1, fallH) * COIN_GRAVITY / 2);
     const vx        = (Math.random() * 2 - 1) * vxMax;
-    const coin = new Coin(cb.x, COIN_LIFETIME_S, value, kind, vx, 0, cb.y + cb.height, this.physics, dt, wallL, wallR, this.mapGroundY);
+    const coin = new Coin(cb.x, COIN_LIFETIME_S, value, kind, vx, 0, cb.y + cb.height, this.physics, dt, wallL, wallR, this.mapGroundY, this.mapDef.coinSkins?.[kind]);
     this.coins.push(coin);
     this.coinLayer.addChild(coin.container);
   }
@@ -1497,7 +1497,7 @@ export class Game {
       const vy    = throwVy  ?? -(COIN_DROP_VY_MIN + Math.random() * (COIN_DROP_VY_MAX - COIN_DROP_VY_MIN));
       const wallL = this.mapDef.playerTowerX - TOWER_WIDTH / 2;
       const wallR = this.mapDef.enemyTowerX  + TOWER_WIDTH / 2;
-      const coin  = new Coin(x, COIN_LIFETIME_S, dropValue, dropKind, vx, vy, y, this.physics, dt, wallL, wallR, this.mapGroundY);
+      const coin  = new Coin(x, COIN_LIFETIME_S, dropValue, dropKind, vx, vy, y, this.physics, dt, wallL, wallR, this.mapGroundY, this.mapDef.coinSkins?.[dropKind]);
       this.coins.push(coin);
       this.coinLayer.addChild(coin.container);
       if (!c.isDead && !isThrow) c.recoverCoin(coin);
