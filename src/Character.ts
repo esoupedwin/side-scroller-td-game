@@ -1756,8 +1756,8 @@ export class Character {
           if (this.coinCarryGfx !== g) return;   // carry ended/changed before load resolved
           const sprite = new PIXI.Sprite(tex);
           sprite.anchor.set(0.5);
-          sprite.width = 16;   // ≈ the 7px-radius procedural carry coin, padded
-          sprite.height = 16;
+          sprite.width = 22;   // match the on-ground coin skin size (no scale-down while held)
+          sprite.height = 22;
           g.addChild(sprite);  // child of g so removeCoinCarry() disposes it too
           g.clear();           // drop the procedural circles, keep the sprite child
         })
