@@ -42,9 +42,10 @@ const spawnBtns = new Map<UnitType, HTMLButtonElement>(
   UNIT_TYPES.map(t => [t, document.getElementById(`spawn-${t}-btn`) as HTMLButtonElement]),
 );
 
-// Populate costs from config so the HTML never goes stale
+// Populate costs from config so the HTML never goes stale. Just the number —
+// the gold coin icon is rendered by the .btn-cost::before CSS pseudo-element.
 for (const t of UNIT_TYPES) {
-  (document.getElementById(`${t}-cost`) as HTMLElement).textContent = `${CHAR_COST[t]} 💰`;
+  (document.getElementById(`${t}-cost`) as HTMLElement).textContent = String(CHAR_COST[t]);
 }
 const countdownEl    = document.getElementById('countdown')!;
 const gameOverEl     = document.getElementById('game-over')!;

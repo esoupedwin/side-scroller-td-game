@@ -409,39 +409,66 @@
         gap: 8px;
         pointer-events: none;
       }
+      /* Uniform character cards (cream card + white border, portrait, coin price) */
       .spawn-btn {
         pointer-events: all;
-        color: #fff;
-        border: none;
-        border-radius: 8px;
-        padding: 8px 16px;
-        font-size: 13px;
-        font-weight: 700;
+        box-sizing: border-box;
+        width: 86px;
+        height: 102px;
+        flex: 0 0 auto;
+        background: #ece0c8;
+        border: 3px solid #ffffff;
+        border-radius: 13px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.40);
+        padding: 6px 4px 7px;
         cursor: pointer;
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 2px;
+        justify-content: space-between;
+        color: #322b25;
         transition: transform 0.1s, box-shadow 0.1s, opacity 0.15s;
-        line-height: 1.2;
+      }
+      .spawn-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 7px 16px rgba(0,0,0,0.5);
+      }
+      .spawn-btn .card-name {
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        font-size: 10px;
+        font-weight: 800;
+        line-height: 1.05;
+        overflow: hidden;
+      }
+      .spawn-btn .card-portrait {
+        flex: 1 1 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 34px;
+        line-height: 1;
       }
       .spawn-btn .btn-cost {
-        font-size: 10px;
-        font-weight: 600;
-        opacity: 0.85;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 15px;
+        font-weight: 800;
+        color: #2a2419;
       }
-      #spawn-conscript-btn { background: linear-gradient(135deg, #b07040, #7a4a20); box-shadow: 0 4px 12px rgba(176,112,64,0.45); }
-      #spawn-warrior-btn  { background: linear-gradient(135deg, #00b4d8, #0077b6); box-shadow: 0 4px 12px rgba(0,180,216,0.45); }
-      #spawn-archer-btn   { background: linear-gradient(135deg, #43aa8b, #2d7a60); box-shadow: 0 4px 12px rgba(67,170,139,0.45); }
-      #spawn-rifleman-btn { background: linear-gradient(135deg, #7a8c42, #4a5c22); box-shadow: 0 4px 12px rgba(122,140,66,0.45); }
-      #spawn-gunslinger-btn { background: linear-gradient(135deg, #d9a514, #8a6608); box-shadow: 0 4px 12px rgba(184,134,11,0.45); }
-      #spawn-sniper-btn   { background: linear-gradient(135deg, #e07b39, #a8521a); box-shadow: 0 4px 12px rgba(224,123,57,0.45); }
-      #spawn-viking-btn   { background: linear-gradient(135deg, #7a9e7e, #3d6642); box-shadow: 0 4px 12px rgba(122,158,126,0.45); }
-      #spawn-shocktrooper-btn { background: linear-gradient(135deg, #c25b3a, #7a2f18); box-shadow: 0 4px 12px rgba(194,91,58,0.45); }
-      #spawn-knight-btn   { background: linear-gradient(135deg, #8b9faa, #45525c); box-shadow: 0 4px 12px rgba(139,159,170,0.45); }
-      #spawn-heavy-btn    { background: linear-gradient(135deg, #5c6a8a, #2d3558); box-shadow: 0 4px 12px rgba(92,106,138,0.45); }
-      #spawn-grenadier-btn  { background: linear-gradient(135deg, #6b7a2a, #3d4a10); box-shadow: 0 4px 12px rgba(107,122,42,0.45); }
-      #spawn-rocketeer-btn  { background: linear-gradient(135deg, #cc4400, #8b2200); box-shadow: 0 4px 12px rgba(204,68,0,0.45); }
+      .spawn-btn .btn-cost::before {
+        content: '';
+        flex-shrink: 0;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 35% 30%, #ffe89a 0%, #f4c430 45%, #d99a1c 78%, #b9790f 100%);
+        box-shadow: inset 0 0 0 1.5px #e0a92a;
+      }
       .spawn-btn:active    { transform: scale(0.95); }
       .spawn-btn:disabled  { opacity: 0.4; cursor: not-allowed; transform: none; }
 
@@ -696,51 +723,63 @@
 
       <div id="ui-overlay">
         <button id="spawn-conscript-btn" class="spawn-btn">
-          <span>👊 Conscript</span>
+          <span class="card-name">Conscript</span>
+          <span class="card-portrait">👊</span>
           <span class="btn-cost" id="conscript-cost"></span>
         </button>
         <button id="spawn-warrior-btn"  class="spawn-btn">
-          <span>⚔ Warrior</span>
+          <span class="card-name">Warrior</span>
+          <span class="card-portrait">⚔</span>
           <span class="btn-cost" id="warrior-cost"></span>
         </button>
         <button id="spawn-archer-btn"   class="spawn-btn">
-          <span>🏹 Archer</span>
+          <span class="card-name">Archer</span>
+          <span class="card-portrait">🏹</span>
           <span class="btn-cost" id="archer-cost"></span>
         </button>
         <button id="spawn-rifleman-btn" class="spawn-btn">
-          <span>🔫 Rifleman</span>
+          <span class="card-name">Rifleman</span>
+          <span class="card-portrait">🔫</span>
           <span class="btn-cost" id="rifleman-cost"></span>
         </button>
         <button id="spawn-gunslinger-btn" class="spawn-btn">
-          <span>🤠 Gunslinger</span>
+          <span class="card-name">Gunslinger</span>
+          <span class="card-portrait">🤠</span>
           <span class="btn-cost" id="gunslinger-cost"></span>
         </button>
         <button id="spawn-sniper-btn" class="spawn-btn">
-          <span>🎯 Sniper</span>
+          <span class="card-name">Sniper</span>
+          <span class="card-portrait">🎯</span>
           <span class="btn-cost" id="sniper-cost"></span>
         </button>
         <button id="spawn-viking-btn" class="spawn-btn">
-          <span>🪓 Viking</span>
+          <span class="card-name">Viking</span>
+          <span class="card-portrait">🪓</span>
           <span class="btn-cost" id="viking-cost"></span>
         </button>
         <button id="spawn-shocktrooper-btn" class="spawn-btn">
-          <span>💥 Shock Trooper</span>
+          <span class="card-name">Shock Trooper</span>
+          <span class="card-portrait">💥</span>
           <span class="btn-cost" id="shocktrooper-cost"></span>
         </button>
         <button id="spawn-knight-btn" class="spawn-btn">
-          <span>🛡 Knight</span>
+          <span class="card-name">Knight</span>
+          <span class="card-portrait">🛡</span>
           <span class="btn-cost" id="knight-cost"></span>
         </button>
         <button id="spawn-heavy-btn" class="spawn-btn">
-          <span>🔨 Heavy</span>
+          <span class="card-name">Heavy</span>
+          <span class="card-portrait">🔨</span>
           <span class="btn-cost" id="heavy-cost"></span>
         </button>
         <button id="spawn-grenadier-btn" class="spawn-btn">
-          <span>💣 Grenadier</span>
+          <span class="card-name">Grenadier</span>
+          <span class="card-portrait">💣</span>
           <span class="btn-cost" id="grenadier-cost"></span>
         </button>
         <button id="spawn-rocketeer-btn" class="spawn-btn">
-          <span>🚀 Rocketeer</span>
+          <span class="card-name">Rocketeer</span>
+          <span class="card-portrait">🚀</span>
           <span class="btn-cost" id="rocketeer-cost"></span>
         </button>
       </div>
