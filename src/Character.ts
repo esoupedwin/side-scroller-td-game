@@ -6,9 +6,12 @@ import {
   CHAR_PICKUP_DIST, CHAR_DEPOSIT_DIST, CHAR_CARRY_SPEED_MULT, CHAR_COIN_RECOVERY_COOLDOWN,
   CHAR_HP_BAR_W, CHAR_HP_BAR_H,
   SAFE_ZONE_HEAL_RATE, HIT_JUMP_CHANCE,
+  RANDOM_JUMP_INTERVAL_MIN, RANDOM_JUMP_INTERVAL_VAR, RANDOM_JUMP_CHANCE, RANDOM_JUMP_CHANCE_DEFEND, RANDOM_JUMP_HOME_MARGIN,
+  EVASIVE_JUMP_COOLDOWN, EVASIVE_JUMP_CHANCE, EVASIVE_JUMP_SCAN_RANGE,
   CHAR_LOW_HEALTH_RATIO, CHAR_LOW_HEALTH_BLINK_COLOR, CHAR_LOW_HEALTH_BLINK_HZ,
   ATTACK_KNOCKBACK_VY,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
+  HARASS_RALLY_OFFSET, HARASS_GROUP_DIST, HARASS_RALLY_TOLERANCE,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST, COIN_THROW_MAX_Y_GAP,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
@@ -1592,14 +1595,14 @@ export class Character {
     if (this.isOnPlatform) return;   // stay on platform; horizontal movement is the right action
     this.randomJumpTimer -= dt;
     if (this.randomJumpTimer > 0) return;
-    this.randomJumpTimer = 1.5 + Math.random() * 2;  // next check in 1.5â€“3.5 s
+    this.randomJumpTimer = RANDOM_JUMP_INTERVAL_MIN + Math.random() * RANDOM_JUMP_INTERVAL_VAR;  // next check in 1.5â€“3.5 s
 
     const sideDir = this.side === 'player' ? 1 : -1;
-    if (sideDir * (this.x - homeTowerFrontX) < 120) return;  // too close to home
+    if (sideDir * (this.x - homeTowerFrontX) < RANDOM_JUMP_HOME_MARGIN) return;  // too close to home
     // Defenders rarely break formation â€” random jumps make them drift off the
     // rally point and out of position. Heavily dampen the chance while on
     // defend duty.
-    const chance = this._behavior === 'defend' ? 0.02 : 0.20;
+    const chance = this._behavior === 'defend' ? RANDOM_JUMP_CHANCE_DEFEND : RANDOM_JUMP_CHANCE;
     if (Math.random() < chance) this.jump(this.lastMoveDir, dt);
   }
 
@@ -2448,11 +2451,11 @@ export class Character {
         const blocking = enemies.find(c =>
           !c.isDead &&
           Math.sign(c.x - this.x) === dirToTarget &&
-          Math.abs(c.x - this.x) < 60,
+          Math.abs(c.x - this.x) < EVASIVE_JUMP_SCAN_RANGE,
         );
         if (blocking) {
-          this.evasiveJumpTimer = 2.0;
-          if (Math.random() < 0.80) this.jump(dirToTarget, dt);
+          this.evasiveJumpTimer = EVASIVE_JUMP_COOLDOWN;
+          if (Math.random() < EVASIVE_JUMP_CHANCE) this.jump(dirToTarget, dt);
         }
       }
     }
@@ -2655,9 +2658,9 @@ export class Character {
     } else {
       // No enemies â€” use pathfinding to group up or rally near own tower
       const mate = this.nearestAlly(allies);
-      const rallyX = mate ? mate.x : homeTowerFrontX + dir * 80;
+      const rallyX = mate ? mate.x : homeTowerFrontX + dir * HARASS_RALLY_OFFSET;
       const dist   = Math.abs(this.x - rallyX);
-      const thresh = mate ? 55 : 20;
+      const thresh = mate ? HARASS_GROUP_DIST : HARASS_RALLY_TOLERANCE;
       if (dist > thresh) {
         this.requestPath(rallyX, this.floorY, navGraph, dt);
         this.followPath(dt, ctx.platforms);

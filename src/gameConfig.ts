@@ -35,6 +35,9 @@ export const GameConfig = {
     hpBarWidth:         28,     // px
     hpBarHeight:        5,      // px
     harassSafetyBuffer: 40,  // px outside enemy tower range where harass units hold
+    harassRallyOffset:   80, // px in front of own tower where a lone harass unit rallies when no enemies are visible
+    harassGroupDist:     55, // px — a harass unit regroups toward its nearest ally when farther than this
+    harassRallyTolerance: 20, // px — how close to the solo rally point a harass unit must get before holding
     defendPursuitRange: 600, // px — defenders pursue any enemy within this distance of their home tower face (larger than TOWER_ATTACK_RANGE so they can chase off ranged units firing in from just outside the defence zone)
     rangedKiteThreshold: 80, // px — ranged units back away when a melee enemy closes within this distance
     coinThrowScanRange:  80,  // px — scan radius for a new coin after throwing one toward tower
@@ -42,6 +45,19 @@ export const GameConfig = {
     coinThrowMaxYGap:   100, // px — if the carrier's standing surface sits at least this much below the home tower's base, skip throwing and keep carrying (prevents arcing coins into a wall when the tower is on an elevated block ~120 px tall — the threshold is set a few px below the block height to be robust to small tower-placement offsets in the map builder)
     safeZoneHealRate:    5,  // HP/s passively healed while within own tower's attack range
     hitJumpChance:    0.75,  // probability of jumping when struck by a projectile
+
+    // ── Liveness ("random") jump: occasional hop so marching units feel alive ──
+    randomJumpIntervalMinSec: 1.5,  // base seconds between liveness-jump checks
+    randomJumpIntervalVarSec: 2.0,  // added random variance (→ checks every 1.5–3.5 s)
+    randomJumpChance:         0.20, // probability of a liveness jump per check
+    randomJumpChanceDefend:   0.02, // dampened chance while on defend duty (stay in formation)
+    randomJumpHomeMargin:     120,  // px from the home tower face within which liveness jumps are suppressed
+
+    // ── Evasive jump: hop over an enemy blocking the path while collecting ──────
+    evasiveJumpCooldownSec:   2.0,  // seconds between evasive-jump attempts
+    evasiveJumpChance:        0.80, // probability of jumping a blocker when one is detected
+    evasiveJumpScanRange:     60,   // px ahead to scan for a blocking enemy
+
     attackKnockbackVy:    80,  // px/s — small upward impulse applied with every per-character knockback
     attackKnockbackDecay: 4.0, // multiplied against knockbackVx each second (e^-decay); shared by melee + projectile hits
     lowHealthRatio:     0.3,      // hp/maxHp at or below which the body blinks a red tint
