@@ -21,7 +21,9 @@ export const COIN_PALETTE: Record<CoinKind, readonly [number, number, number, nu
  * override. The blue (jackpot) coin is reskinned as the purple coin art.
  */
 const DEFAULT_COIN_SKINS: Partial<Record<CoinKind, string>> = {
-  blue: '/sprites/coins/coin_purple.png',
+  gold:   '/sprites/coins/coin_gold.png',
+  silver: '/sprites/coins/coin_silver.png',
+  blue:   '/sprites/coins/coin_purple.png',
 };
 
 export class Coin {
