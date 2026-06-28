@@ -1539,6 +1539,17 @@ class MapBuilder {
       this.syncInputsFromMap();
     });
 
+    // Ground height (H) — editable directly in the Ground section; mirrors the
+    // "Ground Height" field in Map Settings (both write map.groundHeight).
+    document.getElementById('input-ground-h')!.addEventListener('change', () => {
+      const val = parseInt((document.getElementById('input-ground-h') as HTMLInputElement).value, 10);
+      if (isNaN(val) || val < 20) return;
+      this.pushUndo();
+      const defaultGH = (this.map.worldHeight ?? WORLD_H) - GROUND_Y;
+      this.map.groundHeight = val === defaultGH ? undefined : val;
+      this.syncInputsFromMap();
+    });
+
     // Ground Z-index — sorts the ground within the shared scene z-space. Live
     // update on every keystroke so the canvas reflects order changes in real time.
     document.getElementById('input-ground-z')!.addEventListener('input', () => {
@@ -2259,7 +2270,7 @@ class MapBuilder {
     }
     if (groundSel) {
       (document.getElementById('display-ground-w') as HTMLInputElement).value = String(m.worldWidth);
-      (document.getElementById('display-ground-h') as HTMLInputElement).value = String(this.groundStripH);
+      (document.getElementById('input-ground-h') as HTMLInputElement).value = String(this.groundStripH);
       (document.getElementById('input-ground-tile-w') as HTMLInputElement).value = m.groundSkinTileW !== undefined ? String(m.groundSkinTileW) : '';
       (document.getElementById('input-ground-tile-h') as HTMLInputElement).value = m.groundSkinTileH !== undefined ? String(m.groundSkinTileH) : '';
       (document.getElementById('input-ground-z') as HTMLInputElement).value = String(m.groundZ ?? 0);
