@@ -10,11 +10,21 @@
       #game-container { position: relative; }
 
       /* ── Developer panel ────────────────────────────────────────────────────── */
+      /* Anchored to the viewport bottom (not the body flex flow) so the game's
+         scale-to-fit / VIEWPORT_HEIGHT can't push it off-screen. Hidden by default;
+         toggled with P. Overlays the bottom of the game when shown. */
       #dev-panel {
+        position: fixed;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 50;
+        max-height: 100vh;
+        overflow-y: auto;
         width: min(calc(100vw - 16px), 2400px);
         background: rgba(6, 6, 18, 0.92);
         border: 1px solid rgba(255,255,255,0.07);
-        border-radius: 0 0 8px 8px;
+        border-radius: 8px 8px 0 0;
         padding: 6px 14px;
         display: flex;
         flex-direction: row;
