@@ -246,6 +246,11 @@ export class Character {
   private legsSprite:       PIXI.AnimatedSprite | null = null;
   private bodyBaseScale     = 1;
   private legsBaseScale     = 1;
+  // Animated-sprite playback gating. The sprites run only when BOTH the game is
+  // unpaused (animPaused=false) and the character is on-screen (animCulled=false),
+  // so off-screen units don't burn the shared ticker advancing frames nobody sees.
+  private animPaused        = false;
+  private animCulled        = false;
   // Body display-leaves (sprites + graphics, both render paths) whose `.tint` the
   // low-health blink pulses. Snapshotted right after buildSprite(), before the HP
   // bar / rank badge / id label are added — so those never pick up the red tint.
@@ -1861,8 +1866,29 @@ export class Character {
   /** Read-only â€” y of the surface (ground / platform / block top) the character is standing on. */
   get currentFloorY()  { return this.floorY; }
 
-  pauseAnimations()  { this.bodySprite?.stop(); this.legsSprite?.stop(); this.container.alpha = 1; }
-  resumeAnimations() { this.bodySprite?.play(); this.legsSprite?.play(); }
+  pauseAnimations()  { this.animPaused = true;  this.updateSpritePlayback(); this.container.alpha = 1; }
+  resumeAnimations() { this.animPaused = false; this.updateSpritePlayback(); }
+
+  /** Viewport-cull hook (called by Game.updateCulling). Toggles render
+   *  visibility and, for the sprite path, stops/starts playback so off-screen
+   *  units don't advance frames on the shared ticker. */
+  setCulled(culled: boolean) {
+    this.animCulled = culled;
+    this.container.visible = !culled;
+    this.updateSpritePlayback();
+  }
+
+  /** Play the sprites only when on-screen AND the game isn't paused; else stop.
+   *  No-op on the Graphics render path. PIXI's play()/stop() self-guard on the
+   *  current state, so redundant calls (e.g. each cull pass) are cheap. */
+  private updateSpritePlayback() {
+    if (!this.bodySprite) return;
+    if (!this.animPaused && !this.animCulled) {
+      this.bodySprite.play(); this.legsSprite?.play();
+    } else {
+      this.bodySprite.stop(); this.legsSprite?.stop();
+    }
+  }
 
   get frontX() {
     return this.side === 'player'

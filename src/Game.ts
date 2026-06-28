@@ -1705,7 +1705,7 @@ export class Game {
     const viewR  = this.cameraX + VIEWPORT_WIDTH / GAME_ZOOM + 100;
     const inView = (x: number) => x >= viewL && x <= viewR;
 
-    for (const c  of this.characters)   c.container.visible  = inView(c.x);
+    for (const c  of this.characters)   c.setCulled(!inView(c.x));  // also gates sprite playback
     for (const c  of this.coins)        c.container.visible  = inView(c.x);
     for (const p  of this.projectiles)  p.container.visible  = inView(p.x);
     for (const g  of this.grenades)     g.container.visible  = inView(g.x);
