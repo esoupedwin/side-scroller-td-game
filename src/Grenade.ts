@@ -24,6 +24,7 @@ export class Grenade {
   private readonly damage:       number;
   private readonly gravity:      number;
   private readonly shooter:      Character | null;
+  private readonly groundY:      number;
 
   private pendingExplosion: { x: number; y: number; radius: number; damage: number } | null = null;
 
@@ -41,6 +42,7 @@ export class Grenade {
     gravity:      number,
     maxVx:        number,
     shooter:      Character | null = null,
+    groundY:      number = GROUND_Y,
   ) {
     this.side         = side;
     this.x            = sx;
@@ -50,6 +52,7 @@ export class Grenade {
     this.splashRadius = splashRadius;
     this.gravity      = gravity;
     this.shooter      = shooter;
+    this.groundY      = groundY;
 
     // Compute vx, then derive vy so the grenade lands at (tx, ty).
     // Use at least 45% of maxVx for a visible arc; scale up for distant targets.
@@ -167,8 +170,8 @@ export class Grenade {
     }
 
     // Ground collision — bounce until settled
-    if (this.y >= GROUND_Y) {
-      this.y = GROUND_Y;
+    if (this.y >= this.groundY) {
+      this.y = this.groundY;
       this.bounce('y');
     }
 

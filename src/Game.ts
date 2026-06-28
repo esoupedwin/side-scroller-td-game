@@ -2124,7 +2124,7 @@ export class Game {
       const g = new Grenade(
         req.side, req.sx, req.sy, req.tx, req.ty,
         req.damage, GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX,
-        req.shooter ?? null,
+        req.shooter ?? null, this.mapGroundY,
       );
       this.grenades.push(g);
       this.grenadeLayer.addChild(g.container);
@@ -2133,7 +2133,7 @@ export class Game {
       const r = new Rocket(
         req.side, req.sx, req.sy, req.tx,
         req.damage, ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX,
-        req.shooter ?? null,
+        req.shooter ?? null, this.mapGroundY,
       );
       this.rockets.push(r);
       this.rocketLayer.addChild(r.container);

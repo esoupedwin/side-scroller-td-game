@@ -25,6 +25,7 @@ export class Rocket {
   private readonly damage:       number;
   private readonly gravity:      number;
   private readonly shooter:      Character | null;
+  private readonly groundY:      number;
 
   private pendingExplosion: { x: number; y: number; radius: number; damage: number } | null = null;
 
@@ -43,6 +44,7 @@ export class Rocket {
     gravity:      number,
     launchVx:     number,
     shooter:      Character | null = null,
+    groundY:      number = GROUND_Y,
   ) {
     this.side         = side;
     this.x            = sx;
@@ -52,6 +54,7 @@ export class Rocket {
     this.splashRadius = splashRadius;
     this.gravity      = gravity;
     this.shooter      = shooter;
+    this.groundY      = groundY;
 
     const dx  = tx - sx;
     this.vx   = Math.sign(dx || 1) * launchVx;
@@ -179,8 +182,8 @@ export class Rocket {
     }
 
     // Ground
-    if (this.y >= GROUND_Y) {
-      this.y = GROUND_Y;
+    if (this.y >= this.groundY) {
+      this.y = this.groundY;
       this.explode();
       return;
     }
