@@ -561,6 +561,11 @@
         font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
         color: #ffcc66;
       }
+      .pm-res-list { display: flex; flex-direction: column; gap: 8px; margin: 2px 0 10px; }
+      .pm-res-btn.is-active {
+        box-shadow: 0 0 0 2px #ffffff, 0 0 14px rgba(127, 212, 255, 0.65);
+      }
+      .pm-res-btn.is-active::after { content: '  ✓'; }
 
       /* ── Loading screen ─────────────────────────────────────────────────────── */
       #loading-screen {
@@ -936,8 +941,15 @@
           <h2 class="pm-title">Paused</h2>
           <button id="pm-resume-btn" class="pm-btn">▶ Resume</button>
           <button id="pm-restart-btn" class="pm-btn">↻ Restart Game</button>
+          <button id="pm-resolution-btn" class="pm-btn">🖥 Resolution</button>
           <button id="pm-keys-btn" class="pm-btn">⌨ Key Bindings</button>
           <p class="pm-hint">Press Esc to resume</p>
+        </div>
+        <!-- Resolution view -->
+        <div id="pm-resolution" class="pm-view" style="display:none;">
+          <h2 class="pm-title">Resolution</h2>
+          <div id="pm-resolution-list" class="pm-res-list"></div>
+          <button id="pm-res-back-btn" class="pm-btn pm-btn-secondary">← Back</button>
         </div>
         <!-- Key bindings view -->
         <div id="pm-keys" class="pm-view" style="display:none;">

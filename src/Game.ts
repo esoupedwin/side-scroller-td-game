@@ -28,6 +28,7 @@ import { Decor, DECOR_FRONT_Z } from './Decor';
 import { pickName } from './names';
 import { getSpriteSet } from './SpriteRegistry';
 import { tribeForSide, TRIBE_ROSTERS, heavyMeleeForTribe, getPlayerTribe, getEnemyTribe, setPlayerTribe, setEnemyTribe } from './Tribes';
+import { getRenderScale } from './resolution';
 import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 import type { CollisionBoxData } from './CollisionBox';
@@ -364,6 +365,8 @@ export class Game {
       view: canvas,
       width:  VIEWPORT_WIDTH,
       height: GAME_HEIGHT,
+      resolution: getRenderScale(),  // backing-store density from the resolution setting
+      autoDensity: true,             // keep the canvas's displayed CSS size at the logical size
       backgroundColor: 0x87ceeb,
       antialias: false,
     });
@@ -763,6 +766,14 @@ export class Game {
   }
 
   get paused() { return this.isPaused; }
+
+  /** Re-apply the current resolution setting to the renderer's backing store.
+   *  Logical size and the canvas's displayed CSS size are unchanged — only the
+   *  pixel density changes, so the HTML UI overlays stay aligned. */
+  applyResolution(): void {
+    this.app.renderer.resolution = getRenderScale();
+    this.app.renderer.resize(VIEWPORT_WIDTH, GAME_HEIGHT);
+  }
 
   togglePause() {
     if (this.isOver) return;

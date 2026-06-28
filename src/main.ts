@@ -6,6 +6,7 @@ import { preloadAllSprites } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
 import { WORLDS, ALL_MAPS, loadMapWithOverride, mapCoords } from './maps';
 import { TRIBES, TRIBE_ROSTERS, type Tribe, getPlayerTribe, setPlayerTribe } from './Tribes';
+import { RESOLUTIONS, getResolutionHeight, setResolutionHeight } from './resolution';
 import { loadTemplates as loadTribeTowerTemplates } from './TribeTowerTemplates';
 
 const loadingScreen = document.getElementById('loading-screen')!;
@@ -93,6 +94,7 @@ const devPanel = document.getElementById('dev-panel')!;
 const pauseMenu  = document.getElementById('pause-menu')!;
 const pmMainView = document.getElementById('pm-main')!;
 const pmKeysView = document.getElementById('pm-keys')!;
+const pmResolutionView = document.getElementById('pm-resolution')!;
 const cmdModalEl = document.getElementById('cmd-modal')!;
 let pauseMenuOpen   = false;
 let pauseMenuPaused = false;   // true when the menu itself initiated the pause
@@ -100,6 +102,7 @@ let pauseMenuPaused = false;   // true when the menu itself initiated the pause
 function showPauseMenuMain() {
   pmMainView.style.display = 'flex';
   pmKeysView.style.display = 'none';
+  pmResolutionView.style.display = 'none';
 }
 
 function openPauseMenu() {
@@ -131,6 +134,33 @@ document.getElementById('pm-keys-btn')!.addEventListener('click', () => {
   pmKeysView.style.display = 'flex';
 });
 document.getElementById('pm-back-btn')!.addEventListener('click', showPauseMenuMain);
+
+// ── Resolution sub-view ────────────────────────────────────────────────────
+const pmResolutionList = document.getElementById('pm-resolution-list')!;
+function refreshResolutionButtons() {
+  const current = getResolutionHeight();
+  pmResolutionList.querySelectorAll<HTMLButtonElement>('.pm-res-btn').forEach(btn => {
+    btn.classList.toggle('is-active', Number(btn.dataset.height) === current);
+  });
+}
+for (const r of RESOLUTIONS) {
+  const btn = document.createElement('button');
+  btn.className = 'pm-btn pm-res-btn';
+  btn.dataset.height = String(r.height);
+  btn.textContent = r.label;
+  btn.addEventListener('click', () => {
+    setResolutionHeight(r.height);
+    game.applyResolution();
+    refreshResolutionButtons();
+  });
+  pmResolutionList.appendChild(btn);
+}
+document.getElementById('pm-resolution-btn')!.addEventListener('click', () => {
+  pmMainView.style.display = 'none';
+  pmResolutionView.style.display = 'flex';
+  refreshResolutionButtons();
+});
+document.getElementById('pm-res-back-btn')!.addEventListener('click', showPauseMenuMain);
 // Click the backdrop (outside the card) to resume.
 pauseMenu.addEventListener('click', (e) => { if (e.target === pauseMenu) closePauseMenu(); });
 
