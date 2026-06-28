@@ -1951,13 +1951,20 @@ export class Character {
       this.movingTimer  = 0;
       this.stillTimer  += ctx.dt;
     }
-    this.tickLegs(ctx.dt);
-    this.tickAnimSprite();
-    this.tickPromoAnim(ctx.dt);
-    // update() already returned for dead characters, so this is "alive & hurt".
-    const lowHealth = this.hp <= this.maxHp * CHAR_LOW_HEALTH_RATIO;
-    this.tickLowHealthBlink(ctx.dt, lowHealth);
-    this.tickSweat(ctx.dt, lowHealth);
+    // Visual-only updates (leg/sprite animation, promotion flash, low-health
+    // tint + sweat) — skipped while the character is culled off-screen, since
+    // PIXI won't render it anyway. The AI/physics above always run, and the next
+    // in-view frame refreshes these, so there's no gameplay or visible effect.
+    // `container.visible` is maintained by Game.updateCulling().
+    if (this.container.visible) {
+      this.tickLegs(ctx.dt);
+      this.tickAnimSprite();
+      this.tickPromoAnim(ctx.dt);
+      // update() already returned for dead characters, so this is "alive & hurt".
+      const lowHealth = this.hp <= this.maxHp * CHAR_LOW_HEALTH_RATIO;
+      this.tickLowHealthBlink(ctx.dt, lowHealth);
+      this.tickSweat(ctx.dt, lowHealth);
+    }
 
     // Hard boundary: characters are blocked at each tower's front face (solid collision).
     this.boundL = Math.min(ctx.homeTowerFrontX, ctx.enemyTowerFrontX);

@@ -1479,12 +1479,16 @@ export class Game {
     this.physics.step(dt);
     for (const c of liveChars) c.syncFromBody(this.platformData, this.blockData);
 
-    this.diagnostics.tick({
-      time:      this.mapDurationSec - this.timeRemaining,
-      chars:     liveChars,
-      platforms: this.platformData,
-      blocks:    this.blockData,
-    });
+    // Guard the call so the input object isn't allocated every frame when
+    // diagnostics is off (the default) — tick() itself also early-outs.
+    if (this.diagnostics.isActive()) {
+      this.diagnostics.tick({
+        time:      this.mapDurationSec - this.timeRemaining,
+        chars:     liveChars,
+        platforms: this.platformData,
+        blocks:    this.blockData,
+      });
+    }
 
     // Tower fire — inline both branches; no per-tick closure or object spread.
     const shotP = this.playerTower.tryFire(dt, this.enemyLive);
