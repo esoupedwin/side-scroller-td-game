@@ -1,6 +1,6 @@
 import { Game, type CpuStrategyInfo } from './Game';
 import type { PowerUpType } from './PowerUp';
-import { CHAR_COST } from './constants';
+import { CHAR_COST, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from './constants';
 import { TYPE_ICON } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
@@ -57,6 +57,20 @@ const restartBtn     = document.getElementById('restart-btn')!;
 const pauseOverlay = document.getElementById('pause-overlay')!;
 const canvas = document.createElement('canvas');
 container.insertBefore(canvas, container.firstChild);
+
+// ── Scale-to-fit ────────────────────────────────────────────────────────────
+// The game renders at a fixed logical size (VIEWPORT_WIDTH × VIEWPORT_HEIGHT). Scale
+// the whole #game-container — canvas plus the HUD/spawn-card overlays inside it —
+// uniformly to fit the browser window, preserving aspect (letterboxed by the body
+// background). The pause menu / command modal / dev panel are siblings of the
+// container, so they stay fixed to the viewport and are unaffected by this scale.
+function fitGameToWindow() {
+  const scale = Math.min(window.innerWidth / VIEWPORT_WIDTH, window.innerHeight / VIEWPORT_HEIGHT);
+  container.style.transformOrigin = 'center center';
+  container.style.transform = `scale(${scale})`;
+}
+window.addEventListener('resize', fitGameToWindow);
+fitGameToWindow();
 
 let gameOver = false;
 

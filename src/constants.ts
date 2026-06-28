@@ -9,13 +9,25 @@ const pu    = GameConfig.powerUp;
 const gr    = GameConfig.grenade;
 const rkt   = GameConfig.rocket;
 
-// Visible canvas width — scales with the browser window up to a hard cap.
-// Capped so the scrolling mechanic still has headroom on the default map (2808 wide)
-// and so map balance doesn't depend on viewer's monitor size.
-const VIEWPORT_WIDTH_MAX = 2400;
-export const VIEWPORT_WIDTH = typeof window !== 'undefined'
-  ? Math.min(window.innerWidth - 16, VIEWPORT_WIDTH_MAX)
-  : canvas.width;
+// Fixed logical canvas width. The game now renders at a fixed logical size
+// (VIEWPORT_WIDTH × GAME_HEIGHT) and the whole #game-container is CSS-scaled to
+// fit the browser window (see fitGameToWindow in main.ts). Decoupling this from
+// window.innerWidth makes the view monitor-independent (so map balance doesn't
+// depend on viewer's monitor size) and lets the scale-to-fit actually enlarge.
+export const VIEWPORT_WIDTH = 1920;
+
+// Fixed logical viewport (canvas) height. Drives the canvas size, camera anchor,
+// scale-to-fit aspect, and the resolution backing-store base — but NOT the game's
+// coordinate space. GROUND_Y, the ground, and all saved map Y-coordinates stay
+// tied to GAME_HEIGHT (below), so editing this just changes how tall the visible
+// frame is (more/less sky) without moving any game elements. Default 800 = no
+// change. Raise it (e.g. 1080) to make the frame closer to 16:9 / reduce letterbox.
+export const VIEWPORT_HEIGHT = 1000;
+
+// How far (screen px) the camera may pan DOWN below its default resting view.
+// Lower = less peeking below the ground; 0 = no downward pan at all. The
+// world-bottom limit still applies, so this only ever further restricts it.
+export const CAMERA_MAX_PAN_DOWN = 160;
 
 // In-world rendering zoom. Applied to the `world` PIXI container so all game
 // objects, backgrounds, and characters scale uniformly. Ground stays anchored

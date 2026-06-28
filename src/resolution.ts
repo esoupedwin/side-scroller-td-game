@@ -1,7 +1,7 @@
-import { GAME_HEIGHT } from './constants';
+import { VIEWPORT_HEIGHT } from './constants';
 
 /**
- * Render-resolution setting. The game's logical layout is fixed (GAME_HEIGHT
+ * Render-resolution setting. The logical viewport is fixed (VIEWPORT_HEIGHT
  * tall); this only controls the PIXI renderer's backing-store density, so a
  * higher setting renders crisper without changing what's visible or the
  * canvas's displayed size (the HTML UI overlays stay aligned).
@@ -15,6 +15,7 @@ export interface ResolutionOption {
 export const RESOLUTIONS: readonly ResolutionOption[] = [
   { label: '3840 × 2160', height: 2160 },
   { label: '2560 × 1440', height: 1440 },
+  { label: '1920 × 1200', height: 1200 },
   { label: '1920 × 1080', height: 1080 },
 ];
 
@@ -35,7 +36,7 @@ export function setResolutionHeight(height: number): void {
 }
 
 /** PIXI renderer resolution (backing-store px per logical px): selected
- *  vertical resolution ÷ the game's logical height. */
+ *  vertical resolution ÷ the logical viewport height. */
 export function getRenderScale(): number {
-  return getResolutionHeight() / GAME_HEIGHT;
+  return getResolutionHeight() / VIEWPORT_HEIGHT;
 }

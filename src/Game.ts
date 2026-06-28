@@ -36,7 +36,7 @@ import { NavGraph } from './Pathfinding';
 import { Diagnostics } from './Diagnostics';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
-  VIEWPORT_WIDTH, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM,
+  VIEWPORT_WIDTH, VIEWPORT_HEIGHT, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM, CAMERA_MAX_PAN_DOWN,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, GUNSLINGER, SNIPER, VIKING, KNIGHT, HEAVY, TANKER, GRENADIER, ROCKETEER, SHOCKTROOPER,
@@ -246,9 +246,13 @@ export class Game {
     if (!this.isDragging) return;
     // Inverse drag: dragging the map right/down (positive dx/dy) should shift
     // the camera left/up so the user feels they're sliding the world.
-    // Divide by GAME_ZOOM so 1 client px == 1 world px regardless of zoom.
-    const dx = e.clientX - this.dragStartClientX;
-    const dy = e.clientY - this.dragStartClientY;
+    // The canvas is CSS-scaled to fit the window (fitGameToWindow), so 1 screen
+    // px ≠ 1 logical px — divide by the on-screen scale (rect.width / logical
+    // width) and by GAME_ZOOM so 1 screen px still maps to 1 world px.
+    const rect     = (this.app.view as HTMLCanvasElement).getBoundingClientRect();
+    const cssScale = rect.width > 0 ? rect.width / VIEWPORT_WIDTH : 1;
+    const dx = (e.clientX - this.dragStartClientX) / cssScale;
+    const dy = (e.clientY - this.dragStartClientY) / cssScale;
     this.cameraX = this.dragStartCameraX - dx / GAME_ZOOM;
     this.cameraY = this.dragStartCameraY + dy / GAME_ZOOM;
     // tick() runs the clamp on every frame, so we don't need to clamp here.
@@ -364,7 +368,7 @@ export class Game {
     this.app = new PIXI.Application({
       view: canvas,
       width:  VIEWPORT_WIDTH,
-      height: GAME_HEIGHT,
+      height: VIEWPORT_HEIGHT,
       resolution: getRenderScale(),  // backing-store density from the resolution setting
       autoDensity: true,             // keep the canvas's displayed CSS size at the logical size
       backgroundColor: 0x87ceeb,
@@ -409,7 +413,7 @@ export class Game {
     const m = this.mapDef;
     this.mapGroundY = (m.worldHeight ?? GAME_HEIGHT) - (m.groundHeight ?? (GAME_HEIGHT - GROUND_Y));
     // Default vertical scroll: ground surface sits 60px above the canvas bottom.
-    this.cameraY = (GAME_HEIGHT - 60 - this.mapGroundY) / GAME_ZOOM;
+    this.cameraY = (VIEWPORT_HEIGHT - 60 - this.mapGroundY) / GAME_ZOOM;
     const towerFaceL = m.playerTowerX + TOWER_WIDTH / 2;
     const towerFaceR = m.enemyTowerX  - TOWER_WIDTH / 2;
 
@@ -772,7 +776,7 @@ export class Game {
    *  pixel density changes, so the HTML UI overlays stay aligned. */
   applyResolution(): void {
     this.app.renderer.resolution = getRenderScale();
-    this.app.renderer.resize(VIEWPORT_WIDTH, GAME_HEIGHT);
+    this.app.renderer.resize(VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
   }
 
   togglePause() {
@@ -1266,7 +1270,12 @@ export class Game {
     // Max down: world bottom (worldHeight) at canvas bottom.
     const worldH  = (this.mapDef.worldHeight ?? GAME_HEIGHT) as number;
     const camYMax = Math.max(0, this.mapGroundY * (GAME_ZOOM - 1) / GAME_ZOOM);
-    const camYMin = Math.min(0, GAME_HEIGHT / GAME_ZOOM - worldH + this.mapGroundY * (GAME_ZOOM - 1) / GAME_ZOOM);
+    // World-bottom limit on how far down the camera may scroll…
+    const camYMinWorld = Math.min(0, VIEWPORT_HEIGHT / GAME_ZOOM - worldH + this.mapGroundY * (GAME_ZOOM - 1) / GAME_ZOOM);
+    // …further restricted so it can't pan more than CAMERA_MAX_PAN_DOWN screen px
+    // below the default resting view (restCameraY). Higher of the two = less down-pan.
+    const restCameraY = (VIEWPORT_HEIGHT - 60 - this.mapGroundY) / GAME_ZOOM;
+    const camYMin = Math.max(camYMinWorld, restCameraY - CAMERA_MAX_PAN_DOWN / GAME_ZOOM);
     this.cameraY  = Math.max(camYMin, Math.min(camYMax, this.cameraY));
     this.world.x        = -this.cameraX * GAME_ZOOM;
     this.world.y        = this.mapGroundY * (1 - GAME_ZOOM) + this.cameraY * GAME_ZOOM;
