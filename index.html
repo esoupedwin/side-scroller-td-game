@@ -414,8 +414,8 @@
       .spawn-btn {
         pointer-events: all;
         box-sizing: border-box;
-        width: 82px;
-        height: 108px;
+        width: 107px;
+        height: 140px;
         flex: 0 0 auto;
         background: #d6cbb4;
         border: 3px solid #2b2740;
@@ -444,17 +444,18 @@
       .spawn-btn.has-card .card-portrait { display: none; }
       .spawn-btn.has-card .btn-cost {
         position: absolute;
-        bottom: 7px;
+        bottom: 9px;
         left: 50%;
         transform: translateX(-50%);
         background: rgba(255, 255, 255, 0.6);
-        padding: 1px 8px 1px 6px;
-        border-radius: 10px;
+        padding: 2px 11px 2px 8px;
+        border-radius: 13px;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
       }
       #spawn-conscript-btn.has-card    { background-image: url('/cards/buy/card_buy_conscript.png'); }
       #spawn-warrior-btn.has-card      { background-image: url('/cards/buy/card_buy_warrior.png'); }
       #spawn-archer-btn.has-card       { background-image: url('/cards/buy/card_buy_archer.png'); }
+      #spawn-rifleman-btn.has-card     { background-image: url('/cards/buy/card_buy_rifleman.png'); }
       #spawn-sniper-btn.has-card       { background-image: url('/cards/buy/card_buy_sniper.png'); }
       #spawn-viking-btn.has-card       { background-image: url('/cards/buy/card_buy_viking.png'); }
       #spawn-shocktrooper-btn.has-card { background-image: url('/cards/buy/card_buy_shocktrooper.png'); }
@@ -465,12 +466,12 @@
         box-shadow: 0 7px 16px rgba(0,0,0,0.5);
       }
       .spawn-btn .card-name {
-        height: 22px;
+        height: 29px;
         display: flex;
         align-items: center;
         justify-content: center;
         text-align: center;
-        font-size: 10px;
+        font-size: 13px;
         font-weight: 800;
         line-height: 1.05;
         overflow: hidden;
@@ -480,22 +481,22 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 34px;
+        font-size: 44px;
         line-height: 1;
       }
       .spawn-btn .btn-cost {
         display: inline-flex;
         align-items: center;
-        gap: 4px;
-        font-size: 15px;
+        gap: 5px;
+        font-size: 19px;
         font-weight: 800;
         color: #2a2419;
       }
       .spawn-btn .btn-cost::before {
         content: '';
         flex-shrink: 0;
-        width: 14px;
-        height: 14px;
+        width: 18px;
+        height: 18px;
         border-radius: 50%;
         background: radial-gradient(circle at 35% 30%, #ffe89a 0%, #f4c430 45%, #d99a1c 78%, #b9790f 100%);
         box-shadow: inset 0 0 0 1.5px #e0a92a;
@@ -768,7 +769,7 @@
           <span class="card-portrait">🏹</span>
           <span class="btn-cost" id="archer-cost"></span>
         </button>
-        <button id="spawn-rifleman-btn" class="spawn-btn">
+        <button id="spawn-rifleman-btn" class="spawn-btn has-card">
           <span class="card-name">Rifleman</span>
           <span class="card-portrait">🔫</span>
           <span class="btn-cost" id="rifleman-cost"></span>
