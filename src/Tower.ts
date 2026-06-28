@@ -30,7 +30,6 @@ export class Tower {
   private bar:               PIXI.Graphics;
   private hpText:            PIXI.Text;
   private body:              PIXI.Graphics;
-  private label:             PIXI.Text;
   private lastDrawnTowerRatio = -1;
 
   // HP bar dimensions — 1.4× height, 1.2× width relative to the original design
@@ -126,16 +125,6 @@ export class Tower {
     });
     this.container.addChild(this.hpText);
     this.drawBar();
-
-    // Label
-    this.label = new PIXI.Text(side === 'player' ? 'YOUR TOWER' : 'ENEMY TOWER', {
-      fontSize: 13,
-      fill: 0xffffff,
-      fontWeight: 'bold',
-    });
-    this.label.x = x - this.label.width / 2;
-    this.label.y = baseY - TOWER_HEIGHT - BAR_OFFSET - 18;
-    this.container.addChild(this.label);
   }
 
   private drawBar() {
