@@ -289,7 +289,8 @@ export class Game {
   private readonly onCpuCharsChanged:    (chars: { id: number; name: string; type: string; behavior: string }[]) => void;
   private readonly onCpuStrategyChanged: (info: CpuStrategyInfo) => void;
   private readonly onTimeChanged:        (seconds: number) => void;
-  private readonly onEnemyTowerHpChanged: (hp: number, maxHp: number) => void;
+  private readonly onEnemyTowerHpChanged:  (hp: number, maxHp: number) => void;
+  private readonly onPlayerTowerHpChanged: (hp: number, maxHp: number) => void;
   private readonly tickFn:               (dt: number) => void;
 
   private lastCpuCharsSig     = '';
@@ -311,7 +312,8 @@ export class Game {
   private cpuStrategyInfo: CpuStrategyInfo = {
     stance: 'economy', score: 0, unitAdv: 0, towerAdv: 0, coinAdv: 0, decision: '—',
   };
-  private lastNotifiedEnemyTowerHp = -1;
+  private lastNotifiedEnemyTowerHp  = -1;
+  private lastNotifiedPlayerTowerHp = -1;
 
   // Reusable arrays rebuilt each tick — avoids per-tick filter() allocations
   private readonly liveChars:  Character[] = [];
@@ -353,15 +355,17 @@ export class Game {
     onCpuCharsChanged:    (chars: { id: number; name: string; type: string; behavior: string }[]) => void,
     onCpuStrategyChanged: (info: CpuStrategyInfo) => void,
     onTimeChanged:        (seconds: number) => void,
-    onEnemyTowerHpChanged: (hp: number, maxHp: number) => void,
+    onEnemyTowerHpChanged:  (hp: number, maxHp: number) => void,
+    onPlayerTowerHpChanged: (hp: number, maxHp: number) => void,
   ) {
-    this.onGameOver             = onGameOver;
-    this.onCoinsChanged         = onCoinsChanged;
-    this.onCpuCoinsChanged      = onCpuCoinsChanged;
-    this.onCpuCharsChanged      = onCpuCharsChanged;
-    this.onCpuStrategyChanged   = onCpuStrategyChanged;
-    this.onTimeChanged          = onTimeChanged;
-    this.onEnemyTowerHpChanged  = onEnemyTowerHpChanged;
+    this.onGameOver              = onGameOver;
+    this.onCoinsChanged          = onCoinsChanged;
+    this.onCpuCoinsChanged       = onCpuCoinsChanged;
+    this.onCpuCharsChanged       = onCpuCharsChanged;
+    this.onCpuStrategyChanged    = onCpuStrategyChanged;
+    this.onTimeChanged           = onTimeChanged;
+    this.onEnemyTowerHpChanged   = onEnemyTowerHpChanged;
+    this.onPlayerTowerHpChanged  = onPlayerTowerHpChanged;
     this.hud            = new CharacterHUD(hudEl);
     this.tickFn         = (_dt) => this.tick();
 
@@ -404,6 +408,7 @@ export class Game {
     this.notifyCoins();
     this.notifyCpuCoins();
     this.notifyEnemyTowerHp();
+    this.notifyPlayerTowerHp();
     this.onTimeChanged(this.mapDurationSec);
   }
 
@@ -1307,6 +1312,7 @@ export class Game {
     if (this.notifyCpuCharsMs    >= 200) { this.notifyCpuCharsMs    = 0; this.notifyCpuChars(); }
     if (this.notifyCpuStrategyMs >= 150) { this.notifyCpuStrategyMs = 0; this.notifyCpuStrategy(); }
     this.notifyEnemyTowerHp();
+    this.notifyPlayerTowerHp();
 
     // Rebuild live arrays into pre-allocated buffers — avoids filter() allocations each tick
     this.liveChars.length = 0; this.playerLive.length = 0; this.enemyLive.length = 0;
@@ -1963,6 +1969,13 @@ export class Game {
     this.onEnemyTowerHpChanged(hp, TOWER_HP);
   }
 
+  private notifyPlayerTowerHp() {
+    const hp = Math.ceil(this.playerTower.hp);
+    if (hp === this.lastNotifiedPlayerTowerHp) return;
+    this.lastNotifiedPlayerTowerHp = hp;
+    this.onPlayerTowerHpChanged(hp, TOWER_HP);
+  }
+
   private notifyCpuChars() {
     // Walk the prepooled enemyLive array once. Build a change-detection signature
     // by string-concatenation in a single pass (no intermediate filter/map array).
@@ -2209,7 +2222,8 @@ export class Game {
     this.cpuCoinBalance        = STARTING_COINS;
     this.lastNotifiedCoins     = -1;
     this.lastNotifiedCpuCoins  = -1;
-    this.lastNotifiedEnemyTowerHp = -1;
+    this.lastNotifiedEnemyTowerHp  = -1;
+    this.lastNotifiedPlayerTowerHp = -1;
     this.timeRemaining         = this.mapDurationSec;
     this.lastNotifiedTime      = -1;
 
@@ -2233,6 +2247,7 @@ export class Game {
     this.notifyCoins();
     this.notifyCpuCoins();
     this.notifyEnemyTowerHp();
+    this.notifyPlayerTowerHp();
     this.onTimeChanged(this.mapDurationSec);
   }
 

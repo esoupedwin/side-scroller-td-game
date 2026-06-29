@@ -28,6 +28,13 @@ const cpuCoinAmountEl = document.getElementById('cpu-coin-amount')!;
 const cpuCharsListEl  = document.getElementById('cpu-chars-list')!;
 const enemyTowerHpEl  = document.getElementById('enemy-tower-hp')!;
 
+// Top-center HUD: HP bars + clock + numeric labels for both towers.
+const topHudEl        = document.getElementById('top-hud')!;
+const playerHpFillEl  = document.getElementById('player-hp-fill')!;
+const playerHpLabelEl = document.getElementById('player-hp-label')!;
+const enemyHpFillEl   = document.getElementById('enemy-hp-fill')!;
+const enemyHpLabelEl  = document.getElementById('enemy-hp-label')!;
+
 // Every unit type the player UI has a button for (display order). The active
 // tribe's TRIBE_ROSTERS entry determines which of these are *visible* — the
 // rest are hidden via syncSpawnButtonVisibility(). Tanker is omitted entirely
@@ -81,7 +88,7 @@ let gameOver = false;
 // handleCoinsChanged via notifyCoins() — TDZ otherwise.
 const lastDisabledByBtn = new Map<HTMLButtonElement, boolean>();
 
-let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged, handleEnemyTowerHpChanged);
+let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged, handleEnemyTowerHpChanged, handlePlayerTowerHpChanged);
 
 for (const t of UNIT_TYPES) {
   spawnBtns.get(t)!.addEventListener('click', () => game.spawnPlayer(t));
@@ -707,9 +714,25 @@ function handleCpuCoinsChanged(coins: number) {
 
 
 function handleEnemyTowerHpChanged(hp: number, maxHp: number) {
+  // Dev panel value (color-coded by severity).
   enemyTowerHpEl.textContent = `${hp} / ${maxHp}`;
   const ratio = Math.max(0, hp / maxHp);
   enemyTowerHpEl.style.color = ratio < 0.28 ? '#e63946' : ratio < 0.6 ? '#f4a261' : '#e0e0e0';
+
+  // Top-center HUD: red bar retreats from the centre clock outward to the right
+  // as HP drops. scaleX from the left edge keeps the inside (clock-adjacent)
+  // pixels stable so the depletion reads as "draining toward the clock".
+  enemyHpLabelEl.textContent = String(hp);
+  enemyHpFillEl.style.transform = `scaleX(${ratio})`;
+}
+
+function handlePlayerTowerHpChanged(hp: number, maxHp: number) {
+  // Top-center HUD: blue bar retreats from the centre clock outward to the left.
+  // scaleX with the right-edge transform-origin keeps the clock-adjacent
+  // pixels stable so depletion reads as draining away from the clock.
+  const ratio = Math.max(0, hp / maxHp);
+  playerHpLabelEl.textContent = String(hp);
+  playerHpFillEl.style.transform = `scaleX(${ratio})`;
 }
 
 function handleCpuCharsChanged(chars: { id: number; name: string; type: string; behavior: string }[]) {
@@ -772,15 +795,15 @@ function handleTimeChanged(seconds: number) {
   const secs = seconds % 60;
   countdownEl.textContent = `${mins}:${String(secs).padStart(2, '0')}`;
   if (seconds < 20) {
-    countdownEl.classList.add('countdown-urgent');
+    topHudEl.classList.add('countdown-urgent');
   } else {
-    countdownEl.classList.remove('countdown-urgent');
+    topHudEl.classList.remove('countdown-urgent');
   }
 }
 
 function handleGameOver(winner: 'player' | 'enemy', reason: 'tower' | 'timeout') {
   gameOver = true;
-  countdownEl.classList.remove('countdown-urgent');
+  topHudEl.classList.remove('countdown-urgent');
   // Trigger button-state update through the coins handler
   handleCoinsChanged(parseInt(coinAmountEl.textContent ?? '0'));
 

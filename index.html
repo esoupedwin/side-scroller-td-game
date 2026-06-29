@@ -4,9 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tower Defence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" />
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { background: #1a1a2e; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; font-family: 'Segoe UI', sans-serif; gap: 4px; }
+      * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', 'Segoe UI', sans-serif; font-weight: 900; }
+      body { background: #1a1a2e; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; gap: 4px; }
       #game-container { position: relative; }
 
       /* ── Developer panel ────────────────────────────────────────────────────── */
@@ -156,52 +159,135 @@
       .dev-select:focus { outline: none; border-color: rgba(255,255,255,0.25); }
       .dev-select option, .dev-select optgroup { background: #0a0a18; color: #bbb; }
 
-      /* ── Countdown timer (top-centre) ──────────────────────────────────────── */
-      #countdown {
+      /* ── Top-centre HUD: blue HP pill │ grey clock+timer capsule │ red HP pill ── */
+      /* Three independent rounded pills laid out in a flex row. The grey
+         centre capsule contains the timer.png clock sprite + the countdown
+         text. HP bars fill from the centre outward so health drain reads as
+         retreating toward the clock. */
+      #top-hud {
         position: absolute;
         top: 8px;
         left: 50%;
         transform: translateX(-50%);
         z-index: 25;
-        font-size: 44px;
-        font-weight: 900;
-        letter-spacing: 0.06em;
-        color: #e0e0e0;
-        text-shadow: 0 1px 8px rgba(0,0,0,0.85);
+        display: flex;
+        align-items: center;
         pointer-events: none;
         user-select: none;
+      }
+      .top-hud-side {
+        position: relative;
+        width: 180px;
+        height: 60px;
+        overflow: hidden;
+        border-radius: 999px;
+        box-shadow: 0 3px 0 rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.35);
+      }
+      .top-hud-side.left  { background: #102a5e; }
+      .top-hud-side.right { background: #5e0a26; }
+      .top-hud-fill {
+        position: absolute;
+        top: 0; bottom: 0;
+        width: 100%;
+        transition: transform 0.18s ease-out;
+      }
+      .top-hud-side.left  .top-hud-fill {
+        left: 0;
+        background: linear-gradient(180deg, #3a90ff 0%, #1c64c8 100%);
+        transform-origin: right center;
+      }
+      .top-hud-side.right .top-hud-fill {
+        right: 0;
+        background: linear-gradient(180deg, #ff4a6e 0%, #c0143a 100%);
+        transform-origin: left center;
+      }
+      .top-hud-label {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        font-size: 28px;
+        font-weight: 900;
+        letter-spacing: 0.04em;
+        color: #fff;
+        text-shadow: 0 2px 0 rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.45);
         font-variant-numeric: tabular-nums;
       }
-      #countdown.countdown-urgent {
-        color: #ff2233;
-        animation: countdown-warning 0.6s ease-in-out infinite alternate;
-        transform-origin: center;
+      /* Push numeric labels toward the clock-adjacent edge so they sit on the
+         filled (live) side even at very low HP. */
+      .top-hud-side.left  .top-hud-label { justify-content: flex-end;   padding-right: 38px; }
+      .top-hud-side.right .top-hud-label { justify-content: flex-start; padding-left:  38px; }
+      #top-hud-center {
+        position: relative;
+        display: flex;
+        align-items: center;
+        height: 72px;
+        padding: 0 24px 0 10px;
+        margin: 0 -28px;            /* overlap adjacent pills so the pills join */
+        background: linear-gradient(180deg, #d6dae2 0%, #b8bdc8 100%);
+        border-radius: 999px;
+        box-shadow: 0 3px 0 rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.35);
+        z-index: 3;
+        gap: 10px;
+      }
+      #top-hud-clock {
+        flex-shrink: 0;
+        width: 64px;
+        height: 64px;
+        background: url('/sprites/misc/timer.png') center / contain no-repeat;
+        filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25));
+      }
+      #countdown {
+        font-size: 34px;
+        font-weight: 900;
+        letter-spacing: 0.01em;
+        color: #1d2540;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        min-width: 70px;
+        text-align: center;
+      }
+      #top-hud.countdown-urgent #countdown {
+        color: #c0143a;
+        animation: countdown-warning 0.55s ease-in-out infinite alternate;
       }
       @keyframes countdown-warning {
-        from {
-          transform: translateX(-50%) scale(1);
-          color: #ff2233;
-          text-shadow: 0 0 18px rgba(255,34,51,0.85), 0 1px 6px rgba(0,0,0,0.8);
-        }
-        to {
-          transform: translateX(-50%) scale(1.18);
-          color: #ffffff;
-          text-shadow: 0 0 32px rgba(255,80,80,1), 0 0 8px rgba(255,34,51,0.9);
-        }
+        from { transform: scale(1);    color: #c0143a; }
+        to   { transform: scale(1.18); color: #ff4a6e; }
       }
 
-      /* ── Coin counter (top-right) ───────────────────────────────────────────── */
+      /* ── Coin counter (top-left, cream pill) ───────────────────────────── */
       #coin-counter {
         position: absolute;
-        top: 8px; right: 10px;
+        top: 8px; left: 10px;
         z-index: 25;
-        color: #ffd166;
-        font-size: 17px;
-        font-weight: 800;
-        letter-spacing: 0.03em;
-        text-shadow: 0 0 10px rgba(255,209,102,0.55);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 4px 18px 4px 4px;
+        background: linear-gradient(180deg, #fff8e5 0%, #f1e3b6 100%);
+        border: 3px solid #1d2540;
+        border-radius: 999px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.35);
         pointer-events: none;
         user-select: none;
+      }
+      #coin-counter .coin-icon {
+        flex-shrink: 0;
+        width: 56px;
+        height: 56px;
+        background: url('/sprites/coins/coin_gold.png') center / contain no-repeat;
+      }
+      #coin-counter #coin-amount {
+        font-size: 36px;
+        font-weight: 900;
+        letter-spacing: 0.02em;
+        color: #1d2540;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        min-width: 40px;
       }
 
       /* ── Mute indicator (top-right, under coin counter) ───────────────────── */
@@ -838,8 +924,24 @@
            the DOM (hidden) so CharacterHUD's per-tick update() is harmless. -->
       <div id="char-hud" style="display:none;"></div>
       <button id="cmd-open-btn" title="Manage characters (Z)">⚔ Commands</button>
-      <div id="countdown">3:00</div>
-      <div id="coin-counter">💰 <span id="coin-amount">150</span></div>
+      <div id="top-hud">
+        <div class="top-hud-side left">
+          <div class="top-hud-fill" id="player-hp-fill"></div>
+          <div class="top-hud-label" id="player-hp-label">1000</div>
+        </div>
+        <div id="top-hud-center">
+          <div id="top-hud-clock"></div>
+          <div id="countdown">3:00</div>
+        </div>
+        <div class="top-hud-side right">
+          <div class="top-hud-fill" id="enemy-hp-fill"></div>
+          <div class="top-hud-label" id="enemy-hp-label">1000</div>
+        </div>
+      </div>
+      <div id="coin-counter">
+        <div class="coin-icon"></div>
+        <span id="coin-amount">150</span>
+      </div>
       <div id="mute-indicator" title="Toggle mute (M)">
         <span id="mute-icon">🔇</span>
         <span class="mute-hint">M</span>
