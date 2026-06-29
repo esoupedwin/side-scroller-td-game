@@ -1,7 +1,8 @@
 import { Game, type CpuStrategyInfo } from './Game';
 import type { PowerUpType } from './PowerUp';
-import { CHAR_COST, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from './constants';
+import { CHAR_COST, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, PROMO_THRESHOLDS } from './constants';
 import { TYPE_ICON } from './CharacterHUD';
+import { RANK_NAMES } from './Character';
 import { preloadAllSprites } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
 import { WORLDS, ALL_MAPS, loadMapWithOverride, mapCoords } from './maps';
@@ -234,17 +235,44 @@ window.addEventListener('keydown', (e) => {
   let cmdOpen   = false;
   let refreshT: number | null = null;
 
-  const hpLabel = (char: PlayerChar) => `${Math.ceil(char.hp)}/${Math.round(char.maxHp)}`;
+  // ── Per-character display helpers (mirror the old CharacterHUD card) ──
+  const RANK_COLORS = ['#999', '#cd7f32', '#b0b0b0', '#ffd700'] as const;
+  const hpFrac    = (char: PlayerChar) => Math.max(0, char.hp / char.maxHp);
+  const hpText    = (char: PlayerChar) => `${Math.ceil(char.hp)} / ${Math.round(char.maxHp)}`;
+  const rankInfo  = (char: PlayerChar) => {
+    const label = char.rank === 0 ? 'Private' : '◆'.repeat(char.rank) + ' ' + RANK_NAMES[char.rank];
+    return { label, color: RANK_COLORS[char.rank] };
+  };
+  // XP toward NEXT promotion. Rank 3 (Captain) → full bar, 'MAX' label.
+  const xpInfo = (char: PlayerChar) => {
+    if (char.rank >= 3) return { frac: 1, text: 'MAX', isMax: true };
+    const prev = char.rank === 0 ? 0 : PROMO_THRESHOLDS[char.rank - 1];
+    const next = PROMO_THRESHOLDS[char.rank];
+    const span = next - prev;
+    const into = Math.max(0, Math.min(span, char.currentAP - prev));
+    return { frac: into / span, text: `${Math.floor(char.currentAP)} / ${next}`, isMax: false };
+  };
 
   const buildRow = (char: PlayerChar): HTMLElement => {
     const row = document.createElement('div');
     row.className   = 'cmd-row';
     row.dataset.id  = String(char.id);
+    const { label: rankLbl, color: rankCol } = rankInfo(char);
+    const xp = xpInfo(char);
+    const typeLabel = char.config.type.charAt(0).toUpperCase() + char.config.type.slice(1);
     row.innerHTML   = `
       <span class="cmd-row-id">#${char.id}</span>
       <span class="cmd-row-name">${char.name}</span>
-      <span class="cmd-row-type">${TYPE_ICON[char.config.type] ?? ''} ${char.config.type}</span>
-      <span class="cmd-row-hp">${hpLabel(char)}</span>
+      <span class="cmd-row-type">${TYPE_ICON[char.config.type] ?? ''} ${typeLabel}</span>
+      <span class="cmd-row-rank" style="color:${rankCol}">${rankLbl}</span>
+      <div class="cmd-row-bar">
+        <div class="cmd-row-bar-label"><span>HP</span><span class="num">${hpText(char)}</span></div>
+        <div class="cmd-row-bar-track"><div class="cmd-row-bar-fill hp" style="width:${(hpFrac(char) * 100).toFixed(1)}%"></div></div>
+      </div>
+      <div class="cmd-row-bar">
+        <div class="cmd-row-bar-label"><span>XP</span><span class="num">${xp.text}</span></div>
+        <div class="cmd-row-bar-track"><div class="cmd-row-bar-fill xp${xp.isMax ? ' is-max' : ''}" style="width:${(xp.frac * 100).toFixed(1)}%"></div></div>
+      </div>
       <span class="cmd-row-bhv"></span>
     `;
     const bhvBox = row.querySelector('.cmd-row-bhv') as HTMLElement;
@@ -270,9 +298,9 @@ window.addEventListener('keydown', (e) => {
     for (const char of chars) cmdList.appendChild(buildRow(char));
   };
 
-  // In-place refresh: HP text + active-button class only. Falls back to a
-  // full rebuild when the set of char ids changes (death, spawn) so rows
-  // appear/disappear without flicker.
+  // In-place refresh: HP/XP bars + numbers + rank + active behavior class.
+  // Falls back to a full rebuild only when the set of char ids changes
+  // (death, spawn) so rows appear/disappear without flicker.
   const refreshCmdRows = () => {
     const chars      = game.playerCharacters;
     const currentIds = new Set(chars.map(c => c.id));
@@ -284,7 +312,22 @@ window.addEventListener('keydown', (e) => {
     for (const char of chars) {
       const row = cmdList.querySelector(`[data-id="${char.id}"]`);
       if (!row) continue;
-      (row.querySelector('.cmd-row-hp') as HTMLElement).textContent = hpLabel(char);
+      const bars = row.querySelectorAll('.cmd-row-bar');
+      const hpBar = bars[0], xpBar = bars[1];
+      // HP
+      (hpBar.querySelector('.num') as HTMLElement).textContent = hpText(char);
+      (hpBar.querySelector('.cmd-row-bar-fill') as HTMLElement).style.width = `${(hpFrac(char) * 100).toFixed(1)}%`;
+      // XP + rank
+      const xp = xpInfo(char);
+      (xpBar.querySelector('.num') as HTMLElement).textContent = xp.text;
+      const xpFill = xpBar.querySelector('.cmd-row-bar-fill') as HTMLElement;
+      xpFill.style.width = `${(xp.frac * 100).toFixed(1)}%`;
+      xpFill.classList.toggle('is-max', xp.isMax);
+      const { label: rankLbl, color: rankCol } = rankInfo(char);
+      const rankEl = row.querySelector('.cmd-row-rank') as HTMLElement;
+      rankEl.textContent = rankLbl;
+      rankEl.style.color = rankCol;
+      // Behaviour
       row.querySelectorAll('.cmd-bhv-btn').forEach(btn => {
         const b = btn as HTMLButtonElement;
         b.classList.toggle('is-active', b.dataset.bhv === char.behavior);
@@ -336,6 +379,16 @@ window.addEventListener('keydown', (e) => {
       closeCmdModal();
     }
   });
+
+  // Bottom-right Commands button — main entry point now that the HUD card
+  // panel is hidden. Mirrors the Z keybind: toggles the modal open/closed.
+  const cmdOpenBtn = document.getElementById('cmd-open-btn') as HTMLButtonElement | null;
+  if (cmdOpenBtn) {
+    cmdOpenBtn.addEventListener('click', () => {
+      if (cmdOpen) closeCmdModal();
+      else         openCmdModal();
+    });
+  }
 }
 
 // ── Mute indicator ────────────────────────────────────────────────────────

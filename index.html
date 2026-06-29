@@ -241,6 +241,44 @@
       }
       #mute-indicator.is-muted .mute-hint { color: rgba(255,138,147,0.7); }
 
+      /* ── Commands button (bottom-right, opens #cmd-modal) ─────────────── */
+      /* Replaces the old top-left CharacterHUD strip. Stays visible at all
+         times during play so the player can re-route their units without
+         a keybind. Same modal also bound to Z and the ⚙ dev shortcut. */
+      #cmd-open-btn {
+        position: absolute;
+        bottom: 18px;
+        right: 18px;
+        z-index: 30;
+        pointer-events: all;
+        padding: 8px 14px;
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #fff;
+        background: linear-gradient(135deg, #2c7be5, #1e5fb0);
+        border: 1px solid #4a93f0;
+        border-radius: 6px;
+        cursor: pointer;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.4) inset;
+        transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
+      }
+      #cmd-open-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 5px 14px rgba(0,0,0,0.6), 0 0 12px rgba(74,147,240,0.6);
+        filter: brightness(1.12);
+      }
+      #cmd-open-btn:active {
+        transform: translateY(0);
+        filter: brightness(0.92);
+      }
+      #cmd-open-btn:disabled {
+        opacity: 0.45;
+        pointer-events: none;
+      }
+
       /* ── Character HUD (top strip) ─────────────────────────────────────────── */
       #char-hud {
         position: absolute;
@@ -714,6 +752,43 @@
         min-width: 78px;
         font-variant-numeric: tabular-nums;
       }
+      /* Visual HP + XP bars (richer than just a number — what the CharacterHUD
+         cards used to show on the top-left strip). Each bar block is a
+         narrow column with a labelled track. */
+      .cmd-row-bar {
+        display: flex; flex-direction: column; gap: 2px;
+        min-width: 90px;
+      }
+      .cmd-row-bar-label {
+        font-size: 9px; color: #8aa0b6;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        display: flex; justify-content: space-between;
+      }
+      .cmd-row-bar-label .num {
+        color: #c0d0e0;
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      .cmd-row-bar-track {
+        height: 5px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .cmd-row-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.1s linear;
+      }
+      .cmd-row-bar-fill.hp { background: linear-gradient(90deg, #4cd964, #2c7be5); }
+      .cmd-row-bar-fill.xp { background: linear-gradient(90deg, #ffd166, #f4a261); }
+      .cmd-row-bar-fill.xp.is-max { background: linear-gradient(90deg, #ffd700, #ffae00); box-shadow: 0 0 4px rgba(255,215,0,0.5); }
+      .cmd-row-rank {
+        font-size: 10px; font-weight: 700;
+        text-align: center;
+        min-width: 70px;
+        letter-spacing: 0.04em;
+      }
       .cmd-row-bhv {
         display: flex; gap: 4px;
         margin-left: auto;
@@ -758,7 +833,11 @@
     </div>
 
     <div id="game-container">
-      <div id="char-hud"></div>
+      <!-- Top-left char card strip — its info has moved into #cmd-modal,
+           opened from the bottom-right Commands button (or Z key). Kept in
+           the DOM (hidden) so CharacterHUD's per-tick update() is harmless. -->
+      <div id="char-hud" style="display:none;"></div>
+      <button id="cmd-open-btn" title="Manage characters (Z)">⚔ Commands</button>
       <div id="countdown">3:00</div>
       <div id="coin-counter">💰 <span id="coin-amount">150</span></div>
       <div id="mute-indicator" title="Toggle mute (M)">
@@ -982,13 +1061,13 @@
       </div>
     </div>
 
-    <!-- ── Character command modal (Z key) ──────────────────────────────── -->
+    <!-- ── Character command modal (bottom-right Commands button or Z key) ── -->
     <div id="cmd-modal" style="display:none;">
       <div class="cmd-card">
         <div class="cmd-header">
           <h2>Character Command</h2>
           <span class="cmd-time">⏱ SLOW-MO ×0.2</span>
-          <span class="cmd-hint">Press Z or Esc to close</span>
+          <span class="cmd-hint">Z or Esc to close</span>
         </div>
         <div class="cmd-bulk">
           <span class="cmd-bulk-label">Set all to:</span>
