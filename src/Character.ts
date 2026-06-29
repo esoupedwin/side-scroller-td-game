@@ -381,7 +381,7 @@ export class Character {
 
     this.barBg = new PIXI.Graphics();
     this.barBg.beginFill(0x333333);
-    this.barBg.drawRect(-CHAR_HP_BAR_W / 2, this.hpBarOffsetY(), CHAR_HP_BAR_W, CHAR_HP_BAR_H);
+    this.barBg.drawRoundedRect(-CHAR_HP_BAR_W / 2, this.hpBarOffsetY(), CHAR_HP_BAR_W, CHAR_HP_BAR_H, CHAR_HP_BAR_H / 2);
     this.barBg.endFill();
     this.container.addChild(this.barBg);
 
@@ -1537,7 +1537,7 @@ export class Character {
     this.lastDrawnHpRatio = ratio;
     this.bar.clear();
     this.bar.beginFill(this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR);
-    this.bar.drawRect(-CHAR_HP_BAR_W / 2, this.hpBarOffsetY(), CHAR_HP_BAR_W * ratio, CHAR_HP_BAR_H);
+    this.bar.drawRoundedRect(-CHAR_HP_BAR_W / 2, this.hpBarOffsetY(), CHAR_HP_BAR_W * ratio, CHAR_HP_BAR_H, CHAR_HP_BAR_H / 2);
     this.bar.endFill();
   }
 
