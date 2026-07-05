@@ -261,6 +261,8 @@ export const RIFLEMAN = {
   width:       ch.width,
   height:      ch.height,
   knockback:   ch.rifleman.knockback,
+  shotsBeforeCooldown: ch.rifleman.shotsBeforeCooldown,
+  cooldownSec:         ch.rifleman.cooldownSec,
 };
 
 export const GUNSLINGER = {
@@ -317,6 +319,8 @@ export const SHOCKTROOPER = {
   width:       ch.width,
   height:      ch.height,
   knockback:   ch.shocktrooper.knockback,
+  shotsBeforeCooldown: ch.shocktrooper.shotsBeforeCooldown,
+  cooldownSec:         ch.shocktrooper.cooldownSec,
 };
 
 export const KNIGHT = {

@@ -83,6 +83,12 @@ export interface CharacterConfig {
   width:       number;
   height:      number;
   knockback:   number;   // px/s horizontal impulse applied to the victim on a successful hit (melee or ranged)
+  // Magazine / reload: after firing `shotsBeforeCooldown` shots (at fireRate),
+  // the weapon must wait `cooldownSec` before it can fire again. cooldownSec = 0
+  // (or shotsBeforeCooldown = 0) disables the mechanic — the weapon fires
+  // indefinitely at fireRate. Optional so unconfigured types default to no cooldown.
+  shotsBeforeCooldown?: number;
+  cooldownSec?:         number;
 }
 
 export interface FireRequest {
@@ -193,6 +199,9 @@ export class Character {
   private promoAnimTimer = -1;
 
   private attackTimer        = 0;
+  // Magazine / reload state (see CharacterConfig.shotsBeforeCooldown/cooldownSec).
+  private magShotsFired      = 0;   // shots fired since the last cooldown
+  private cooldownTimer      = 0;   // seconds remaining before the weapon can fire again
   private randomJumpTimer    = Math.random() * 3;  // stagger across characters
   private evasiveJumpTimer   = 0;
   private lastMoveDir:         1 | -1 = 1;
@@ -576,7 +585,10 @@ export class Character {
     const inMotion  = wasMoving ? this.stillTimer < 0.15 : this.movingTimer > 0.05;
     const legs: LegsAnimName = inMotion ? 'walk' : 'idle';
 
-    const recentlyFired = this.state === 'fighting' || this.attackFacingTimer > 0;
+    // While reloading (cooldownTimer > 0) the weapon can't fire, so don't play
+    // the attack/firing animation — the unit falls back to idle/walk. It still
+    // faces the enemy (facingDir below is unaffected).
+    const recentlyFired = this.cooldownTimer <= 0 && (this.state === 'fighting' || this.attackFacingTimer > 0);
     let body: BodyAnimName;
     if (recentlyFired)                                              body = 'attack';
     else if (this.coinThrowTimer > 0)                               body = 'throw';
@@ -1812,6 +1824,8 @@ export class Character {
     this.jumpVx             = 0;
     this.knockbackVx        = 0;
     this.attackTimer        = 0;
+    this.cooldownTimer      = 0;
+    this.magShotsFired      = 0;
     this.attackFacingTimer  = 0;
     this.pendingMeleeSwing  = null;
     this.pendingBlast       = null;
@@ -1919,6 +1933,7 @@ export class Character {
     if (this.isDead) return;
 
     this.attackTimer        = Math.max(0, this.attackTimer        - ctx.dt);
+    this.cooldownTimer      = Math.max(0, this.cooldownTimer      - ctx.dt);
     this.evasiveJumpTimer   = Math.max(0, this.evasiveJumpTimer   - ctx.dt);
     this.attackFacingTimer  = Math.max(0, this.attackFacingTimer  - ctx.dt);
     this.tickPendingMeleeSwing(ctx);
@@ -3238,8 +3253,23 @@ export class Character {
     else                      burst.delay = GUNSLINGER_BURST_INTERVAL;
   }
 
+  /** Count one shot toward the magazine; once it fills, start the reload cooldown
+   *  (see CharacterConfig.shotsBeforeCooldown / cooldownSec). A gunslinger burst
+   *  counts as a single shot here — the whole trigger pull, not each round.
+   *  No-op when either value is 0, so most weapons fire indefinitely at fireRate. */
+  private registerShot() {
+    const magSize  = this.config.shotsBeforeCooldown ?? 0;
+    const cooldown = this.config.cooldownSec ?? 0;
+    if (magSize <= 0 || cooldown <= 0) return;
+    this.magShotsFired += 1;
+    if (this.magShotsFired >= magSize) {
+      this.cooldownTimer = cooldown;
+      this.magShotsFired = 0;
+    }
+  }
+
   private attackEnemy(target: Character, onFire?: (r: FireRequest) => void) {
-    if (this.attackTimer > 0) return;
+    if (this.attackTimer > 0 || this.cooldownTimer > 0) return;
     if (this.pendingMeleeSwing || this.pendingBlast || this.pendingBurst) return;  // wait for the previous swing/blast/burst to land
     const dirSign = Math.sign(target.x - this.x);
     if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
@@ -3306,6 +3336,7 @@ export class Character {
       }
     }
     this.attackTimer = this.config.fireRate;
+    this.registerShot();
   }
 
   private attackTower(
@@ -3313,12 +3344,13 @@ export class Character {
     onFire?: (r: FireRequest) => void,
     onDamageTower?: (dmg: number) => void,
   ) {
-    if (this.attackTimer > 0) return;
+    if (this.attackTimer > 0 || this.cooldownTimer > 0) return;
     if (this.pendingMeleeSwing || this.pendingBurst) return;  // wait for the previous swing/burst to land
     const dirSign = Math.sign(towerFrontX - this.x);
     if (dirSign !== 0) this.lastAttackDir = dirSign as 1 | -1;
     const windUp = this.beginAttack();
     this.attackTimer = this.config.fireRate;
+    this.registerShot();
     // The gunslinger rolls crit per burst round inside fireBullet, so it skips
     // this single whole-attack miss roll.
     if (this.config.type !== 'gunslinger' && Math.random() < this.config.critical) return;  // miss â€” silent, towers have no label system

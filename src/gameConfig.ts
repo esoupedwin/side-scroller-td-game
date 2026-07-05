@@ -103,10 +103,12 @@ export const GameConfig = {
       speed:       78,
       attackRange: 280,
       attackPower: 9,
-      fireRate:    0.5,
+      fireRate:    0.25,       // 2Ã— faster than before (was 0.5)
       cost:        70,
       critical:    0.07, // 7 % miss chance
       knockback:   0,
+      shotsBeforeCooldown: 3,  // fires 3 rounds rapidlyâ€¦
+      cooldownSec:         1.5, // â€¦then reloads for 1.5 s
     },
     gunslinger: {
       type:        'gunslinger' as const,
@@ -149,10 +151,12 @@ export const GameConfig = {
       speed:       85,
       attackRange: 190,        // doubled — still closes in, but each shot is an AoE cone
       attackPower: 20,         // per enemy hit; the shot strikes EVERY enemy in the cone
-      fireRate:    0.9,        // pump-action reload — quicker than a slow shotgun
+      fireRate:    0.7,        // pump-action reload — quicker than a slow shotgun
       cost:        90,
       critical:    0.10,
       knockback:   350,        // shotgun blast flings victims back, like the viking
+      shotsBeforeCooldown: 3,  // fires 3 blasts…
+      cooldownSec:         2,  // …then must reload for 1 s before firing again
     },
     knight: {
       type:        'knight'   as const,
