@@ -12,6 +12,9 @@ import { loadTemplates as loadTribeTowerTemplates } from './TribeTowerTemplates'
 
 const loadingScreen = document.getElementById('loading-screen')!;
 
+// Show the build version (package.json version + commit SHA, injected by Vite).
+document.getElementById('loading-version')!.textContent = __APP_VERSION__;
+
 loadTribeTowerTemplates(); // sync localStorage read — must run before `new Game()` so Tower can read skins
 await preloadAllSprites();
 initAudio(); // fire-and-forget — loads in background, never delays game start
