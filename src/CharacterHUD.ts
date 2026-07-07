@@ -2,6 +2,25 @@ import type { Character } from './Character';
 import { RANK_NAMES } from './Character';
 import { PROMO_THRESHOLDS } from './constants';
 
+// ── Shared rank/XP display helpers ──────────────────────────────────────────
+// Used by both the HUD card (below) and the command dialog (main.ts) so the
+// rank-badge string and promotion-progress math live in one place.
+
+/** Rank badge label: 'Private' at rank 0, else ◆-repeat + rank name. */
+export function rankLabel(rank: number): string {
+  return rank === 0 ? 'Private' : '◆'.repeat(rank) + ' ' + RANK_NAMES[rank];
+}
+
+/** XP progress toward the next promotion. Rank ≥ 3 (Captain) is maxed. */
+export function xpProgress(ap: number, rank: number): { frac: number; text: string; isMax: boolean } {
+  if (rank >= 3) return { frac: 1, text: 'MAX', isMax: true };
+  const prev = rank === 0 ? 0 : PROMO_THRESHOLDS[rank - 1];
+  const next = PROMO_THRESHOLDS[rank];
+  const span = next - prev;
+  const into = Math.max(0, Math.min(span, ap - prev));
+  return { frac: into / span, text: `${Math.floor(ap)} / ${next}`, isMax: false };
+}
+
 export const TYPE_ICON: Record<string, string> = {
   conscript: '👊',
   warrior:   '⚔',
@@ -142,24 +161,15 @@ export class CharacterHUD {
 
   private syncRankEl(el: HTMLElement, rank: 0 | 1 | 2 | 3) {
     const RANK_COLORS = ['#444', '#cd7f32', '#b0b0b0', '#ffd700'];
-    el.textContent = rank === 0 ? 'Private' : '◆'.repeat(rank) + ' ' + RANK_NAMES[rank];
+    el.textContent = rankLabel(rank);
     el.style.color = RANK_COLORS[rank];
   }
 
   private syncXpEl(bar: HTMLElement, num: HTMLElement, ap: number, rank: 0 | 1 | 2 | 3) {
-    if (rank >= 3) {
-      bar.style.width  = '100%';
-      num.textContent  = 'MAX';
-      bar.parentElement?.classList.add('char-card-xp-track-max');
-      return;
-    }
-    bar.parentElement?.classList.remove('char-card-xp-track-max');
-    const prev = rank === 0 ? 0 : PROMO_THRESHOLDS[rank - 1];
-    const next = PROMO_THRESHOLDS[rank];
-    const span = next - prev;
-    const into = Math.max(0, Math.min(span, ap - prev));
-    bar.style.width = `${(into / span) * 100}%`;
-    num.textContent = `${Math.floor(ap)} / ${next}`;
+    const xp = xpProgress(ap, rank);
+    bar.parentElement?.classList.toggle('char-card-xp-track-max', xp.isMax);
+    bar.style.width = xp.isMax ? '100%' : `${xp.frac * 100}%`;
+    num.textContent = xp.text;
   }
 
   private syncBehaviorEl(el: HTMLElement, behavior: 'attacking' | 'collecting' | 'harass' | 'defend' | 'rush') {

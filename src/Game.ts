@@ -229,6 +229,7 @@ export class Game {
   private dragStartClientY    = 0;
   private dragStartCameraX    = 0;
   private dragStartCameraY    = 0;
+  private dragCssScale        = 1;   // on-screen px per logical px, snapshotted at drag start
 
   private readonly onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0) return;   // primary button only — don't fight right-click menus
@@ -237,7 +238,12 @@ export class Game {
     this.dragStartClientY = e.clientY;
     this.dragStartCameraX = this.cameraX;
     this.dragStartCameraY = this.cameraY;
+    // The canvas is CSS-scaled to fit the window (fitGameToWindow), so 1 screen
+    // px ≠ 1 logical px. Snapshot the scale once here (it can't change mid-drag,
+    // only on resize) instead of forcing a layout reflow every pointermove.
     const c = this.app.view as HTMLCanvasElement;
+    const rect = c.getBoundingClientRect();
+    this.dragCssScale = rect.width > 0 ? rect.width / VIEWPORT_WIDTH : 1;
     c.style.cursor = 'grabbing';
     c.setPointerCapture?.(e.pointerId);
   };
@@ -245,14 +251,10 @@ export class Game {
   private readonly onPointerMove = (e: PointerEvent) => {
     if (!this.isDragging) return;
     // Inverse drag: dragging the map right/down (positive dx/dy) should shift
-    // the camera left/up so the user feels they're sliding the world.
-    // The canvas is CSS-scaled to fit the window (fitGameToWindow), so 1 screen
-    // px ≠ 1 logical px — divide by the on-screen scale (rect.width / logical
-    // width) and by GAME_ZOOM so 1 screen px still maps to 1 world px.
-    const rect     = (this.app.view as HTMLCanvasElement).getBoundingClientRect();
-    const cssScale = rect.width > 0 ? rect.width / VIEWPORT_WIDTH : 1;
-    const dx = (e.clientX - this.dragStartClientX) / cssScale;
-    const dy = (e.clientY - this.dragStartClientY) / cssScale;
+    // the camera left/up so the user feels they're sliding the world. Divide by
+    // the snapshotted on-screen scale and by GAME_ZOOM so 1 screen px maps to 1 world px.
+    const dx = (e.clientX - this.dragStartClientX) / this.dragCssScale;
+    const dy = (e.clientY - this.dragStartClientY) / this.dragCssScale;
     this.cameraX = this.dragStartCameraX - dx / GAME_ZOOM;
     this.cameraY = this.dragStartCameraY + dy / GAME_ZOOM;
     // tick() runs the clamp on every frame, so we don't need to clamp here.

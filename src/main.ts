@@ -1,8 +1,7 @@
 import { Game, type CpuStrategyInfo } from './Game';
 import type { PowerUpType } from './PowerUp';
-import { CHAR_COST, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, PROMO_THRESHOLDS } from './constants';
-import { TYPE_ICON } from './CharacterHUD';
-import { RANK_NAMES } from './Character';
+import { CHAR_COST, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from './constants';
+import { TYPE_ICON, rankLabel, xpProgress } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
 import { WORLDS, ALL_MAPS, loadMapWithOverride, mapCoords } from './maps';
@@ -75,9 +74,9 @@ container.insertBefore(canvas, container.firstChild);
 // uniformly to fit the browser window, preserving aspect (letterboxed by the body
 // background). The pause menu / command modal / dev panel are siblings of the
 // container, so they stay fixed to the viewport and are unaffected by this scale.
+container.style.transformOrigin = 'center center';   // invariant — set once
 function fitGameToWindow() {
   const scale = Math.min(window.innerWidth / VIEWPORT_WIDTH, window.innerHeight / VIEWPORT_HEIGHT);
-  container.style.transformOrigin = 'center center';
   container.style.transform = `scale(${scale})`;
 }
 window.addEventListener('resize', fitGameToWindow);
@@ -246,22 +245,13 @@ window.addEventListener('keydown', (e) => {
   let refreshT: number | null = null;
 
   // ── Per-character display helpers (mirror the old CharacterHUD card) ──
+  // rankLabel / xpProgress are shared with CharacterHUD; only the dialog's rank
+  // colour palette (lighter, for the dark card background) is local.
   const RANK_COLORS = ['#999', '#cd7f32', '#b0b0b0', '#ffd700'] as const;
   const hpFrac    = (char: PlayerChar) => Math.max(0, char.hp / char.maxHp);
   const hpText    = (char: PlayerChar) => `${Math.ceil(char.hp)} / ${Math.round(char.maxHp)}`;
-  const rankInfo  = (char: PlayerChar) => {
-    const label = char.rank === 0 ? 'Private' : '◆'.repeat(char.rank) + ' ' + RANK_NAMES[char.rank];
-    return { label, color: RANK_COLORS[char.rank] };
-  };
-  // XP toward NEXT promotion. Rank 3 (Captain) → full bar, 'MAX' label.
-  const xpInfo = (char: PlayerChar) => {
-    if (char.rank >= 3) return { frac: 1, text: 'MAX', isMax: true };
-    const prev = char.rank === 0 ? 0 : PROMO_THRESHOLDS[char.rank - 1];
-    const next = PROMO_THRESHOLDS[char.rank];
-    const span = next - prev;
-    const into = Math.max(0, Math.min(span, char.currentAP - prev));
-    return { frac: into / span, text: `${Math.floor(char.currentAP)} / ${next}`, isMax: false };
-  };
+  const rankInfo  = (char: PlayerChar) => ({ label: rankLabel(char.rank), color: RANK_COLORS[char.rank] });
+  const xpInfo    = (char: PlayerChar) => xpProgress(char.currentAP, char.rank);
 
   const buildRow = (char: PlayerChar): HTMLElement => {
     const row = document.createElement('div');
@@ -716,26 +706,24 @@ function handleCpuCoinsChanged(coins: number) {
 }
 
 
-function handleEnemyTowerHpChanged(hp: number, maxHp: number) {
-  // Dev panel value (color-coded by severity).
-  enemyTowerHpEl.textContent = `${hp} / ${maxHp}`;
-  const ratio = Math.max(0, hp / maxHp);
-  enemyTowerHpEl.style.color = ratio < 0.28 ? '#e63946' : ratio < 0.6 ? '#f4a261' : '#e0e0e0';
+// Top-center HUD tower bar: the fill's scaleX retreats from the centre clock as
+// HP drops (transform-origin set in CSS keeps the clock-adjacent edge stable),
+// and the label shows the raw HP.
+function setTowerBar(fillEl: HTMLElement, labelEl: HTMLElement, hp: number, maxHp: number) {
+  labelEl.textContent = String(hp);
+  fillEl.style.transform = `scaleX(${Math.max(0, hp / maxHp)})`;
+}
 
-  // Top-center HUD: red bar retreats from the centre clock outward to the right
-  // as HP drops. scaleX from the left edge keeps the inside (clock-adjacent)
-  // pixels stable so the depletion reads as "draining toward the clock".
-  enemyHpLabelEl.textContent = String(hp);
-  enemyHpFillEl.style.transform = `scaleX(${ratio})`;
+function handleEnemyTowerHpChanged(hp: number, maxHp: number) {
+  setTowerBar(enemyHpFillEl, enemyHpLabelEl, hp, maxHp);
+  // Dev panel value (color-coded by severity).
+  const ratio = Math.max(0, hp / maxHp);
+  enemyTowerHpEl.textContent = `${hp} / ${maxHp}`;
+  enemyTowerHpEl.style.color = ratio < 0.28 ? '#e63946' : ratio < 0.6 ? '#f4a261' : '#e0e0e0';
 }
 
 function handlePlayerTowerHpChanged(hp: number, maxHp: number) {
-  // Top-center HUD: blue bar retreats from the centre clock outward to the left.
-  // scaleX with the right-edge transform-origin keeps the clock-adjacent
-  // pixels stable so depletion reads as draining away from the clock.
-  const ratio = Math.max(0, hp / maxHp);
-  playerHpLabelEl.textContent = String(hp);
-  playerHpFillEl.style.transform = `scaleX(${ratio})`;
+  setTowerBar(playerHpFillEl, playerHpLabelEl, hp, maxHp);
 }
 
 function handleCpuCharsChanged(chars: { id: number; name: string; type: string; behavior: string }[]) {
