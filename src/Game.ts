@@ -39,13 +39,13 @@ import {
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM, CAMERA_MAX_PAN_DOWN,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  CONSCRIPT, WARRIOR, ARCHER, RIFLEMAN, GUNSLINGER, SNIPER, VIKING, KNIGHT, HEAVY, TANKER, GRENADIER, ROCKETEER, SHOCKTROOPER,
+  charConfig, charCost,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
   GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY, ATTACK_KNOCKBACK_DECAY,
   ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX, ROCKET_SPLASH_MIN_FRAC,
   ROCKET_HIT_RADIUS, ROCKET_KNOCKBACK_MAX_VX, ROCKET_KNOCKBACK_MAX_VY, ROCKET_KNOCKBACK_DECAY,
   CPU_SPAWN_MIN_MS, CPU_SPAWN_MAX_MS, CPU_FIRST_SPAWN_MAX,
-  STARTING_COINS, CHAR_COST,
+  STARTING_COINS,
   PASSIVE_INCOME_RATE, LOW_BALANCE_THRESHOLD, LOW_BALANCE_INCOME_MULT,
   COIN_VALUE, KILL_REWARD, TOWER_KILL_REWARD, COIN_DROP_MIN_MS, COIN_DROP_MAX_MS,
   COIN_LIFETIME_S,
@@ -77,22 +77,6 @@ function withSpawnBoosts(cfg: CharacterConfig): CharacterConfig {
     attackPower: cfg.attackPower + spawnBoost(),
   };
 }
-
-const CHAR_CONFIGS = {
-  conscript: CONSCRIPT,
-  warrior:   WARRIOR,
-  archer:    ARCHER,
-  rifleman:  RIFLEMAN,
-  gunslinger: GUNSLINGER,
-  sniper:    SNIPER,
-  viking:    VIKING,
-  shocktrooper: SHOCKTROOPER,
-  knight:    KNIGHT,
-  heavy:     HEAVY,
-  tanker:    TANKER,
-  grenadier: GRENADIER,
-  rocketeer: ROCKETEER,
-} as const;
 
 const PARALLAX_FACTOR     = 0.15; // near background scrolls at 15 % of world camera speed
 const PARALLAX_FACTOR_FAR = 0.05; // far background scrolls at 5 % — feels more distant
@@ -758,13 +742,14 @@ export class Game {
   /** Returns false if the player cannot afford this unit. */
   spawnPlayer(type: CharacterConfig['type']): boolean {
     if (this.isOver) return false;
-    const cost = CHAR_COST[type];
+    const playerTribe = getPlayerTribe();
+    const cost = charCost(playerTribe, type);
     if (this.coinBalance < cost) return false;
 
     this.coinBalance -= cost;
     this.notifyCoins();
 
-    const config  = withSpawnBoosts(CHAR_CONFIGS[type]);
+    const config  = withSpawnBoosts(charConfig(playerTribe, type));
     // Offset by half the character body width so the unit's tower-side edge
     // (not centre) sits at the tribe's configured spawn point — keeps the
     // body from overlapping the tower physics box.
@@ -920,6 +905,8 @@ export class Game {
   private spawnCpu(self: 'player' | 'enemy', selfChars: Character[], oppChars: Character[]) {
     if (this.isOver) return;
 
+    const cpuTribe  = tribeForSide(self);
+    const cost$     = (type: string) => charCost(cpuTribe, type);
     const stance    = self === 'enemy' ? this.cpuStance : this.playerStance;
     const pressure  = oppChars.length - selfChars.length;
     const balance   = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
@@ -930,7 +917,7 @@ export class Game {
     // stance AI and roster filter entirely. Saves toward it when it can't afford.
     if (self === 'enemy' && this.cpuForcedType) {
       const type = this.cpuForcedType;
-      const cost = CHAR_COST[type];
+      const cost = cost$(type);
       if (this.cpuCoinBalance >= cost) {
         this.cpuCoinBalance -= cost;
         const c = this.spawnCpuUnit(self, type, spawnY);
@@ -954,10 +941,10 @@ export class Game {
       : this.cachedPlayerOppClustered;
 
     if (stance === 'push') {
-      if (opponentsClustered && balance >= CHAR_COST.rocketeer) {
+      if (opponentsClustered && balance >= cost$('rocketeer')) {
         // Splash-heavy: opponents are bunched up, prefer rockets/grenades
         order = ['rocketeer', 'grenadier', 'rifleman', 'knight', 'heavy', 'warrior', 'archer'];
-      } else if (opponentsClustered && balance >= CHAR_COST.grenadier) {
+      } else if (opponentsClustered && balance >= cost$('grenadier')) {
         order = ['grenadier', 'rifleman', 'knight', 'heavy', 'warrior', 'archer'];
       } else {
         // Aggressive push: flood high-damage units; knight leads the melee wedge
@@ -973,11 +960,11 @@ export class Game {
       }
     } else {
       // Economy: invest in better units
-      if (balance >= CHAR_COST.sniper && selfChars.length >= 3) {
+      if (balance >= cost$('sniper') && selfChars.length >= 3) {
         order = ['sniper', 'rifleman', 'knight', 'archer', 'heavy', 'warrior'];
-      } else if (balance >= CHAR_COST.knight) {
+      } else if (balance >= cost$('knight')) {
         order = ['knight', 'rifleman', 'gunslinger', 'archer', 'heavy', 'warrior'];
-      } else if (balance >= CHAR_COST.rifleman) {
+      } else if (balance >= cost$('rifleman')) {
         order = ['rifleman', 'gunslinger', 'archer', 'heavy', 'warrior'];
       } else {
         order = ['archer', 'heavy', 'warrior'];
@@ -988,7 +975,6 @@ export class Game {
     // 'knight' as the heavy melee) into the actual CPU tribe's roster:
     //   - 'knight' / 'viking' both resolve to the tribe's own heavy melee
     //   - anything else not in the tribe's roster is dropped
-    const cpuTribe   = tribeForSide(self);
     const roster     = TRIBE_ROSTERS[cpuTribe];
     const heavyMelee = heavyMeleeForTribe(cpuTribe);
     const rosterSet = new Set<string>(roster);
@@ -1000,7 +986,7 @@ export class Game {
     order = resolved;
 
     for (const type of order) {
-      const cost = CHAR_COST[type];
+      const cost = cost$(type);
       if (balance < cost) continue;
       if (self === 'enemy') {
         this.cpuCoinBalance -= cost;
@@ -1014,7 +1000,7 @@ export class Game {
       return;
     }
     if (self === 'enemy') {
-      const needCost = Math.min(...order.map(t => CHAR_COST[t]));
+      const needCost = Math.min(...order.map(t => cost$(t)));
       this.cpuStrategyInfo.decision = `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
     }
     this.resetSpawnTimer(self, pressure);
@@ -1024,7 +1010,7 @@ export class Game {
    *  register it with the world. Shared by the AI spawn loop and the dev forced-type
    *  override. Does not deduct coins or reset the spawn timer — the caller owns that. */
   private spawnCpuUnit(self: 'player' | 'enemy', type: CharacterConfig['type'], spawnY: number): Character {
-    const cpuConfig = withSpawnBoosts(CHAR_CONFIGS[type]);
+    const cpuConfig = withSpawnBoosts(charConfig(tribeForSide(self), type));
     // Place the unit's tower-side body edge (not centre) at the tribe's
     // configured spawn point so it never overlaps the tower physics body.
     const towerSpawnX = self === 'enemy' ? this.enemyTower.spawnX : this.playerTower.spawnX;

@@ -1,4 +1,6 @@
 import { GameConfig } from './gameConfig';
+import type { CharacterConfig } from './Character';
+import type { Tribe } from './Tribes';
 
 const { canvas, groundY, colors, towers, characters, cpu, economy } = GameConfig;
 const ch    = characters;
@@ -193,205 +195,99 @@ export const COIN_THROW_VX          = GameConfig.economy.coinThrowVx;
 export const COIN_THROW_VY          = GameConfig.economy.coinThrowVy;
 export const COIN_THROW_MIN_DIST    = GameConfig.towers.attackRange + 50;
 
-export const CHAR_COST = {
-  conscript: ch.conscript.cost,
-  warrior:   ch.warrior.cost,
-  archer:    ch.archer.cost,
-  rifleman:  ch.rifleman.cost,
-  gunslinger: ch.gunslinger.cost,
-  sniper:    ch.sniper.cost,
-  viking:    ch.viking.cost,
-  shocktrooper: ch.shocktrooper.cost,
-  knight:    ch.knight.cost,
-  heavy:     ch.heavy.cost,
-  tanker:    ch.tanker.cost,
-  grenadier: ch.grenadier.cost,
-  rocketeer: ch.rocketeer.cost,
-} as const;
-
 export const CHAR_WIDTH  = ch.width;
 export const CHAR_HEIGHT = ch.height;
 
-export const CONSCRIPT = {
-  type:        ch.conscript.type,
-  hp:          ch.conscript.hp,
-  speed:       ch.conscript.speed,
-  attackRange: ch.conscript.attackRange,
-  attackPower: ch.conscript.attackPower,
-  fireRate:    ch.conscript.fireRate,
-  critical:    ch.conscript.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.conscript.knockback,
+// ── Per-tribe character configs ─────────────────────────────────────────────
+// Each tribe fields its own units with independent stats (gameConfig.characters
+// .<tribe>); `common` holds tribe-less CPU/hidden types (heavy, tanker). Costs
+// are per-tribe too. A unit config/cost is looked up via charConfig/charCost,
+// which fall back tribe → common → other tribe so dev-forced cross-tribe types
+// still resolve.
+
+/** Shape of a raw per-type block in gameConfig.characters.<tribe>. Superset of
+ *  CharacterConfig fields; width/height are optional (defaulted from ch.width /
+ *  ch.height) and burst-only fields are ignored here. */
+type RawCharCfg = {
+  type: CharacterConfig['type'];
+  hp: number; speed: number; attackRange: number; attackPower: number;
+  fireRate: number; cost: number; critical: number; knockback: number;
+  width?: number; height?: number;
+  shotsBeforeCooldown?: number; cooldownSec?: number;
+  poisonDamage?: number; poisonTicks?: number; poisonIntervalSec?: number;
 };
 
-export const WARRIOR = {
-  type:        ch.warrior.type,
-  hp:          ch.warrior.hp,
-  speed:       ch.warrior.speed,
-  attackRange: ch.warrior.attackRange,
-  attackPower: ch.warrior.attackPower,
-  fireRate:    ch.warrior.fireRate,
-  critical:    ch.warrior.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.warrior.knockback,
+function toCharConfig(c: RawCharCfg): CharacterConfig {
+  return {
+    type:        c.type,
+    hp:          c.hp,
+    speed:       c.speed,
+    attackRange: c.attackRange,
+    attackPower: c.attackPower,
+    fireRate:    c.fireRate,
+    critical:    c.critical,
+    width:       c.width  ?? ch.width,
+    height:      c.height ?? ch.height,
+    knockback:   c.knockback,
+    shotsBeforeCooldown: c.shotsBeforeCooldown,
+    cooldownSec:         c.cooldownSec,
+    poisonDamage:      c.poisonDamage,
+    poisonTicks:       c.poisonTicks,
+    poisonIntervalSec: c.poisonIntervalSec,
+  };
+}
+
+function buildConfigs(block: Record<string, RawCharCfg>): Record<string, CharacterConfig> {
+  const out: Record<string, CharacterConfig> = {};
+  for (const k in block) out[k] = toCharConfig(block[k]);
+  return out;
+}
+function buildCosts(block: Record<string, RawCharCfg>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const k in block) out[k] = block[k].cost;
+  return out;
+}
+
+const kattgardRaw = ch.kattgard as unknown as Record<string, RawCharCfg>;
+const lapinorRaw  = ch.lapinor  as unknown as Record<string, RawCharCfg>;
+const commonRaw   = ch.common   as unknown as Record<string, RawCharCfg>;
+
+const COMMON_CONFIGS = buildConfigs(commonRaw);
+const COMMON_COSTS   = buildCosts(commonRaw);
+
+/** Per-tribe unit config map — the tribe's own units merged over `common`. */
+export const CHAR_CONFIGS_BY_TRIBE: Record<Tribe, Record<string, CharacterConfig>> = {
+  kattgard: { ...COMMON_CONFIGS, ...buildConfigs(kattgardRaw) },
+  lapinor:  { ...COMMON_CONFIGS, ...buildConfigs(lapinorRaw)  },
 };
 
-export const ARCHER = {
-  type:        ch.archer.type,
-  hp:          ch.archer.hp,
-  speed:       ch.archer.speed,
-  attackRange: ch.archer.attackRange,
-  attackPower: ch.archer.attackPower,
-  fireRate:    ch.archer.fireRate,
-  critical:    ch.archer.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.archer.knockback,
-  poisonDamage:      ch.archer.poisonDamage,
-  poisonTicks:       ch.archer.poisonTicks,
-  poisonIntervalSec: ch.archer.poisonIntervalSec,
-  poisonTribes:      ch.archer.poisonTribes,
+/** Per-tribe unit cost map — same merge as CHAR_CONFIGS_BY_TRIBE. */
+export const CHAR_COST_BY_TRIBE: Record<Tribe, Record<string, number>> = {
+  kattgard: { ...COMMON_COSTS, ...buildCosts(kattgardRaw) },
+  lapinor:  { ...COMMON_COSTS, ...buildCosts(lapinorRaw)  },
 };
 
-export const RIFLEMAN = {
-  type:        ch.rifleman.type,
-  hp:          ch.rifleman.hp,
-  speed:       ch.rifleman.speed,
-  attackRange: ch.rifleman.attackRange,
-  attackPower: ch.rifleman.attackPower,
-  fireRate:    ch.rifleman.fireRate,
-  critical:    ch.rifleman.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.rifleman.knockback,
-  shotsBeforeCooldown: ch.rifleman.shotsBeforeCooldown,
-  cooldownSec:         ch.rifleman.cooldownSec,
-};
+const otherTribe = (t: Tribe): Tribe => (t === 'kattgard' ? 'lapinor' : 'kattgard');
 
-export const GUNSLINGER = {
-  type:        ch.gunslinger.type,
-  hp:          ch.gunslinger.hp,
-  speed:       ch.gunslinger.speed,
-  attackRange: ch.gunslinger.attackRange,
-  attackPower: ch.gunslinger.attackPower,
-  fireRate:    ch.gunslinger.fireRate,
-  critical:    ch.gunslinger.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.gunslinger.knockback,
-};
-// Burst-fire tunables — the gunslinger fires `burstCount` rounds spaced
+/** Config for a unit of `type` fielded by `tribe`. Falls back to the shared
+ *  `common` block (already merged in), then the other tribe (dev-forced types). */
+export function charConfig(tribe: Tribe, type: string): CharacterConfig {
+  return CHAR_CONFIGS_BY_TRIBE[tribe][type]
+      ?? CHAR_CONFIGS_BY_TRIBE[otherTribe(tribe)][type];
+}
+
+/** Coin cost of a unit for a tribe, with the same fallback chain. Infinity if
+ *  the type is unknown to both tribes and common. */
+export function charCost(tribe: Tribe, type: string): number {
+  return CHAR_COST_BY_TRIBE[tribe][type]
+      ?? CHAR_COST_BY_TRIBE[otherTribe(tribe)][type]
+      ?? Infinity;
+}
+
+// Burst-fire tunables — Lapinor's gunslinger fires `burstCount` rounds spaced
 // `burstIntervalSec` apart on each trigger pull (see Character.tickPendingBurst).
-export const GUNSLINGER_BURST_COUNT    = ch.gunslinger.burstCount;
-export const GUNSLINGER_BURST_INTERVAL = ch.gunslinger.burstIntervalSec;
-
-export const SNIPER = {
-  type:        ch.sniper.type,
-  hp:          ch.sniper.hp,
-  speed:       ch.sniper.speed,
-  attackRange: ch.sniper.attackRange,
-  attackPower: ch.sniper.attackPower,
-  fireRate:    ch.sniper.fireRate,
-  critical:    ch.sniper.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.sniper.knockback,
-};
-
-export const VIKING = {
-  type:        ch.viking.type,
-  hp:          ch.viking.hp,
-  speed:       ch.viking.speed,
-  attackRange: ch.viking.attackRange,
-  attackPower: ch.viking.attackPower,
-  fireRate:    ch.viking.fireRate,
-  critical:    ch.viking.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.viking.knockback,
-};
-
-export const SHOCKTROOPER = {
-  type:        ch.shocktrooper.type,
-  hp:          ch.shocktrooper.hp,
-  speed:       ch.shocktrooper.speed,
-  attackRange: ch.shocktrooper.attackRange,
-  attackPower: ch.shocktrooper.attackPower,
-  fireRate:    ch.shocktrooper.fireRate,
-  critical:    ch.shocktrooper.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.shocktrooper.knockback,
-  shotsBeforeCooldown: ch.shocktrooper.shotsBeforeCooldown,
-  cooldownSec:         ch.shocktrooper.cooldownSec,
-};
-
-export const KNIGHT = {
-  type:        ch.knight.type,
-  hp:          ch.knight.hp,
-  speed:       ch.knight.speed,
-  attackRange: ch.knight.attackRange,
-  attackPower: ch.knight.attackPower,
-  fireRate:    ch.knight.fireRate,
-  critical:    ch.knight.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.knight.knockback,
-};
-
-export const HEAVY = {
-  type:        ch.heavy.type,
-  hp:          ch.heavy.hp,
-  speed:       ch.heavy.speed,
-  attackRange: ch.heavy.attackRange,
-  attackPower: ch.heavy.attackPower,
-  fireRate:    ch.heavy.fireRate,
-  critical:    ch.heavy.critical,
-  width:       ch.heavy.width,
-  height:      ch.heavy.height,
-  knockback:   ch.heavy.knockback,
-};
-
-export const TANKER = {
-  type:        ch.tanker.type,
-  hp:          ch.tanker.hp,
-  speed:       ch.tanker.speed,
-  attackRange: ch.tanker.attackRange,
-  attackPower: ch.tanker.attackPower,
-  fireRate:    ch.tanker.fireRate,
-  critical:    ch.tanker.critical,
-  width:       ch.tanker.width,
-  height:      ch.tanker.height,
-  knockback:   ch.tanker.knockback,
-};
-
-export const GRENADIER = {
-  type:        ch.grenadier.type,
-  hp:          ch.grenadier.hp,
-  speed:       ch.grenadier.speed,
-  attackRange: ch.grenadier.attackRange,
-  attackPower: ch.grenadier.attackPower,
-  fireRate:    ch.grenadier.fireRate,
-  critical:    ch.grenadier.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.grenadier.knockback,
-};
-
-export const ROCKETEER = {
-  type:        ch.rocketeer.type,
-  hp:          ch.rocketeer.hp,
-  speed:       ch.rocketeer.speed,
-  attackRange: ch.rocketeer.attackRange,
-  attackPower: ch.rocketeer.attackPower,
-  fireRate:    ch.rocketeer.fireRate,
-  critical:    ch.rocketeer.critical,
-  width:       ch.width,
-  height:      ch.height,
-  knockback:   ch.rocketeer.knockback,
-};
+export const GUNSLINGER_BURST_COUNT    = ch.lapinor.gunslinger.burstCount;
+export const GUNSLINGER_BURST_INTERVAL = ch.lapinor.gunslinger.burstIntervalSec;
 
 // ── Grenade ──────────────────────────────────────────────────────────────────
 export const GRENADE_FUSE_S            = gr.fuseSec;

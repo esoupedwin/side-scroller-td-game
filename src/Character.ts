@@ -91,13 +91,12 @@ export interface CharacterConfig {
   cooldownSec?:         number;
   // Poison: a direct hit from this unit applies a damage-over-time effect to the
   // victim — `poisonDamage` HP every `poisonIntervalSec`, `poisonTicks` times.
-  // All three must be > 0 for poison to apply. `poisonTribes`, if set, restricts
-  // poison to those tribes' units of this type (omit = every tribe). Optional so
-  // unconfigured types never poison.
+  // All three must be > 0 for poison to apply. Optional so unconfigured types
+  // never poison. Because configs are now per-tribe, poison is naturally scoped
+  // to the tribes whose block sets these values (e.g. Kattgard's archer).
   poisonDamage?:      number;
   poisonTicks?:       number;
   poisonIntervalSec?: number;
-  poisonTribes?:      readonly Tribe[];
 }
 
 export interface FireRequest {
@@ -1889,11 +1888,11 @@ export class Character {
   }
 
   /** Whether this character's attacks apply poison — all three poison values set
-   *  and > 0, and (if `poisonTribes` is set) this character's tribe is listed. */
+   *  and > 0. Tribe scoping is implicit: only the tribe blocks that set these
+   *  values (e.g. Kattgard's archer) field a poison-capable unit. */
   private get canPoison(): boolean {
     const c = this.config;
-    if (!c.poisonDamage || !c.poisonTicks || !c.poisonIntervalSec) return false;
-    return !c.poisonTribes || c.poisonTribes.includes(this.tribe);
+    return !!(c.poisonDamage && c.poisonTicks && c.poisonIntervalSec);
   }
 
   /** Start/refresh a poison effect on THIS character from `attacker`'s config. */

@@ -65,163 +65,126 @@ export const GameConfig = {
     lowHealthBlinkHz:    2.4,     // blink pulses per second
     poisonColor:        0x66cc33, // green used for the poisoned-body tint and poison damage numbers
 
-    conscript: {
-      type:        'conscript' as const,
-      hp:          110,
-      speed:       150,  // faster than warrior
-      attackRange: 36,
-      attackPower: 10,   // damage per punch
-      fireRate:    0.65, // rapid punches
-      cost:        15,
-      critical:    0.18, // untrained brawler
-      knockback:   0,    // px/s horizontal impulse imparted on the target when this unit hits
+    // ── Per-tribe rosters ──────────────────────────────────────────────────
+    // Each tribe fully lists ITS OWN units (see TRIBE_ROSTERS in Tribes.ts) with
+    // independent stats — Kattgard's conscript ≠ Lapinor's conscript. Values start
+    // identical (a structural split) and can be tuned per tribe freely. Types that
+    // belong to no tribe (heavy, tanker — CPU/hidden) live in `common` below.
+    kattgard: {
+      conscript: {
+        type:        'conscript' as const,
+        hp:          110, speed: 150, attackRange: 36, attackPower: 10,
+        fireRate:    0.65, cost: 15, critical: 0.18, knockback: 0,
+      },
+      warrior: {
+        type:        'warrior' as const,
+        hp:          160, speed: 120, attackRange: 40, attackPower: 15,
+        fireRate:    0.8, cost: 25, critical: 0.10, knockback: 0,
+      },
+      archer: {
+        type:        'archer' as const,
+        hp:          100, speed: 70, attackRange: 180, attackPower: 12,
+        fireRate:    2.2, cost: 50, critical: 0.08, knockback: 0,
+        // Poison-tipped arrows — a hit applies a damage-over-time effect. Kattgard only.
+        poisonDamage:      4,    // HP lost per poison tick
+        poisonTicks:       4,    // number of ticks before it wears off
+        poisonIntervalSec: 1.0,  // seconds between ticks
+      },
+      rifleman: {
+        type:        'rifleman' as const,
+        hp:          90, speed: 78, attackRange: 280, attackPower: 9,
+        fireRate:    0.25, cost: 70, critical: 0.07, knockback: 0,
+        shotsBeforeCooldown: 3, cooldownSec: 1.5,  // 3 rounds, then a 1.5 s reload
+      },
+      sniper: {
+        type:        'sniper' as const,
+        hp:          70, speed: 50, attackRange: 380, attackPower: 35,
+        fireRate:    3.1, cost: 100, critical: 0.05, knockback: 0,
+      },
+      viking: {
+        type:        'viking' as const,
+        hp:          350, speed: 100, attackRange: 44, attackPower: 20,
+        fireRate:    1.0, cost: 120, critical: 0.12, knockback: 400,
+      },
+      shocktrooper: {
+        type:        'shocktrooper' as const,
+        hp:          130, speed: 85, attackRange: 190, attackPower: 20,
+        fireRate:    0.7, cost: 90, critical: 0.10, knockback: 350,
+        shotsBeforeCooldown: 3, cooldownSec: 2,  // 3 blasts, then a 2 s reload
+      },
+      grenadier: {
+        type:        'grenadier' as const,
+        hp:          110, speed: 65, attackRange: 280, attackPower: 55,
+        fireRate:    2, cost: 90, critical: 0.08, knockback: 0,
+      },
+      rocketeer: {
+        type:        'rocketeer' as const,
+        hp:          120, speed: 68, attackRange: 260, attackPower: 70,
+        fireRate:    2.5, cost: 120, critical: 0.06, knockback: 0,
+      },
     },
-    warrior: {
-      type:        'warrior'  as const,
-      hp:          160,
-      speed:       120,
-      attackRange: 40,
-      attackPower: 15,   // damage per swing
-      fireRate:    0.8,  // seconds between swings
-      cost:        25,
-      critical:    0.10, // 10 % miss chance
-      knockback:   0,
+    lapinor: {
+      conscript: {
+        type:        'conscript' as const,
+        hp:          110, speed: 150, attackRange: 36, attackPower: 10,
+        fireRate:    0.65, cost: 15, critical: 0.18, knockback: 0,
+      },
+      warrior: {
+        type:        'warrior' as const,
+        hp:          160, speed: 120, attackRange: 40, attackPower: 15,
+        fireRate:    0.8, cost: 25, critical: 0.10, knockback: 0,
+      },
+      archer: {
+        type:        'archer' as const,
+        hp:          100, speed: 70, attackRange: 180, attackPower: 12,
+        fireRate:    2.2, cost: 50, critical: 0.08, knockback: 0,
+        // No poison — poison is a Kattgard-archer trait for now.
+      },
+      rifleman: {
+        type:        'rifleman' as const,
+        hp:          90, speed: 78, attackRange: 280, attackPower: 9,
+        fireRate:    0.25, cost: 70, critical: 0.07, knockback: 0,
+        shotsBeforeCooldown: 3, cooldownSec: 1.5,
+      },
+      gunslinger: {
+        type:        'gunslinger' as const,
+        hp:          85, speed: 92, attackRange: 200, attackPower: 7,
+        fireRate:    1.4, cost: 75, critical: 0.09, knockback: 0,
+        burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
+      },
+      sniper: {
+        type:        'sniper' as const,
+        hp:          70, speed: 50, attackRange: 380, attackPower: 35,
+        fireRate:    3.1, cost: 100, critical: 0.05, knockback: 0,
+      },
+      knight: {
+        type:        'knight' as const,
+        hp:          280, speed: 80, attackRange: 44, attackPower: 28,
+        fireRate:    1.1, cost: 150, critical: 0.08, knockback: 250,
+      },
+      grenadier: {
+        type:        'grenadier' as const,
+        hp:          110, speed: 65, attackRange: 280, attackPower: 55,
+        fireRate:    2, cost: 90, critical: 0.08, knockback: 0,
+      },
+      rocketeer: {
+        type:        'rocketeer' as const,
+        hp:          120, speed: 68, attackRange: 260, attackPower: 70,
+        fireRate:    2.5, cost: 120, critical: 0.06, knockback: 0,
+      },
     },
-    archer: {
-      type:        'archer'   as const,
-      hp:          100,
-      speed:       70,
-      attackRange: 180,
-      attackPower: 12,
-      fireRate:    2.2,
-      cost:        50,
-      critical:    0.08, // 8 % miss chance
-      knockback:   0,
-      // Poison-tipped arrows — a hit applies a damage-over-time effect.
-      poisonDamage:      4,             // HP lost per poison tick
-      poisonTicks:       4,             // number of ticks before it wears off
-      poisonIntervalSec: 1.0,           // seconds between ticks
-      poisonTribes:      ['kattgard'],  // only these tribes' archers poison (omit = all tribes)
-    },
-    rifleman: {
-      type:        'rifleman' as const,
-      hp:          90,
-      speed:       78,
-      attackRange: 280,
-      attackPower: 9,
-      fireRate:    0.25,       // 2Ã— faster than before (was 0.5)
-      cost:        70,
-      critical:    0.07, // 7 % miss chance
-      knockback:   0,
-      shotsBeforeCooldown: 3,  // fires 3 rounds rapidlyâ€¦
-      cooldownSec:         1.5, // â€¦then reloads for 1.5 s
-    },
-    gunslinger: {
-      type:        'gunslinger' as const,
-      hp:          85,
-      speed:       92,         // nimble pistolero — quicker than the rifleman
-      attackRange: 200,        // pistol — shorter reach than the rifle (280)
-      attackPower: 7,          // per round; a full 3-round burst lands 21
-      fireRate:    1.4,        // seconds between bursts (longer cooldown — fires 3 at once)
-      cost:        75,
-      critical:    0.09,
-      knockback:   0,
-      burstCount:       3,     // rounds fired per trigger pull
-      burstIntervalSec: 0.09,  // seconds between rounds within a burst
-    },
-    sniper: {
-      type:        'sniper' as const,
-      hp:          70,
-      speed:       50,
-      attackRange: 380,
-      attackPower: 35,
-      fireRate:    3.1,
-      cost:        100,
-      critical:    0.05, // 5 % miss chance — trained marksman
-      knockback:   0,
-    },
-    viking: {
-      type:        'viking'   as const,
-      hp:          350,        // berserker constitution — highest HP of the melee roster
-      speed:       100,
-      attackRange: 44,
-      attackPower: 20,
-      fireRate:    1.0,
-      cost:        120,
-      critical:    0.12,
-      knockback:   400,  // staggers melee victims back a clear ~100 px before decay zeroes vx
-    },
-    shocktrooper: {
-      type:        'shocktrooper' as const,
-      hp:          130,
-      speed:       85,
-      attackRange: 190,        // doubled — still closes in, but each shot is an AoE cone
-      attackPower: 20,         // per enemy hit; the shot strikes EVERY enemy in the cone
-      fireRate:    0.7,        // pump-action reload — quicker than a slow shotgun
-      cost:        90,
-      critical:    0.10,
-      knockback:   350,        // shotgun blast flings victims back, like the viking
-      shotsBeforeCooldown: 3,  // fires 3 blasts…
-      cooldownSec:         2,  // …then must reload for 1 s before firing again
-    },
-    knight: {
-      type:        'knight'   as const,
-      hp:          280,        // plate armour but leaner build than the viking
-      speed:       80,         // slower than viking due to armour weight
-      attackRange: 44,
-      attackPower: 28,         // longer sword, harder hits than the viking
-      fireRate:    1.1,        // slightly slower swing than viking
-      cost:        150,
-      critical:    0.08,       // trained warrior, few misses
-      knockback:   250,        // armoured momentum, less than viking
-    },
-    heavy: {
-      type:        'heavy'    as const,
-      hp:          220,
-      speed:       25,
-      attackRange: 48,
-      attackPower: 40,
-      fireRate:    1.3,
-      cost:        80,
-      critical:    0.12, // 12 % miss chance — slow and imprecise
-      width:       28,
-      height:      44,
-      knockback:   0,
-    },
-    tanker: {
-      type:        'tanker'   as const,
-      hp:          500,
-      speed:       30,
-      attackRange: 240,
-      attackPower: 75,
-      fireRate:    3.2,   // slow but devastating
-      cost:        160,
-      critical:    0.08,
-      width:       80,
-      height:      70,
-      knockback:   0,
-    },
-    grenadier: {
-      type:        'grenadier' as const,
-      hp:          110,
-      speed:       65,
-      attackRange: 280,
-      attackPower: 55,   // grenade AoE damage per target hit
-      fireRate:    2,
-      cost:        90,
-      critical:    0.08,
-      knockback:   0,
-    },
-    rocketeer: {
-      type:        'rocketeer' as const,
-      hp:          120,
-      speed:       68,
-      attackRange: 260,
-      attackPower: 70,   // rocket AoE damage per target hit
-      fireRate:    2.5,
-      cost:        120,
-      critical:    0.06,
-      knockback:   0,
+    // Tribe-less types: CPU-only / hidden (not in any roster). Shared fallback.
+    common: {
+      heavy: {
+        type:        'heavy' as const,
+        hp:          220, speed: 25, attackRange: 48, attackPower: 40,
+        fireRate:    1.3, cost: 80, critical: 0.12, width: 28, height: 44, knockback: 0,
+      },
+      tanker: {
+        type:        'tanker' as const,
+        hp:          500, speed: 30, attackRange: 240, attackPower: 75,
+        fireRate:    3.2, cost: 160, critical: 0.08, width: 80, height: 70, knockback: 0,
+      },
     },
   },
 

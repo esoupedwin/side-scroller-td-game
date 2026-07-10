@@ -1,6 +1,6 @@
 import { Game, type CpuStrategyInfo } from './Game';
 import type { PowerUpType } from './PowerUp';
-import { CHAR_COST, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from './constants';
+import { charCost, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from './constants';
 import { TYPE_ICON, rankLabel, xpProgress } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
@@ -55,9 +55,15 @@ const spawnBtns = new Map<UnitType, HTMLButtonElement>(
 
 // Populate costs from config so the HTML never goes stale. Just the number —
 // the gold coin icon is rendered by the .btn-cost::before CSS pseudo-element.
-for (const t of UNIT_TYPES) {
-  (document.getElementById(`${t}-cost`) as HTMLElement).textContent = String(CHAR_COST[t]);
+// Costs are per-tribe, so refresh whenever the player's tribe changes.
+function refreshCostLabels() {
+  const tribe = getPlayerTribe();
+  for (const t of UNIT_TYPES) {
+    const el = document.getElementById(`${t}-cost`);
+    if (el) el.textContent = String(charCost(tribe, t));
+  }
 }
+refreshCostLabels();
 const countdownEl    = document.getElementById('countdown')!;
 const gameOverEl     = document.getElementById('game-over')!;
 const goTitle        = document.getElementById('game-over-title')!;
@@ -656,6 +662,7 @@ refreshDiagnoseUi();
   tribeSelect.addEventListener('change', () => {
     setPlayerTribe(tribeSelect.value as Tribe);
     syncSpawnButtonVisibility();
+    refreshCostLabels();
     restartCurrentGame();
   });
 }
@@ -773,8 +780,9 @@ function handleCoinsChanged(coins: number) {
   coinAmountEl.textContent = String(coins);
 
   // Disable spawn buttons when game is over OR when there aren't enough coins
+  const playerTribe = getPlayerTribe();
   for (const [t, btn] of spawnBtns) {
-    const next = gameOver || coins < CHAR_COST[t];
+    const next = gameOver || coins < charCost(playerTribe, t);
     if (lastDisabledByBtn.get(btn) === next) continue;
     btn.disabled = next;
     lastDisabledByBtn.set(btn, next);
