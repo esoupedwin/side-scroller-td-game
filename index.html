@@ -701,6 +701,197 @@
       }
       .pm-res-btn.is-active::after { content: '  ✓'; }
 
+      /* ── Loadout selection screen ──────────────────────────────────────────── */
+      #loadout-screen {
+        position: fixed; inset: 0;
+        background: rgba(0, 0, 0, 0.72);
+        backdrop-filter: blur(4px);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 260;
+      }
+      .lo-card {
+        background: rgba(18, 22, 30, 0.95);
+        border: 1px solid rgba(120, 160, 200, 0.35);
+        border-radius: 12px;
+        box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6);
+        color: #e6edf5;
+        width: min(760px, 94vw);
+        max-height: 92vh;
+        overflow-y: auto;
+        padding: 26px 30px;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        display: flex; flex-direction: column; gap: 14px;
+      }
+      .lo-title {
+        margin: 0; text-align: center;
+        font-size: 26px; font-weight: 800; letter-spacing: 0.06em;
+      }
+      .lo-sub {
+        margin: 0; text-align: center;
+        font-size: 14px; color: #8aa0b6;
+      }
+      #loadout-grid {
+        display: flex; flex-wrap: wrap; gap: 12px;
+        justify-content: center;
+        padding: 6px 0;
+      }
+      .loadout-card {
+        box-sizing: border-box;
+        width: 107px; height: 140px;
+        flex: 0 0 auto;
+        background-color: #d6cbb4;
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        border: none;
+        border-radius: 6px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.40);
+        padding: 0;
+        cursor: pointer;
+        position: relative;
+        color: #322b25;
+        transition: transform 0.1s, box-shadow 0.1s, opacity 0.15s, filter 0.15s;
+        filter: grayscale(0.55) brightness(0.75);
+      }
+      .loadout-card:hover { transform: translateY(-3px); box-shadow: 0 7px 16px rgba(0,0,0,0.5); }
+      .loadout-card.selected {
+        filter: none;
+        box-shadow: 0 0 0 3px #7fd4ff, 0 0 18px rgba(127, 212, 255, 0.65);
+      }
+      .loadout-card .lo-check {
+        display: none;
+        position: absolute; top: 6px; right: 6px;
+        width: 24px; height: 24px; line-height: 24px;
+        background: #1f6feb; color: #fff;
+        border-radius: 50%;
+        font-size: 14px; font-weight: 800; text-align: center;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+      }
+      .loadout-card.selected .lo-check { display: block; }
+      .loadout-card .lo-name {
+        position: absolute; top: 8px; left: 0; right: 0;
+        text-align: center;
+        font-size: 13px; font-weight: 700; text-transform: capitalize;
+      }
+      .loadout-card.has-art .lo-name { display: none; }
+      .loadout-card .lo-cost {
+        position: absolute; bottom: 9px; left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 255, 255, 0.6);
+        padding: 2px 11px 2px 8px;
+        border-radius: 13px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        font-size: 14px; font-weight: 800;
+        white-space: nowrap;
+      }
+      .lo-footer {
+        display: flex; align-items: center; justify-content: center; gap: 18px;
+        margin-top: 4px;
+      }
+      #loadout-count {
+        font-size: 16px; font-weight: 700; color: #cfe2ff;
+        min-width: 120px; text-align: center;
+      }
+      #loadout-start-btn {
+        background: linear-gradient(135deg, #1f6feb, #0d47a1);
+        color: #fff; border: none; border-radius: 8px;
+        padding: 13px 44px; font-size: 17px; font-weight: 800;
+        letter-spacing: 0.04em;
+        cursor: pointer; transition: filter 0.12s ease, opacity 0.15s;
+      }
+      #loadout-start-btn:hover:not(:disabled) { filter: brightness(1.12); }
+      #loadout-start-btn:disabled { opacity: 0.4; cursor: default; }
+
+      /* ── Match-start 3-2-1 countdown ───────────────────────────────────────── */
+      #start-countdown {
+        position: fixed; inset: 0;
+        display: none;
+        align-items: center; justify-content: center;
+        z-index: 255;
+        pointer-events: none;
+      }
+      #start-countdown .cd-num {
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        font-size: 170px; font-weight: 900;
+        color: #ffffff;
+        text-shadow:
+          0 0 34px rgba(127, 212, 255, 0.9),
+          0 0 90px rgba(31, 111, 235, 0.55),
+          0 8px 26px rgba(0, 0, 0, 0.65);
+        animation: cd-pop 0.8s ease-out forwards;
+      }
+      #start-countdown .cd-num.cd-go {
+        color: #7dff9b;
+        text-shadow:
+          0 0 34px rgba(125, 255, 155, 0.9),
+          0 0 90px rgba(30, 180, 80, 0.55),
+          0 8px 26px rgba(0, 0, 0, 0.65);
+      }
+      @keyframes cd-pop {
+        0%   { transform: scale(2.4); opacity: 0; }
+        22%  { transform: scale(1.0); opacity: 1; }
+        68%  { transform: scale(1.0); opacity: 1; }
+        100% { transform: scale(0.55); opacity: 0; }
+      }
+
+      /* ── Splash screen (Press Enter to Start) ─────────────────────────────── */
+      #splash-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 9990;   /* above all game UI, below the loading screen */
+        background: #1a1a2e;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        transition: opacity 0.5s ease;
+      }
+      #splash-screen.fade-out {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #splash-title {
+        font-size: 96px;
+        font-weight: 900;
+        letter-spacing: 0.18em;
+        color: #e0e0e0;
+        text-shadow:
+          0 0 40px rgba(0, 180, 216, 0.55),
+          0 0 10px rgba(0, 180, 216, 0.3);
+        user-select: none;
+      }
+      #splash-subtitle {
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
+        color: #00b4d8;
+        margin-top: 4px;
+        margin-bottom: 84px;
+        user-select: none;
+      }
+      #splash-prompt {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #cfe2ff;
+        user-select: none;
+        animation: splash-pulse 1.6s ease-in-out infinite;
+      }
+      #splash-prompt .splash-key {
+        display: inline-block;
+        padding: 2px 14px;
+        margin: 0 4px;
+        border: 2px solid rgba(207, 226, 255, 0.55);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.06);
+      }
+      @keyframes splash-pulse {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: 0.35; }
+      }
+
       /* ── Loading screen ─────────────────────────────────────────────────────── */
       #loading-screen {
         position: fixed;
@@ -917,6 +1108,13 @@
     </style>
   </head>
   <body>
+    <!-- ── Splash screen — revealed when the loading screen fades ── -->
+    <div id="splash-screen">
+      <div id="splash-title">COIN</div>
+      <div id="splash-subtitle">Tower Defence</div>
+      <div id="splash-prompt">Press <span class="splash-key">Enter</span> to Start</div>
+    </div>
+
     <div id="loading-screen">
       <div id="loading-title">COIN</div>
       <div id="loading-subtitle">Tower Defence</div>
@@ -1134,6 +1332,22 @@
     </div>
 
     <!-- ── Pause menu (Esc key) ─────────────────────────────────────────── -->
+    <!-- ── Match-start countdown (3-2-1 after the loadout Start button) ── -->
+    <div id="start-countdown"></div>
+
+    <!-- ── Loadout selection (shown before each map starts) ── -->
+    <div id="loadout-screen" style="display:none;">
+      <div class="lo-card">
+        <h2 class="lo-title">Choose Your Squad</h2>
+        <p class="lo-sub" id="loadout-sub"></p>
+        <div id="loadout-grid"></div>
+        <div class="lo-footer">
+          <span id="loadout-count"></span>
+          <button id="loadout-start-btn">▶ Start</button>
+        </div>
+      </div>
+    </div>
+
     <div id="pause-menu" style="display:none;">
       <div class="pm-card">
         <!-- Main view -->

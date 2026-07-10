@@ -291,6 +291,10 @@ export const GameConfig = {
     },
   },
 
+  loadout: {
+    maxCards: 7,   // how many character cards the player can bring into a map
+  },
+
   powerUp: {
     pickupDist:  30,    // px — horizontal pickup radius
     lifetimeSec: 20,    // seconds on ground before expiry
@@ -308,6 +312,10 @@ export const GameConfig = {
   cheats: {
     playerCoinGrant: 100,   // K key — coins added to player balance
     cpuCoinGrant:    100,   // L key — coins added to CPU balance
+    // Dev fast-start: skip the splash screen and character selection on game
+    // load (and on tribe/map switches) and jump straight into the match with
+    // EVERY owned character card loaded — no 7-card cap, no 3-2-1 countdown.
+    skipIntroScreens: false,
   },
 
   vfx: {

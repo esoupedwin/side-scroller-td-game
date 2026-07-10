@@ -132,9 +132,13 @@ export const PROJ_TOWER_SPLASH   = proj.towerSplashBonus;
 export const DMG_LABEL_LIFETIME  = ui.damageLabel.lifetimeSec;
 export const DMG_LABEL_RISE      = ui.damageLabel.risePx;
 
+// ── Loadout ──────────────────────────────────────────────────────────────────
+export const LOADOUT_MAX_CARDS   = GameConfig.loadout.maxCards;
+
 // ── Dev cheats ───────────────────────────────────────────────────────────────
-export const CHEAT_PLAYER_COIN_GRANT = GameConfig.cheats.playerCoinGrant;
-export const CHEAT_CPU_COIN_GRANT    = GameConfig.cheats.cpuCoinGrant;
+export const CHEAT_PLAYER_COIN_GRANT  = GameConfig.cheats.playerCoinGrant;
+export const CHEAT_CPU_COIN_GRANT     = GameConfig.cheats.cpuCoinGrant;
+export const CHEAT_SKIP_INTRO_SCREENS = GameConfig.cheats.skipIntroScreens;
 
 // ── Power-ups ────────────────────────────────────────────────────────────────
 export const POWERUP_PICKUP_DIST    = pu.pickupDist;

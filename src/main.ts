@@ -1,6 +1,7 @@
 import { Game, type CpuStrategyInfo } from './Game';
 import type { PowerUpType } from './PowerUp';
-import { charCost, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from './constants';
+import { charCost, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS } from './constants';
+import { getOwnedCards, loadLoadout, saveLoadout } from './CardCollection';
 import { TYPE_ICON, rankLabel, xpProgress } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
@@ -116,6 +117,208 @@ function restartCurrentGame(mapDef?: ReturnType<typeof loadMapWithOverride>) {
 
 restartBtn.addEventListener('click', () => restartCurrentGame());
 
+// ── Loadout selection screen ───────────────────────────────────────────────
+// Shown before each map starts (first load, tribe change, map change). The
+// player picks up to LOADOUT_MAX_CARDS cards from their collection; only the
+// picked types get spawn buttons for the match. Mid-match Restart keeps the
+// current loadout without re-asking.
+const loadoutScreen  = document.getElementById('loadout-screen')!;
+const loadoutGrid    = document.getElementById('loadout-grid')!;
+const loadoutSub     = document.getElementById('loadout-sub')!;
+const loadoutCountEl = document.getElementById('loadout-count')!;
+const loadoutStartBtn = document.getElementById('loadout-start-btn') as HTMLButtonElement;
+
+function validLoadoutSet(types: string[]): Set<UnitType> {
+  return new Set(types.filter((t): t is UnitType => (UNIT_TYPES as readonly string[]).includes(t)));
+}
+
+let loadout = validLoadoutSet(loadLoadout(getPlayerTribe()));
+let loadoutOpen = false;
+// Map queued by the dev map selector while the screen is up; Start forwards it.
+let pendingMapDef: ReturnType<typeof loadMapWithOverride> | null = null;
+// Tribe the screen is picking for. Differs from getPlayerTribe() when a new
+// map is queued — game.reset(mapDef) re-seeds the player tribe from the map's
+// placeholder default, so the cards must come from THAT tribe's collection.
+let loadoutTribe: Tribe = getPlayerTribe();
+
+// Only the active tribe's roster ∩ the picked loadout gets a visible spawn
+// button. Also called by the dev tribe selector after a tribe switch.
+function syncSpawnButtonVisibility() {
+  const roster = TRIBE_ROSTERS[getPlayerTribe()];
+  for (const t of UNIT_TYPES) {
+    const btn = spawnBtns.get(t);
+    if (!btn) continue;
+    btn.style.display = roster.includes(t) && loadout.has(t) ? '' : 'none';
+  }
+}
+
+function refreshLoadoutFooter() {
+  loadoutCountEl.textContent = `${loadout.size} / ${LOADOUT_MAX_CARDS} selected`;
+  loadoutStartBtn.disabled   = loadout.size === 0;
+}
+
+function buildLoadoutGrid() {
+  const tribe = loadoutTribe;
+  loadoutSub.textContent = `${TRIBES[tribe].displayName} — choose up to ${LOADOUT_MAX_CARDS} character cards`;
+  loadoutGrid.innerHTML  = '';
+  for (const t of getOwnedCards(tribe)) {
+    const card = document.createElement('button');
+    card.className = 'loadout-card';
+    card.dataset.type = t;
+    if (loadout.has(t as UnitType)) card.classList.add('selected');
+
+    const name = document.createElement('span');
+    name.className = 'lo-name';
+    name.textContent = t;
+    const check = document.createElement('span');
+    check.className = 'lo-check';
+    check.textContent = '✓';
+    const cost = document.createElement('span');
+    cost.className = 'lo-cost';
+    cost.textContent = `🪙 ${charCost(tribe, t)}`;
+    card.append(name, check, cost);
+
+    // Card art is optional — types without a PNG keep the cream fallback tile.
+    const art = new Image();
+    art.onload = () => {
+      card.classList.add('has-art');
+      card.style.backgroundImage = `url('${art.src}')`;
+    };
+    art.src = `/cards/buy/card_buy_${t}.png`;
+
+    card.addEventListener('click', () => {
+      const type = t as UnitType;
+      if (loadout.has(type)) {
+        loadout.delete(type);
+        card.classList.remove('selected');
+      } else if (loadout.size < LOADOUT_MAX_CARDS) {
+        loadout.add(type);
+        card.classList.add('selected');
+      }
+      refreshLoadoutFooter();
+    });
+
+    loadoutGrid.appendChild(card);
+  }
+  refreshLoadoutFooter();
+}
+
+// ── Match-start countdown (3-2-1 → GO!) ────────────────────────────────────
+// Runs after the loadout Start button: the fresh match sits paused while the
+// numbers pop in the centre of the screen, then the game unfreezes on GO.
+const startCountdownEl = document.getElementById('start-countdown')!;
+let countdownActive = false;
+// Generation counter: bumping it orphans any in-flight setTimeout chain, so
+// re-opening the loadout screen mid-countdown cancels the old countdown.
+let countdownGen = 0;
+
+function cancelStartCountdown() {
+  countdownGen++;
+  countdownActive = false;
+  startCountdownEl.style.display = 'none';
+  startCountdownEl.replaceChildren();
+}
+
+function runStartCountdown(onDone: () => void) {
+  const gen = ++countdownGen;
+  countdownActive = true;
+  startCountdownEl.style.display = 'flex';
+  const steps = ['3', '2', '1', 'GO!'];
+  const STEP_MS = 800;   // matches the cd-pop animation duration
+
+  const showStep = (i: number) => {
+    if (gen !== countdownGen) return;   // cancelled — a newer flow owns the screen
+    if (i >= steps.length) {
+      cancelStartCountdown();
+      onDone();
+      return;
+    }
+    // Fresh element per step so the cd-pop animation restarts from 0%.
+    const num = document.createElement('span');
+    num.className = i === steps.length - 1 ? 'cd-num cd-go' : 'cd-num';
+    num.textContent = steps[i];
+    startCountdownEl.replaceChildren(num);
+    window.setTimeout(() => showStep(i + 1), STEP_MS);
+  };
+  showStep(0);
+}
+
+function openLoadoutScreen(mapDef?: ReturnType<typeof loadMapWithOverride>) {
+  cancelStartCountdown();   // e.g. tribe/map change while a countdown is running
+
+  // Dev fast-start (gameConfig.cheats.skipIntroScreens): no selection screen,
+  // no countdown — jump straight into the match with every owned card loaded.
+  // The saved 7-card loadout is deliberately left untouched.
+  if (CHEAT_SKIP_INTRO_SCREENS) {
+    loadoutTribe = mapDef ? (mapDef.playerTowerTribe ?? 'kattgard') : getPlayerTribe();
+    loadout = validLoadoutSet(getOwnedCards(loadoutTribe));
+    restartCurrentGame(mapDef);
+    syncSpawnButtonVisibility();
+    refreshCostLabels();
+    return;
+  }
+
+  pendingMapDef = mapDef ?? null;
+  loadoutTribe  = mapDef ? (mapDef.playerTowerTribe ?? 'kattgard') : getPlayerTribe();
+  loadout = validLoadoutSet(loadLoadout(loadoutTribe));
+  buildLoadoutGrid();
+  loadoutOpen = true;
+  loadoutScreen.style.display = 'flex';
+  if (!game.paused) game.togglePause();
+  uiOverlay.style.visibility = 'hidden';
+  hudEl.style.visibility     = 'hidden';
+}
+
+loadoutStartBtn.addEventListener('click', () => {
+  if (loadout.size === 0) return;
+  saveLoadout(loadoutTribe, [...loadout]);
+  loadoutOpen = false;
+  loadoutScreen.style.display = 'none';
+  // Fresh match on the queued map (or a clean restart of the current one).
+  // game.reset() also clears the pause we set when the screen opened, and —
+  // when a map is queued — re-seeds the player tribe from the map, so button
+  // visibility and cost labels sync AFTER the reset.
+  restartCurrentGame(pendingMapDef ?? undefined);
+  pendingMapDef = null;
+  syncSpawnButtonVisibility();
+  refreshCostLabels();
+  // Hold the fresh match frozen behind the 3-2-1, then release it on GO.
+  if (!game.paused) game.togglePause();
+  uiOverlay.style.visibility = 'hidden';
+  hudEl.style.visibility     = 'hidden';
+  runStartCountdown(() => {
+    if (game.paused) game.togglePause();
+    uiOverlay.style.visibility = 'visible';
+    hudEl.style.visibility     = 'visible';
+  });
+});
+
+// ── Splash screen (first load) ─────────────────────────────────────────────
+// The opaque splash sits under the loading screen and is revealed when it
+// fades. The game waits paused behind it; Enter hands off to squad selection.
+// With the skipIntroScreens cheat on, the splash is dropped and the match
+// starts immediately with every owned card available.
+const splashScreen = document.getElementById('splash-screen')!;
+let splashOpen = false;
+if (CHEAT_SKIP_INTRO_SCREENS) {
+  splashScreen.remove();
+  loadout = validLoadoutSet(getOwnedCards(getPlayerTribe()));
+  syncSpawnButtonVisibility();
+} else {
+  splashOpen = true;
+  if (!game.paused) game.togglePause();
+  uiOverlay.style.visibility = 'hidden';
+  hudEl.style.visibility     = 'hidden';
+
+  window.addEventListener('keydown', (e) => {
+    if (!splashOpen || e.key !== 'Enter') return;
+    splashOpen = false;
+    splashScreen.classList.add('fade-out');
+    splashScreen.addEventListener('transitionend', () => splashScreen.remove(), { once: true });
+    openLoadoutScreen();
+  });
+}
+
 // Developer bar (#dev-panel) is hidden by default; P toggles its visibility.
 const devPanel = document.getElementById('dev-panel')!;
 
@@ -195,6 +398,9 @@ document.getElementById('pm-res-back-btn')!.addEventListener('click', showPauseM
 pauseMenu.addEventListener('click', (e) => { if (e.target === pauseMenu) closePauseMenu(); });
 
 window.addEventListener('keydown', (e) => {
+  // Splash / loadout screen / start countdown own the input while up — no
+  // pause toggles, dev keys, or menu opening until the match actually begins.
+  if (splashOpen || loadoutOpen || countdownActive) return;
   if (e.key === 'Escape') {
     // The Z command modal manages its own Esc-to-close (handler registered later).
     if (cmdModalEl.style.display !== 'none') return;
@@ -625,7 +831,8 @@ refreshDiagnoseUi();
   loadMapBtn.addEventListener('click', () => {
     const found = ALL_MAPS.find(m => m.id === mapSelect.value);
     if (!found) return;
-    restartCurrentGame(loadMapWithOverride(found));
+    // New map → pick a squad first; Start launches it.
+    openLoadoutScreen(loadMapWithOverride(found));
   });
 }
 
@@ -645,25 +852,15 @@ refreshDiagnoseUi();
     tribeSelect.appendChild(opt);
   }
   tribeSelect.value = getPlayerTribe();
-
-  function syncSpawnButtonVisibility() {
-    const roster = TRIBE_ROSTERS[getPlayerTribe()];
-    for (const t of UNIT_TYPES) {
-      const btn = spawnBtns.get(t);
-      if (!btn) continue;
-      btn.style.display = roster.includes(t) ? '' : 'none';
-    }
-  }
   syncSpawnButtonVisibility();
 
-  // Switching tribes mid-game would leave a mix of old-tribe units still
-  // alive on the field; force a fresh match so the new tribe's roster takes
-  // over cleanly.
+  // Switching tribes changes the card roster, so the player re-picks their
+  // loadout; Start then launches a fresh match (mixing tribes mid-match would
+  // leave old-tribe units on the field).
   tribeSelect.addEventListener('change', () => {
     setPlayerTribe(tribeSelect.value as Tribe);
-    syncSpawnButtonVisibility();
     refreshCostLabels();
-    restartCurrentGame();
+    openLoadoutScreen();
   });
 }
 
