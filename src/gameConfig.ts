@@ -63,6 +63,7 @@ export const GameConfig = {
     lowHealthRatio:     0.3,      // hp/maxHp at or below which the body blinks a red tint
     lowHealthBlinkColor: 0xff2b2b, // tint colour pulsed onto the body while low on health
     lowHealthBlinkHz:    2.4,     // blink pulses per second
+    poisonColor:        0x66cc33, // green used for the poisoned-body tint and poison damage numbers
 
     conscript: {
       type:        'conscript' as const,
@@ -96,6 +97,11 @@ export const GameConfig = {
       cost:        50,
       critical:    0.08, // 8 % miss chance
       knockback:   0,
+      // Poison-tipped arrows — a hit applies a damage-over-time effect.
+      poisonDamage:      4,             // HP lost per poison tick
+      poisonTicks:       4,             // number of ticks before it wears off
+      poisonIntervalSec: 1.0,           // seconds between ticks
+      poisonTribes:      ['kattgard'],  // only these tribes' archers poison (omit = all tribes)
     },
     rifleman: {
       type:        'rifleman' as const,

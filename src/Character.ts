@@ -8,7 +8,7 @@ import {
   SAFE_ZONE_HEAL_RATE, HIT_JUMP_CHANCE,
   RANDOM_JUMP_INTERVAL_MIN, RANDOM_JUMP_INTERVAL_VAR, RANDOM_JUMP_CHANCE, RANDOM_JUMP_CHANCE_DEFEND, RANDOM_JUMP_HOME_MARGIN,
   EVASIVE_JUMP_COOLDOWN, EVASIVE_JUMP_CHANCE, EVASIVE_JUMP_SCAN_RANGE,
-  CHAR_LOW_HEALTH_RATIO, CHAR_LOW_HEALTH_BLINK_COLOR, CHAR_LOW_HEALTH_BLINK_HZ,
+  CHAR_LOW_HEALTH_RATIO, CHAR_LOW_HEALTH_BLINK_COLOR, CHAR_LOW_HEALTH_BLINK_HZ, CHAR_POISON_COLOR,
   ATTACK_KNOCKBACK_VY,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
   HARASS_RALLY_OFFSET, HARASS_GROUP_DIST, HARASS_RALLY_TOLERANCE,
@@ -89,6 +89,15 @@ export interface CharacterConfig {
   // indefinitely at fireRate. Optional so unconfigured types default to no cooldown.
   shotsBeforeCooldown?: number;
   cooldownSec?:         number;
+  // Poison: a direct hit from this unit applies a damage-over-time effect to the
+  // victim — `poisonDamage` HP every `poisonIntervalSec`, `poisonTicks` times.
+  // All three must be > 0 for poison to apply. `poisonTribes`, if set, restricts
+  // poison to those tribes' units of this type (omit = every tribe). Optional so
+  // unconfigured types never poison.
+  poisonDamage?:      number;
+  poisonTicks?:       number;
+  poisonIntervalSec?: number;
+  poisonTribes?:      readonly Tribe[];
 }
 
 export interface FireRequest {
@@ -183,7 +192,7 @@ export class Character {
   private get isKnockedBack(): boolean { return Math.abs(this.knockbackVx) > 20; }
 
   /** Damage events emitted this tick; Game.ts reads and clears each frame. */
-  readonly pendingDamages: { amount: number; x: number; y: number }[] = [];
+  readonly pendingDamages: { amount: number; x: number; y: number; color?: number }[] = [];
   /** Set when the character drops or throws a carried coin; Game.ts spawns the coin.
    *  vx/vy present â†' deliberate throw (directed velocity, no recovery chase). */
   pendingCoinDrop: { x: number; y: number; value: number; kind: CoinKind; vx?: number; vy?: number } | null = null;
@@ -202,6 +211,12 @@ export class Character {
   // Magazine / reload state (see CharacterConfig.shotsBeforeCooldown/cooldownSec).
   private magShotsFired      = 0;   // shots fired since the last cooldown
   private cooldownTimer      = 0;   // seconds remaining before the weapon can fire again
+  // Poison (damage-over-time) state applied to THIS character by an attacker.
+  private poisonTicksLeft    = 0;   // remaining ticks; 0 = not poisoned
+  private poisonTimer        = 0;   // seconds until the next tick
+  private poisonPerTick      = 0;   // HP lost per tick
+  private poisonIntervalSec  = 0;   // seconds between ticks
+  private poisonSource: Character | null = null;  // attacker, for kill credit
   private randomJumpTimer    = Math.random() * 3;  // stagger across characters
   private evasiveJumpTimer   = 0;
   private lastMoveDir:         1 | -1 = 1;
@@ -1826,6 +1841,8 @@ export class Character {
     this.attackTimer        = 0;
     this.cooldownTimer      = 0;
     this.magShotsFired      = 0;
+    this.poisonTicksLeft    = 0;
+    this.poisonSource       = null;
     this.attackFacingTimer  = 0;
     this.pendingMeleeSwing  = null;
     this.pendingBlast       = null;
@@ -1841,26 +1858,62 @@ export class Character {
     if (this.legsSprite) this.switchLegsAnimation('idle');
   }
 
-  takeDamage(dmg: number, killer?: Character) {
-    // Always queue a label event (amount=0 â†' "Miss" in Game.ts)
-    this.pendingDamages.push({ amount: dmg, x: this.x, y: this.y - this.config.height - 6 });
+  takeDamage(dmg: number, killer?: Character, poisonTick = false) {
+    // Always queue a label event (amount=0 â†' "Miss" in Game.ts). Poison ticks
+    // render green so the damage-over-time reads distinctly from a direct hit.
+    this.pendingDamages.push({ amount: dmg, x: this.x, y: this.y - this.config.height - 6, color: poisonTick ? CHAR_POISON_COLOR : undefined });
     if (dmg <= 0) return;  // miss â€” no HP change, no coin drop, no kill
 
     this.hp = Math.max(0, this.hp - dmg);
     this.drawBar();
-    if (this.carryingCoin) this.dropCarriedCoin();
-    // Defenders stay planted under fire â€” jumping mid-defence drags them off
-    // the rally point and out of the defence zone.
-    const hitJumpChance = this._behavior === 'defend' ? HIT_JUMP_CHANCE * 0.15 : HIT_JUMP_CHANCE;
-    if (!this.isAirborne && Math.random() < hitJumpChance) this.pendingHitJump = true;
+    // Hit reactions (coin drop, flinch jump) only on a direct hit, not each DoT tick.
+    if (!poisonTick) {
+      if (this.carryingCoin) this.dropCarriedCoin();
+      // Defenders stay planted under fire â€” jumping mid-defence drags them off
+      // the rally point and out of the defence zone.
+      const hitJumpChance = this._behavior === 'defend' ? HIT_JUMP_CHANCE * 0.15 : HIT_JUMP_CHANCE;
+      if (!this.isAirborne && Math.random() < hitJumpChance) this.pendingHitJump = true;
+    }
     if (this.hp <= 0) {
       this.state = 'dead';
       this.removeCoinCarry();
-      if (this.isLowHealthTinted) this.clearLowHealthTint();  // don't carry the red tint into the death fade
+      if (this.isLowHealthTinted) this.clearLowHealthTint();  // don't carry the tint into the death fade
       this.clearSweat();
+      this.poisonTicksLeft = 0;
       killer?.earnAP(PROMO_KILL_AP);
       this.killedBy = killer ? 'character' : 'tower';
+    } else if (!poisonTick && killer?.canPoison) {
+      // A direct hit from a poison-capable attacker starts (or refreshes) poison.
+      this.applyPoisonFrom(killer);
     }
+  }
+
+  /** Whether this character's attacks apply poison — all three poison values set
+   *  and > 0, and (if `poisonTribes` is set) this character's tribe is listed. */
+  private get canPoison(): boolean {
+    const c = this.config;
+    if (!c.poisonDamage || !c.poisonTicks || !c.poisonIntervalSec) return false;
+    return !c.poisonTribes || c.poisonTribes.includes(this.tribe);
+  }
+
+  /** Start/refresh a poison effect on THIS character from `attacker`'s config. */
+  private applyPoisonFrom(attacker: Character) {
+    const c = attacker.config;
+    this.poisonPerTick     = c.poisonDamage!;
+    this.poisonTicksLeft   = c.poisonTicks!;
+    this.poisonIntervalSec = c.poisonIntervalSec!;
+    this.poisonTimer       = c.poisonIntervalSec!;
+    this.poisonSource      = attacker;
+  }
+
+  /** Advance the poison DoT: deal one tick of damage when the interval elapses. */
+  private tickPoison(dt: number) {
+    if (this.poisonTicksLeft <= 0) return;
+    this.poisonTimer -= dt;
+    if (this.poisonTimer > 0) return;
+    this.poisonTimer += this.poisonIntervalSec;
+    this.poisonTicksLeft -= 1;
+    this.takeDamage(this.poisonPerTick, this.poisonSource ?? undefined, true);
   }
 
   heal(amount: number) {
@@ -1936,6 +1989,8 @@ export class Character {
     this.cooldownTimer      = Math.max(0, this.cooldownTimer      - ctx.dt);
     this.evasiveJumpTimer   = Math.max(0, this.evasiveJumpTimer   - ctx.dt);
     this.attackFacingTimer  = Math.max(0, this.attackFacingTimer  - ctx.dt);
+    this.tickPoison(ctx.dt);
+    if (this.isDead) return;   // poison may have been the finishing blow this tick
     this.tickPendingMeleeSwing(ctx);
     this.tickPendingBlast(ctx);
     this.tickPendingBurst(ctx);
@@ -2881,16 +2936,23 @@ export class Character {
    *  the body's natural colour (white = none) at the pulse trough and full red at
    *  the peak, so the character visibly blinks red. */
   private tickLowHealthBlink(dt: number, low: boolean): void {
-    if (!low) {
-      // Clear the tint once when leaving the low-health state (e.g. healed).
-      if (this.isLowHealthTinted) this.clearLowHealthTint();
+    if (low) {
+      // Low health takes priority: pulse red.
+      this.lowHealthPhase += dt * CHAR_LOW_HEALTH_BLINK_HZ * Math.PI * 2;
+      const k    = 0.5 - 0.5 * Math.cos(this.lowHealthPhase);   // 0 at trough → 1 at peak
+      const tint = lerpColor(0xffffff, CHAR_LOW_HEALTH_BLINK_COLOR, k);
+      for (const t of this.tintTargets) t.tint = tint;
+      this.isLowHealthTinted = true;
       return;
     }
-    this.lowHealthPhase += dt * CHAR_LOW_HEALTH_BLINK_HZ * Math.PI * 2;
-    const k    = 0.5 - 0.5 * Math.cos(this.lowHealthPhase);   // 0 at trough → 1 at peak
-    const tint = lerpColor(0xffffff, CHAR_LOW_HEALTH_BLINK_COLOR, k);
-    for (const t of this.tintTargets) t.tint = tint;
-    this.isLowHealthTinted = true;
+    if (this.poisonTicksLeft > 0) {
+      // Not low health but poisoned: hold a static green tint.
+      for (const t of this.tintTargets) t.tint = CHAR_POISON_COLOR;
+      this.isLowHealthTinted = true;
+      return;
+    }
+    // Neither: clear the tint once when leaving a tinted state.
+    if (this.isLowHealthTinted) this.clearLowHealthTint();
   }
 
   /** Reset the body tint to its natural colour (no tint). */

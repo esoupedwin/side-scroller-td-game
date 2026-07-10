@@ -1541,7 +1541,7 @@ export class Game {
       for (const ev of c.pendingDamages) {
         const label = ev.amount === 0
           ? new DamageLabel(ev.x, ev.y, 0, 0x999999, 'Miss')
-          : new DamageLabel(ev.x, ev.y, ev.amount, color);
+          : new DamageLabel(ev.x, ev.y, ev.amount, ev.color ?? color);   // poison ticks carry their own green
         this.damageLabels.push(label);
         this.labelLayer.addChild(label.container);
       }

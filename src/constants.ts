@@ -177,6 +177,7 @@ export const EVASIVE_JUMP_SCAN_RANGE   = ch.evasiveJumpScanRange;
 export const CHAR_LOW_HEALTH_RATIO       = ch.lowHealthRatio;
 export const CHAR_LOW_HEALTH_BLINK_COLOR = ch.lowHealthBlinkColor;
 export const CHAR_LOW_HEALTH_BLINK_HZ    = ch.lowHealthBlinkHz;
+export const CHAR_POISON_COLOR           = ch.poisonColor;
 export const ATTACK_KNOCKBACK_VY    = ch.attackKnockbackVy;
 export const ATTACK_KNOCKBACK_DECAY = ch.attackKnockbackDecay;
 export const HARASS_SAFETY_BUFFER   = ch.harassSafetyBuffer;
@@ -248,6 +249,10 @@ export const ARCHER = {
   width:       ch.width,
   height:      ch.height,
   knockback:   ch.archer.knockback,
+  poisonDamage:      ch.archer.poisonDamage,
+  poisonTicks:       ch.archer.poisonTicks,
+  poisonIntervalSec: ch.archer.poisonIntervalSec,
+  poisonTribes:      ch.archer.poisonTribes,
 };
 
 export const RIFLEMAN = {
