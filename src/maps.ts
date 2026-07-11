@@ -55,6 +55,14 @@ export interface MapDefinition {
   backgroundSkin2?:   string;  // data URL; second parallax layer rendered behind backgroundSkin (slower scroll)
   backgroundSkin2Y?:  number;  // screen-space Y offset of the far parallax image (default 0)
   durationSec?:      number;  // match countdown in seconds (default: GAME_DURATION_SEC from gameConfig)
+  /**
+   * Vertical camera pan limits in world px. The camera's visible window is
+   * clamped so it never reveals above cameraTopY (default 0 = sky top) or
+   * below cameraBottomY (default worldHeight = world bottom). An explicit
+   * cameraBottomY replaces the global CAMERA_MAX_PAN_DOWN heuristic.
+   */
+  cameraTopY?:    number;
+  cameraBottomY?: number;
 }
 
 /** One world in the campaign — contains an ordered list of maps. */

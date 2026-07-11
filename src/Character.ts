@@ -13,6 +13,7 @@ import {
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
   HARASS_RALLY_OFFSET, HARASS_GROUP_DIST, HARASS_RALLY_TOLERANCE,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST, COIN_THROW_MAX_Y_GAP,
+  COIN_PICK_DIST_OFFSET,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
   POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
@@ -106,9 +107,10 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 
 export interface CharacterConfig {
-  // Derived from the gameConfig character-block keys — adding a new block
-  // automatically extends this union.
-  type:        CharTypeName;
+  // Unique character-type id — derived from the gameConfig character-block
+  // keys, so adding a new block automatically extends this union. (Not to be
+  // confused with a Character INSTANCE's `id`, the #N serial.)
+  id:          CharTypeName;
   // How the unit delivers damage — drives combat dispatch, snap-fire gating,
   // kiting classification, muzzle VFX, and the Graphics-fallback body.
   attackStyle: AttackStyle;
@@ -413,6 +415,11 @@ export class Character {
   private coinCarryKind:  CoinKind = 'gold';
   private coinCarrySkin:  string | undefined = undefined;  // effective skin of the carried coin (matches the on-ground coin)
   private targetCoin:   Coin | null = null;
+  // Transient CPU "go grab that" waypoint (power-up fetch). Set/cleared by
+  // Game's collect AI; overrides the behavior branch in update() until arrival
+  // without touching `behavior` itself, so the unit resumes its role after.
+  fetchX: number | null = null;
+  fetchFloorY = 0;
   private coinCarryGfx: PIXI.Graphics | null = null;
   private lastDrawnHpRatio  = -1;
   private lastLocoMoveSpeed = -1;
@@ -547,18 +554,18 @@ export class Character {
 
   private buildSprite() {
     if (this.spriteSet) { this.buildAnimSprite(); return; }
-    if      (this.config.type === 'conscript')  this.buildConscriptSprite();
-    else if (this.config.type === 'archer')     this.buildArcherSprite();
-    else if (this.config.type === 'rifleman')   this.buildRiflemanSprite();
-    else if (this.config.type === 'gunslinger') this.buildGunslingerSprite();
-    else if (this.config.type === 'sniper')     this.buildSniperSprite();
-    else if (this.config.type === 'viking')     this.buildVikingSprite();
-    else if (this.config.type === 'knight')     this.buildKnightSprite();
-    else if (this.config.type === 'heavy')      this.buildHeavySprite();
-    else if (this.config.type === 'tanker')     this.buildTankerSprite();
-    else if (this.config.type === 'grenadier')  this.buildGrenadierSprite();
-    else if (this.config.type === 'rocketeer')  this.buildRocketeerSprite();
-    else if (this.config.type === 'shocktrooper') this.buildShockTrooperSprite();
+    if      (this.config.id === 'conscript')  this.buildConscriptSprite();
+    else if (this.config.id === 'archer')     this.buildArcherSprite();
+    else if (this.config.id === 'rifleman')   this.buildRiflemanSprite();
+    else if (this.config.id === 'gunslinger') this.buildGunslingerSprite();
+    else if (this.config.id === 'sniper')     this.buildSniperSprite();
+    else if (this.config.id === 'viking')     this.buildVikingSprite();
+    else if (this.config.id === 'knight')     this.buildKnightSprite();
+    else if (this.config.id === 'heavy')      this.buildHeavySprite();
+    else if (this.config.id === 'tanker')     this.buildTankerSprite();
+    else if (this.config.id === 'grenadier')  this.buildGrenadierSprite();
+    else if (this.config.id === 'rocketeer')  this.buildRocketeerSprite();
+    else if (this.config.id === 'shocktrooper') this.buildShockTrooperSprite();
     else {
       // New config-defined type without sprite sheets or a bespoke builder —
       // borrow the Graphics body that matches its attack style so it reads
@@ -596,8 +603,8 @@ export class Character {
   /** Render scale that makes a frame `frameH` tall display at `config.height Ã— spriteScale` on screen. */
   private animScaleFor(layer: 'body' | 'legs', animName: BodyAnimName | LegsAnimName, frameH: number): number {
     const scale = layer === 'body'
-      ? getBodySpriteScale(this.tribe, this.config.type, animName as BodyAnimName)
-      : getLegsSpriteScale(this.tribe, this.config.type, animName as LegsAnimName);
+      ? getBodySpriteScale(this.tribe, this.config.id, animName as BodyAnimName)
+      : getLegsSpriteScale(this.tribe, this.config.id, animName as LegsAnimName);
     return scale * this.config.height / frameH;
   }
 
@@ -619,11 +626,11 @@ export class Character {
 
     // Legs first so they render BEHIND the body.
     const legs = new PIXI.AnimatedSprite(legsFrames);
-    legs.anchor.set(0.5, getLegsFeetAnchorY(this.tribe, this.config.type, startLegsName));
+    legs.anchor.set(0.5, getLegsFeetAnchorY(this.tribe, this.config.id, startLegsName));
     legs.y = this.config.height;
     this.legsBaseScale = this.animScaleFor('legs', startLegsName, legsFrames[0].height);
     legs.scale.set(this.legsBaseScale);
-    legs.animationSpeed = getLegsAnimFps(this.tribe, this.config.type, startLegsName) / 60;
+    legs.animationSpeed = getLegsAnimFps(this.tribe, this.config.id, startLegsName) / 60;
     legs.loop = true;
     legs.play();
     this.legsSprite      = legs;
@@ -631,11 +638,11 @@ export class Character {
     this.container.addChild(legs);
 
     const body = new PIXI.AnimatedSprite(bodyFrames);
-    body.anchor.set(0.5, getBodyFeetAnchorY(this.tribe, this.config.type, startBodyName));
+    body.anchor.set(0.5, getBodyFeetAnchorY(this.tribe, this.config.id, startBodyName));
     body.y = this.config.height;
     this.bodyBaseScale = this.animScaleFor('body', startBodyName, bodyFrames[0].height);
     body.scale.set(this.bodyBaseScale);
-    body.animationSpeed = getBodyAnimFps(this.tribe, this.config.type, startBodyName) / 60;
+    body.animationSpeed = getBodyAnimFps(this.tribe, this.config.id, startBodyName) / 60;
     body.loop = true;
     body.play();
     this.bodySprite      = body;
@@ -692,8 +699,8 @@ export class Character {
     if (!frames) return;
 
     sprite.textures       = frames;
-    sprite.anchor.set(0.5, getBodyFeetAnchorY(this.tribe, this.config.type, picked));
-    sprite.animationSpeed = getBodyAnimFps(this.tribe, this.config.type, picked) / 60;
+    sprite.anchor.set(0.5, getBodyFeetAnchorY(this.tribe, this.config.id, picked));
+    sprite.animationSpeed = getBodyAnimFps(this.tribe, this.config.id, picked) / 60;
     this.bodyBaseScale    = this.animScaleFor('body', picked, frames[0].height);
     sprite.play();
     this.currentBodyAnim = name;
@@ -712,8 +719,8 @@ export class Character {
     if (!frames) return;
 
     sprite.textures       = frames;
-    sprite.anchor.set(0.5, getLegsFeetAnchorY(this.tribe, this.config.type, picked));
-    sprite.animationSpeed = getLegsAnimFps(this.tribe, this.config.type, picked) / 60;
+    sprite.anchor.set(0.5, getLegsFeetAnchorY(this.tribe, this.config.id, picked));
+    sprite.animationSpeed = getLegsAnimFps(this.tribe, this.config.id, picked) / 60;
     this.legsBaseScale    = this.animScaleFor('legs', picked, frames[0].height);
     sprite.play();
     this.currentLegsAnim = name;
@@ -767,14 +774,14 @@ export class Character {
     const legs = this.legsSprite;
     const legsName = this.currentLegsAnim;
     if (legs && legsName === 'walk') {
-      const target = (getLegsAnimFps(this.tribe, this.config.type, legsName) * ratio) / 60;
+      const target = (getLegsAnimFps(this.tribe, this.config.id, legsName) * ratio) / 60;
       if (Math.abs(legs.animationSpeed - target) > 1e-4) legs.animationSpeed = target;
     }
 
     const body = this.bodySprite;
     const bodyName = this.currentBodyAnim;
     if (body && bodyName && (bodyName === 'walk' || bodyName === 'carry')) {
-      const target = (getBodyAnimFps(this.tribe, this.config.type, bodyName) * ratio) / 60;
+      const target = (getBodyAnimFps(this.tribe, this.config.id, bodyName) * ratio) / 60;
       if (Math.abs(body.animationSpeed - target) > 1e-4) body.animationSpeed = target;
     }
   }
@@ -1676,7 +1683,7 @@ export class Character {
   }
 
   private tickRandomJump(dt: number, homeTowerFrontX: number) {
-    if (this.config.type === 'tanker') return;
+    if (this.config.id === 'tanker') return;
     if (this.isAirborne || this.state === 'fighting') return;
     if (this.isOnPlatform) return;   // stay on platform; horizontal movement is the right action
     this.randomJumpTimer -= dt;
@@ -2082,7 +2089,13 @@ export class Character {
 
     const preX = this.x;
     if (!this.isKnockedBack) {
-      if (this._behavior === 'collecting') {
+      if (this.fetchX !== null) {
+        // Transient "go grab that" waypoint (CPU power-up fetch) — overrides
+        // the behavior branch until arrival; Game clears it if the target
+        // disappears. The behavior itself is untouched, so the unit resumes
+        // its role the moment the fetch ends.
+        this.updateFetching(ctx);
+      } else if (this._behavior === 'collecting') {
         this.updateCollecting(ctx);
       } else if (this._behavior === 'harass') {
         this.updateHarass(ctx);
@@ -2163,7 +2176,7 @@ export class Character {
 
   private jump(dirX: number, _dt: number) {
     if (this.isAirborne) return;
-    if (this.config.type === 'tanker') return;   // tanks cannot jump
+    if (this.config.id === 'tanker') return;   // tanks cannot jump
     this.jumpVx     = dirX * this.moveSpeed;
     this.isAirborne = true;
     this.jumpTickCount       = 0;
@@ -2460,7 +2473,7 @@ export class Character {
 
       // â”€â”€ jump â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (step.action === 'jump') {
-        if (this.config.type === 'tanker') {
+        if (this.config.id === 'tanker') {
           this.pathIdx++;
           continue;
         }
@@ -2596,7 +2609,7 @@ export class Character {
       if (ahead > 0 && ahead < RUSH_DODGE_LOOKAHEAD && Math.abs(c.floorY - this.floorY) < RUSH_FLOOR_TOL) { blocker = c; break; }
     }
 
-    if (blocker && this.config.type !== 'tanker') {
+    if (blocker && this.config.id !== 'tanker') {
       this.jump(dir, dt);
       this.state = 'marching';
       return;
@@ -2608,6 +2621,33 @@ export class Character {
   }
 
   // â”€â”€ Collecting behaviour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  // â”€â”€ Fetch behaviour (transient waypoint) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  /** March to the transient fetch waypoint (a settled power-up). Fires
+   *  opportunistically en route, exactly like collecting. Arrival clears the
+   *  waypoint — the actual pickup happens via Game's proximity check; Game
+   *  also clears the waypoint if the target disappears first. */
+  private updateFetching(ctx: UpdateContext) {
+    const { dt, enemies, blocks, navGraph, onFire } = ctx;
+    if (this.fetchX === null) return;
+
+    if (!this.isAirborne) {
+      const nearest = this.nearestEnemy(enemies, this.config.attackRange, blocks);
+      if (nearest) this.attackEnemy(nearest, onFire);
+    }
+
+    // Arrived: x within pickup range on (roughly) the target surface.
+    if (Math.abs(this.x - this.fetchX) <= CHAR_PICKUP_DIST && Math.abs(this.floorY - this.fetchFloorY) < 30) {
+      this.fetchX = null;
+      this.clearPath();
+      return;
+    }
+
+    this.state = 'marching';
+    this.requestPath(this.fetchX, this.fetchFloorY, navGraph, dt);
+    this.followPath(dt, ctx.platforms);
+  }
 
   private updateCollecting(ctx: UpdateContext) {
     const { dt, enemies, allies, coins, homeTowerFrontX, homeTowerBaseFloorY, onFire, onDepositCoin, navGraph, blocks } = ctx;
@@ -3252,7 +3292,7 @@ export class Character {
   private bodyAnimDuration(anim: BodyAnimName): number {
     const frames = this.spriteSet?.body[anim];
     if (!frames) return 0;
-    const fps = getBodyAnimFps(this.tribe, this.config.type, anim);
+    const fps = getBodyAnimFps(this.tribe, this.config.id, anim);
     return frames.length / fps;
   }
 
@@ -3289,7 +3329,7 @@ export class Character {
       if (Math.abs(swing.target.x - this.x) > reach) return;
       swing.target.takeDamage(swing.damage, swing.damage > 0 ? this : undefined);
       if (swing.damage > 0) {
-        ctx.onMeleeHit?.(this.config.type, this.x);   // no sound on misses (damage === 0)
+        ctx.onMeleeHit?.(this.config.id, this.x);   // no sound on misses (damage === 0)
         spawnHitSpark(swing.target.x, swing.target.y - swing.target.config.height * 0.5);
         // Knockback the victim in the attack direction (relative x).
         if (this.config.knockback > 0 && !swing.target.isDead) {
@@ -3299,7 +3339,7 @@ export class Character {
       }
     } else if (swing.onTower) {
       swing.onTower(swing.damage);
-      ctx.onMeleeHit?.(this.config.type, this.x);
+      ctx.onMeleeHit?.(this.config.id, this.x);
       if (this.config.attackStyle === 'blast') {
         const range = this.config.attackRange + this.config.width * 0.5;
         spawnShotgunBlast(this.x + this.lastAttackDir * 16, this.bowY, this.lastAttackDir, range);
@@ -3621,23 +3661,25 @@ export class Character {
     return best;
   }
 
-  /** Coin closest to own tower front â€” prioritises easy-to-deposit coins.
+  /** Best coin to collect — value-weighted: score = value / (distToTower +
+   *  COIN_PICK_DIST_OFFSET), so a nearby silver only beats a farther gold or
+   *  blue jackpot when it's MUCH closer, instead of pure distance ranking.
    *  Coins in `excluded` are skipped while any unexcluded coin exists; when
-   *  every live coin is excluded, falls back to the closest excluded one
+   *  every live coin is excluded, falls back to the best excluded one
    *  (same semantics as the old "free pool first, else full pool" filter,
    *  without allocating the intermediate arrays). */
   private coinClosestToTower(coins: Coin[], homeTowerFrontX: number, excluded?: ReadonlySet<Coin>): Coin | null {
     let best: Coin | null = null;
     let bestExcluded: Coin | null = null;
-    let minDistToTower = Infinity, minExcluded = Infinity;
+    let bestScore = -Infinity, bestExclScore = -Infinity;
     for (const c of coins) {
       if (c.isDead || c.isPickedUp) continue;
-      const distToTower = Math.abs(c.x - homeTowerFrontX);
+      const score = c.value / (Math.abs(c.x - homeTowerFrontX) + COIN_PICK_DIST_OFFSET);
       if (excluded?.has(c)) {
-        if (distToTower < minExcluded) { minExcluded = distToTower; bestExcluded = c; }
+        if (score > bestExclScore) { bestExclScore = score; bestExcluded = c; }
         continue;
       }
-      if (distToTower < minDistToTower) { minDistToTower = distToTower; best = c; }
+      if (score > bestScore) { bestScore = score; best = c; }
     }
     return best ?? bestExcluded;
   }

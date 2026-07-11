@@ -2,7 +2,8 @@ import { Game, type CpuStrategyInfo } from './Game';
 import type { PowerUpType } from './PowerUp';
 import {
   charCost, charDisplayName, charIcon, ALL_CHAR_TYPES,
-  VIEWPORT_WIDTH, VIEWPORT_HEIGHT, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS,
+  VIEWPORT_WIDTH, VIEWPORT_HEIGHT, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS, CHEAT_TOWER_DAMAGE,
+  CHEAT_CLOCK_SKIP_SEC,
   type CharTypeName,
 } from './constants';
 import { getOwnedCards, loadLoadout, saveLoadout } from './CardCollection';
@@ -501,7 +502,7 @@ window.addEventListener('keydown', (e) => {
     row.dataset.id  = String(char.id);
     const { label: rankLbl, color: rankCol } = rankInfo(char);
     const xp = xpInfo(char);
-    const typeLabel = char.config.displayName ?? char.config.type.charAt(0).toUpperCase() + char.config.type.slice(1);
+    const typeLabel = char.config.displayName ?? char.config.id.charAt(0).toUpperCase() + char.config.id.slice(1);
     row.innerHTML   = `
       <span class="cmd-row-id">#${char.id}</span>
       <span class="cmd-row-name">${char.name}</span>
@@ -915,6 +916,19 @@ const dropPowerUpBtn = document.getElementById('dev-drop-powerup-btn') as HTMLBu
 
 dropPowerUpBtn.addEventListener('click', () => {
   game.forceDropPowerUp(powerUpSelect.value as PowerUpType);
+});
+
+// ── Game Shark: flat tower damage ─────────────────────────────────────────
+document.getElementById('dev-dmg-player-tower-btn')!.addEventListener('click', () => {
+  game.cheatDamageTower('player', CHEAT_TOWER_DAMAGE);
+});
+document.getElementById('dev-dmg-cpu-tower-btn')!.addEventListener('click', () => {
+  game.cheatDamageTower('enemy', CHEAT_TOWER_DAMAGE);
+});
+
+// ── Game Shark: skip the match clock ──────────────────────────────────────
+document.getElementById('dev-skip-clock-btn')!.addEventListener('click', () => {
+  game.cheatSkipClock(CHEAT_CLOCK_SKIP_SEC);
 });
 
 // ── Game Shark: force the CPU to buy a specific unit type ─────────────────

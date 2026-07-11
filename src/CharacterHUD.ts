@@ -47,7 +47,7 @@ export class CharacterHUD {
 
   add(char: Character) {
     const id    = char.id;
-    const type  = char.config.type;
+    const type  = char.config.id;
     // Config-driven — the character block supplies its own UI metadata.
     const color = char.config.uiColor ?? '#ffffff';
     const icon  = char.config.icon    ?? '?';

@@ -40,6 +40,7 @@ export const GameConfig = {
     harassRallyTolerance: 20, // px — how close to the solo rally point a harass unit must get before holding
     defendPursuitRange: 600, // px — defenders pursue any enemy within this distance of their home tower face (larger than TOWER_ATTACK_RANGE so they can chase off ranged units firing in from just outside the defence zone)
     rangedKiteThreshold: 80, // px — ranged units back away when a melee enemy closes within this distance
+    coinPickDistOffset: 200, // px — softening constant in the collector's coin scoring value/(dist+offset); lower = distance matters more, higher = value matters more
     coinThrowScanRange:  80,  // px — scan radius for a new coin after throwing one toward tower
     coinThrowHoldSec:   0.5, // seconds the character holds the coin before releasing the throw
     coinThrowMaxYGap:   100, // px — if the carrier's standing surface sits at least this much below the home tower's base, skip throwing and keep carrying (prevents arcing coins into a wall when the tower is on an elevated block ~120 px tall — the threshold is set a few px below the block height to be robust to small tower-placement offsets in the map builder)
@@ -70,17 +71,17 @@ export const GameConfig = {
     // conscript ≠ Lapinor's conscript. Types that belong to no tribe (heavy,
     // tanker — CPU/hidden) live in `common` below.
     //
-    // ★ ADDING A NEW CHARACTER: add a block here (key = type name) and you're
-    //   done — everything else derives from it automatically:
+    // ★ ADDING A NEW CHARACTER: add a block here (key = character id, and the
+    //   block's `id` field must match it) — everything else derives automatically:
     //   • roster + spawn button + loadout card (key order = display order)
-    //   • the CharacterConfig['type'] union (derived from these keys)
+    //   • the CharacterConfig['id'] union (derived from these keys)
     //   • combat semantics via `attackStyle` (see below)
     //   • CPU AI valuation (threat + buy order, from the stats)
     //   • sprite sheets from /public/sprites/<tribe>/<key>/{body,legs}/<anim>.png
     //     (drop the PNGs in; missing sheets fall back to a Graphics body chosen
     //     by attackStyle; `spriteFolder` overrides the folder name if needed)
     //
-    //   Required: type, hp, speed, attackRange, attackPower, fireRate, cost,
+    //   Required: id, hp, speed, attackRange, attackPower, fireRate, cost,
     //             critical (miss chance), knockback, attackStyle:
     //     'melee'   — close swing (pendingMeleeSwing)
     //     'blast'   — frontal shotgun cone, hits everything in it
@@ -94,19 +95,19 @@ export const GameConfig = {
     //             cooldownSec (magazine), poison*, spriteFolder.
     kattgard: {
       conscript: {
-        type:        'conscript' as const,
+        id:          'conscript' as const,
         attackStyle: 'melee' as const, icon: '👊', uiColor: '#b07040',
         hp:          110, speed: 150, attackRange: 36, attackPower: 10,
         fireRate:    0.65, cost: 15, critical: 0.18, knockback: 0,
       },
       warrior: {
-        type:        'warrior' as const,
+        id:          'warrior' as const,
         attackStyle: 'melee' as const, icon: '⚔', uiColor: '#00b4d8',
         hp:          160, speed: 120, attackRange: 40, attackPower: 15,
         fireRate:    0.8, cost: 25, critical: 0.10, knockback: 0,
       },
       archer: {
-        type:        'archer' as const,
+        id:          'archer' as const,
         attackStyle: 'arrow' as const, icon: '🏹', uiColor: '#43aa8b',
         hp:          100, speed: 70, attackRange: 180, attackPower: 12,
         fireRate:    2.2, cost: 50, critical: 0.08, knockback: 0,
@@ -116,99 +117,113 @@ export const GameConfig = {
         poisonIntervalSec: 1.0,  // seconds between ticks
       },
       rifleman: {
-        type:        'rifleman' as const,
+        id:          'rifleman' as const,
         attackStyle: 'bullet' as const, icon: '🔫', uiColor: '#7a8c42',
         hp:          90, speed: 78, attackRange: 280, attackPower: 9,
         fireRate:    0.25, cost: 70, critical: 0.07, knockback: 0,
         shotsBeforeCooldown: 3, cooldownSec: 1.5,  // 3 rounds, then a 1.5 s reload
       },
+      musketeer: {
+        id:          'musketeer' as const,
+        attackStyle: 'bullet' as const, icon: '🤠', uiColor: '#b8860b',
+        hp:          65, speed: 92, attackRange: 200, attackPower: 7,
+        fireRate:    1.4, cost: 75, critical: 0.09, knockback: 0,
+        burstCount:  1, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
+      },
       sniper: {
-        type:        'sniper' as const,
+        id:          'sniper' as const,
         attackStyle: 'bullet' as const, icon: '🎯', uiColor: '#e07b39',
         hp:          70, speed: 50, attackRange: 380, attackPower: 35,
         fireRate:    3.1, cost: 100, critical: 0.05, knockback: 0,
       },
       viking: {
-        type:        'viking' as const,
+        id:          'viking' as const,
         attackStyle: 'melee' as const, icon: '🪓', uiColor: '#7a9e7e',
         hp:          350, speed: 100, attackRange: 44, attackPower: 20,
         fireRate:    1.0, cost: 120, critical: 0.12, knockback: 400,
       },
       shocktrooper: {
-        type:        'shocktrooper' as const,
+        id:          'shocktrooper' as const,
         attackStyle: 'blast' as const, displayName: 'Shock Trooper', icon: '💥', uiColor: '#c25b3a',
         hp:          130, speed: 85, attackRange: 190, attackPower: 20,
         fireRate:    0.7, cost: 90, critical: 0.10, knockback: 350,
         shotsBeforeCooldown: 3, cooldownSec: 2,  // 3 blasts, then a 2 s reload
       },
       grenadier: {
-        type:        'grenadier' as const,
+        id:          'grenadier' as const,
         attackStyle: 'grenade' as const, icon: '💣', uiColor: '#6b7a2a',
         hp:          110, speed: 65, attackRange: 280, attackPower: 55,
         fireRate:    2, cost: 90, critical: 0.08, knockback: 0,
       },
       rocketeer: {
-        type:        'rocketeer' as const,
+        id:          'rocketeer' as const,
         attackStyle: 'rocket' as const, icon: '🚀', uiColor: '#cc4400',
         hp:          120, speed: 68, attackRange: 260, attackPower: 70,
         fireRate:    2.5, cost: 120, critical: 0.06, knockback: 0,
       },
+      pirateking: {
+        id:          'pirateking' as const,
+        attackStyle: 'bullet' as const, icon: '🤠', uiColor: '#b8860b',
+        hp:          105, speed: 100, attackRange: 200, attackPower: 7,
+        fireRate:    1.4, cost: 100, critical: 0.09, knockback: 100,
+        burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
+      },
     },
     lapinor: {
       conscript: {
-        type:        'conscript' as const,
+        id:          'conscript' as const,
         attackStyle: 'melee' as const, icon: '👊', uiColor: '#b07040',
         hp:          110, speed: 150, attackRange: 36, attackPower: 10,
         fireRate:    0.65, cost: 15, critical: 0.18, knockback: 0,
       },
       warrior: {
-        type:        'warrior' as const,
+        id:          'warrior' as const,
         attackStyle: 'melee' as const, icon: '⚔', uiColor: '#00b4d8',
         hp:          160, speed: 120, attackRange: 40, attackPower: 15,
         fireRate:    0.8, cost: 25, critical: 0.10, knockback: 0,
       },
       archer: {
-        type:        'archer' as const,
+        id:          'archer' as const,
         attackStyle: 'arrow' as const, icon: '🏹', uiColor: '#43aa8b',
         hp:          100, speed: 70, attackRange: 180, attackPower: 12,
         fireRate:    2.2, cost: 50, critical: 0.08, knockback: 0,
         // No poison — poison is a Kattgard-archer trait for now.
       },
       rifleman: {
-        type:        'rifleman' as const,
+        id:          'rifleman' as const,
         attackStyle: 'bullet' as const, icon: '🔫', uiColor: '#7a8c42',
         hp:          90, speed: 78, attackRange: 280, attackPower: 9,
         fireRate:    0.25, cost: 70, critical: 0.07, knockback: 0,
         shotsBeforeCooldown: 3, cooldownSec: 1.5,
       },
       gunslinger: {
-        type:        'gunslinger' as const,
+        id:          'gunslinger' as const,
         attackStyle: 'bullet' as const, icon: '🤠', uiColor: '#b8860b',
         hp:          85, speed: 92, attackRange: 200, attackPower: 7,
         fireRate:    1.4, cost: 75, critical: 0.09, knockback: 0,
         burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
       },
       sniper: {
-        type:        'sniper' as const,
+        id:          'sniper' as const,
         attackStyle: 'bullet' as const, icon: '🎯', uiColor: '#e07b39',
         hp:          70, speed: 50, attackRange: 380, attackPower: 35,
         fireRate:    3.1, cost: 100, critical: 0.05, knockback: 0,
         spriteFolder: 'Sniper',  // asset folder is capitalised on disk
       },
       knight: {
-        type:        'knight' as const,
+        id:          'knight' as const,
         attackStyle: 'melee' as const, icon: '🛡', uiColor: '#8b9faa',
         hp:          280, speed: 80, attackRange: 44, attackPower: 28,
         fireRate:    1.1, cost: 150, critical: 0.08, knockback: 250,
       },
       grenadier: {
-        type:        'grenadier' as const,
+        id:          'grenadier' as const,
         attackStyle: 'grenade' as const, icon: '💣', uiColor: '#6b7a2a',
         hp:          110, speed: 65, attackRange: 280, attackPower: 55,
         fireRate:    2, cost: 90, critical: 0.08, knockback: 0,
       },
       rocketeer: {
-        type:        'rocketeer' as const,
+        id:          'rocketeer' as const,
         attackStyle: 'rocket' as const, icon: '🚀', uiColor: '#cc4400',
         hp:          120, speed: 68, attackRange: 260, attackPower: 70,
         fireRate:    2.5, cost: 120, critical: 0.06, knockback: 0,
@@ -217,13 +232,13 @@ export const GameConfig = {
     // Tribe-less types: CPU-only / hidden (not in any roster). Shared fallback.
     common: {
       heavy: {
-        type:        'heavy' as const,
+        id:          'heavy' as const,
         attackStyle: 'melee' as const, icon: '🔨', uiColor: '#8899bb',
         hp:          220, speed: 25, attackRange: 48, attackPower: 40,
         fireRate:    1.3, cost: 80, critical: 0.12, width: 28, height: 44, knockback: 0,
       },
       tanker: {
-        type:        'tanker' as const,
+        id:          'tanker' as const,
         attackStyle: 'bullet' as const, icon: '🪖', uiColor: '#8b4513',
         hp:          500, speed: 30, attackRange: 240, attackPower: 75,
         fireRate:    3.2, cost: 160, critical: 0.08, width: 80, height: 70, knockback: 0,
@@ -265,6 +280,14 @@ export const GameConfig = {
     neutralMaxFactor:     0.75,
     retreatHpFrac:        0.15,     // AI combat units fall back to 'defend' below this HP fraction…
     retreatRecoverFrac:   0.6,      // …and only rejoin the fight once healed back above this (hysteresis)
+
+    // ── Endgame (time-aware stance) ──────────────────────────────────────────
+    // With this many seconds left, timeout rules take over stance selection:
+    // the timeout winner is decided purely by tower HP (the enemy side loses
+    // ties), so a CPU behind on tower HP goes ALL-IN — every unit attacks and
+    // collectors are recalled, because defending can only preserve a losing
+    // deficit. Ahead on tower HP, it turtles to run out the clock instead.
+    endgameSec:           75,
 
     // ── Attribute-driven unit valuation ──────────────────────────────────────
     // The CPU derives every unit's worth from its live config attributes
@@ -367,6 +390,8 @@ export const GameConfig = {
   cheats: {
     playerCoinGrant: 100,   // K key — coins added to player balance
     cpuCoinGrant:    100,   // L key — coins added to CPU balance
+    towerDamage:     50,    // dev-panel Game Shark buttons — flat damage per click to a tower
+    clockSkipSec:    10,    // dev-panel Game Shark button — seconds removed from the match clock per click
     // Dev fast-start: skip the splash screen and character selection on game
     // load (and on tribe/map switches) and jump straight into the match with
     // EVERY owned character card loaded — no 7-card cap, no 3-2-1 countdown.

@@ -117,7 +117,7 @@ export class Diagnostics {
     for (const c of chars) {
       liveIds.add(c.id);
       if (!this.knownIds.has(c.id)) {
-        this.note(time, 'event', `Spawn #${c.id} ${c.name} (${c.side} ${c.config.type})`);
+        this.note(time, 'event', `Spawn #${c.id} ${c.name} (${c.side} ${c.config.id})`);
       }
     }
     for (const id of this.knownIds) {
@@ -296,7 +296,7 @@ export class Diagnostics {
           id:       c.id,
           name:     c.name,
           side:     c.side,
-          type:     c.config.type,
+          type:     c.config.id,
           rank:     c.rank,
           hp:       Math.round(c.hp),
           maxHp:    Math.round(c.maxHp),

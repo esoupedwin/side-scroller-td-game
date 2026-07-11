@@ -85,6 +85,7 @@ export const CPU_NEUTRAL_MIN_FACTOR  = cpu.neutralMinFactor;
 export const CPU_NEUTRAL_MAX_FACTOR  = cpu.neutralMaxFactor;
 export const CPU_RETREAT_HP_FRAC      = cpu.retreatHpFrac;
 export const CPU_RETREAT_RECOVER_FRAC = cpu.retreatRecoverFrac;
+export const CPU_ENDGAME_SEC          = cpu.endgameSec;
 export const CPU_VAL_RANGE_DIVISOR    = cpu.valuation.rangeReachDivisor;
 export const CPU_VAL_HP_DIVISOR       = cpu.valuation.hpTankyDivisor;
 export const CPU_VAL_SPLASH_PUSH_MULT = cpu.valuation.splashPushMult;
@@ -154,6 +155,8 @@ export const LOADOUT_MAX_CARDS   = GameConfig.loadout.maxCards;
 export const CHEAT_PLAYER_COIN_GRANT  = GameConfig.cheats.playerCoinGrant;
 export const CHEAT_CPU_COIN_GRANT     = GameConfig.cheats.cpuCoinGrant;
 export const CHEAT_SKIP_INTRO_SCREENS = GameConfig.cheats.skipIntroScreens;
+export const CHEAT_TOWER_DAMAGE       = GameConfig.cheats.towerDamage;
+export const CHEAT_CLOCK_SKIP_SEC     = GameConfig.cheats.clockSkipSec;
 
 // ── Power-ups ────────────────────────────────────────────────────────────────
 export const POWERUP_PICKUP_DIST    = pu.pickupDist;
@@ -207,6 +210,7 @@ export const HARASS_GROUP_DIST      = ch.harassGroupDist;
 export const HARASS_RALLY_TOLERANCE = ch.harassRallyTolerance;
 export const DEFEND_PURSUIT_RANGE   = ch.defendPursuitRange;
 export const RANGED_KITE_THRESHOLD  = ch.rangedKiteThreshold;
+export const COIN_PICK_DIST_OFFSET  = ch.coinPickDistOffset;
 export const COIN_THROW_SCAN_RANGE  = ch.coinThrowScanRange;
 export const COIN_THROW_HOLD_SEC    = ch.coinThrowHoldSec;
 export const COIN_THROW_MAX_Y_GAP   = ch.coinThrowMaxYGap;
@@ -230,7 +234,7 @@ export const CHAR_HEIGHT = ch.height;
  *  valuation can price burst weapons correctly (burstIntervalSec stays a
  *  gunslinger-global constant). */
 type RawCharCfg = {
-  type: CharacterConfig['type'];
+  id: CharacterConfig['id'];
   attackStyle: AttackStyle;
   hp: number; speed: number; attackRange: number; attackPower: number;
   fireRate: number; cost: number; critical: number; knockback: number;
@@ -244,7 +248,7 @@ type RawCharCfg = {
 
 function toCharConfig(c: RawCharCfg): CharacterConfig {
   return {
-    type:        c.type,
+    id:          c.id,
     attackStyle: c.attackStyle,
     hp:          c.hp,
     speed:       c.speed,

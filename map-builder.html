@@ -917,6 +917,17 @@
             </div>
             <span class="hint" style="width:100%; margin-top:2px;">Map Height = sky + ground. Adjust Ground Height to change the green strip below the walking surface.</span>
             <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:8px;">
+              <label>Camera Top Y:</label>
+              <input type="number" id="input-camera-top-y" step="10" style="width:120px;" title="Highest world y the camera can reveal at the top of the view (0 = sky top). Empty = no override." />
+              <span class="hint">px</span>
+            </div>
+            <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:6px;">
+              <label>Camera Bottom Y:</label>
+              <input type="number" id="input-camera-bottom-y" step="10" style="width:120px;" title="Lowest world y the camera can reveal at the bottom of the view (default: Map Height). Empty = no override." />
+              <span class="hint">px</span>
+            </div>
+            <span class="hint" style="width:100%; margin-top:2px;">Vertical camera pan limits in world px — the view never shows above Top Y or below Bottom Y. Leave empty for the defaults (sky top / map bottom).</span>
+            <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:8px;">
               <label>Countdown:</label>
               <input type="number" id="input-map-duration-min" min="0" style="width:80px;" title="Match countdown — minutes" />
               <span class="hint">min</span>

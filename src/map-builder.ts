@@ -1557,6 +1557,31 @@ class MapBuilder {
       this.map.groundZ = isNaN(z) || z === 0 ? undefined : z;
     });
 
+    // Camera pan limits (world px). Empty input = no override (engine defaults:
+    // top = 0 / sky top, bottom = map height, plus the global down-pan cap).
+    document.getElementById('input-camera-top-y')!.addEventListener('change', () => {
+      const raw = (document.getElementById('input-camera-top-y') as HTMLInputElement).value;
+      this.pushUndo();
+      if (raw === '') { delete this.map.cameraTopY; }
+      else {
+        const val = parseInt(raw, 10);
+        if (isNaN(val)) return;
+        this.map.cameraTopY = val;
+      }
+      this.syncInputsFromMap();
+    });
+    document.getElementById('input-camera-bottom-y')!.addEventListener('change', () => {
+      const raw = (document.getElementById('input-camera-bottom-y') as HTMLInputElement).value;
+      this.pushUndo();
+      if (raw === '') { delete this.map.cameraBottomY; }
+      else {
+        const val = parseInt(raw, 10);
+        if (isNaN(val)) return;
+        this.map.cameraBottomY = val;
+      }
+      this.syncInputsFromMap();
+    });
+
     // Map duration inputs (minutes + seconds → durationSec)
     const readDuration = () => {
       const minStr = (document.getElementById('input-map-duration-min') as HTMLInputElement).value;
@@ -2287,6 +2312,12 @@ class MapBuilder {
       (document.getElementById('input-world-width')   as HTMLInputElement).value = String(m.worldWidth);
       (document.getElementById('input-world-height')  as HTMLInputElement).value = String(m.worldHeight ?? WORLD_H);
       (document.getElementById('input-ground-height') as HTMLInputElement).value = String(m.groundHeight ?? (m.worldHeight ?? WORLD_H) - GROUND_Y);
+      const camTopInput    = document.getElementById('input-camera-top-y')    as HTMLInputElement;
+      const camBottomInput = document.getElementById('input-camera-bottom-y') as HTMLInputElement;
+      camTopInput.value          = m.cameraTopY    !== undefined ? String(m.cameraTopY)    : '';
+      camBottomInput.value       = m.cameraBottomY !== undefined ? String(m.cameraBottomY) : '';
+      camTopInput.placeholder    = '0';
+      camBottomInput.placeholder = String(m.worldHeight ?? WORLD_H);
       const total       = m.durationSec ?? GameConfig.canvas.durationSec;
       const isOverride  = m.durationSec !== undefined;
       const mins        = Math.floor(total / 60);

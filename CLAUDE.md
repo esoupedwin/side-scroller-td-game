@@ -171,7 +171,7 @@ Blocks are registered with `NavGraph.build()` as walkable surfaces alongside pla
 ## Character system
 
 ### Unit types — config-driven
-Unit types are **defined entirely by the character blocks in `gameConfig.characters.<tribe>`** (plus `characters.common` for tribe-less CPU types like `heavy`/`tanker`). The `CharacterConfig['type']` union (`CharTypeName`) is derived from the block keys; rosters, spawn buttons, loadout cards, sprite lookups, and CPU AI all follow automatically.
+Unit types are **defined entirely by the character blocks in `gameConfig.characters.<tribe>`** (plus `characters.common` for tribe-less CPU types like `heavy`/`tanker`). Each block's key is the character's **`id`** (the block's `id` field must match the key; `config.id` — not to be confused with a Character *instance's* `id`, the #N serial). The `CharacterConfig['id']` union (`CharTypeName`) is derived from the block keys; rosters, spawn buttons, loadout cards, sprite lookups, and CPU AI all follow automatically.
 
 Combat semantics come from the block's **`attackStyle`** attribute:
 - `'melee'` — close swing (`pendingMeleeSwing`); e.g. conscript, warrior, viking, knight, heavy
@@ -412,13 +412,20 @@ Three anomaly types (debounced at 2s per character):
 
 ## CPU AI
 
-`tickCpuCollectAI()` runs each tick before character updates:
-- If coins exist and no CPU unit is collecting: assign the marching unit closest to a coin
-- If no coins exist: return non-carrying collectors to attacking
+`tickCpuCollectAI()` runs on a ~250 ms cadence:
+- Wanted collectors by stance (economy 2 / push 1 / defend 0-1 / all-in 0); drafts the unengaged unit closest to a coin. Both `'attacking'` marchers and idle `'harass'` units are eligible — in defend stance nobody has behavior `'attacking'`, so without the harass fallback a turtling CPU would never collect at all.
+- Characters pick coins by value-weighted score `value / (distToTower + COIN_PICK_DIST_OFFSET)` (in `coinClosestToTower`), so gold/blue outrank a slightly-closer silver.
+- **Power-up fetch**: pickup is proximity-only, so the AI routes the closest unengaged unit through each settled power-up via a transient `fetchX`/`fetchFloorY` waypoint on `Character` (overrides the behavior branch in `update()` until arrival without touching `behavior`; tracked in `Game.puFetchers`, validated each tick). Heal power-ups only draft units below 90% HP; all-in abandons fetches.
 
 `tickCpuBehaviorAI()` sets behavior based on current stance:
-- Defend stance: melee → `'defend'`, ranged → `'harass'`
-- Aggressive stance: all attacking units use `'attacking'`
+- Defend stance: melee/blast → `'defend'`, ranged → `'harass'`
+- Push stance: melee/blast → `'attacking'`, ranged → `'harass'`; **finisher**: when the opponent has ≤1 non-collecting units alive, the harass split is suspended and everyone attacks (harass deals zero tower damage)
+- `assessCpuStance` threat discounts collectors: opponent's ×0.15, own ×0.5 (recallable but currently off the front line)
+
+### Endgame (time-aware stance)
+The timeout winner is decided purely by tower HP (the enemy side loses ties), so inside the final `CPU_ENDGAME_SEC` (default 75 s) `assessCpuStance` ignores the mid-game score:
+- **Behind on tower HP → ALL-IN**: stance `'push'` plus an all-in flag (`cpuAllIn`/`playerAllIn`). Behavior AI sends *every* unit to `'attacking'` (no harass split — harass deals zero tower damage; no low-HP retreats), collect AI recalls collectors (`wantedCollectors = 0`), and `resetSpawnTimer` uses the urgent interval regardless of unit-count pressure. This deliberately overrides the critical-own-tower defend — turtling while behind converts a possible loss into a certain one.
+- **Ahead on tower HP → defend the lead** and run out the clock (unless the opponent tower is critical, then push to finish).
 
 Spawn interval scales with pressure (`playerCount - cpuCount`):
 - Outnumbered (`≥ CPU_PRESSURE_THRESHOLD`): fast spawn
