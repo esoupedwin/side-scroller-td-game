@@ -1,8 +1,12 @@
 import { Game, type CpuStrategyInfo } from './Game';
 import type { PowerUpType } from './PowerUp';
-import { charCost, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS } from './constants';
+import {
+  charCost, charDisplayName, charIcon, ALL_CHAR_TYPES,
+  VIEWPORT_WIDTH, VIEWPORT_HEIGHT, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS,
+  type CharTypeName,
+} from './constants';
 import { getOwnedCards, loadLoadout, saveLoadout } from './CardCollection';
-import { TYPE_ICON, rankLabel, xpProgress } from './CharacterHUD';
+import { rankLabel, xpProgress } from './CharacterHUD';
 import { preloadAllSprites } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
 import { WORLDS, ALL_MAPS, loadMapWithOverride, mapCoords } from './maps';
@@ -38,33 +42,62 @@ const playerHpLabelEl = document.getElementById('player-hp-label')!;
 const enemyHpFillEl   = document.getElementById('enemy-hp-fill')!;
 const enemyHpLabelEl  = document.getElementById('enemy-hp-label')!;
 
-// Every unit type the player UI has a button for (display order). The active
-// tribe's TRIBE_ROSTERS entry determines which of these are *visible* — the
-// rest are hidden via syncSpawnButtonVisibility(). Tanker is omitted entirely
-// (CPU-only) and Heavy is present in the HTML but not in either tribe's
-// roster, so it stays hidden until a tribe lists it.
-const UNIT_TYPES = [
-  'conscript', 'warrior', 'archer', 'rifleman', 'gunslinger', 'sniper',
-  'viking', 'shocktrooper', 'knight', 'heavy', 'grenadier', 'rocketeer',
-] as const;
-type UnitType = typeof UNIT_TYPES[number];
+// Spawn buttons are GENERATED from the active tribe's roster (gameConfig
+// character-block keys, in declaration order) — a new character block gets a
+// button with no HTML/CSS edits. Name/portrait/cost come from the config;
+// card art is probed from /cards/buy/card_buy_<type>.png and applied when it
+// exists (same optional-art pattern as the loadout grid). Rebuilt on every
+// tribe/loadout change by syncSpawnButtonVisibility().
+const spawnBtns = new Map<string, HTMLButtonElement>();
 
-// One spawn button per unit type — keyed by type string for easy lookup
-const spawnBtns = new Map<UnitType, HTMLButtonElement>(
-  UNIT_TYPES.map(t => [t, document.getElementById(`spawn-${t}-btn`) as HTMLButtonElement]),
-);
+function rebuildSpawnButtons() {
+  const tribe = getPlayerTribe();
+  uiOverlay.replaceChildren();
+  spawnBtns.clear();
+  lastDisabledByBtn.clear();
+  for (const t of TRIBE_ROSTERS[tribe]) {
+    if (!loadout.has(t)) continue;   // only the picked loadout gets buttons
+    const btn = document.createElement('button');
+    btn.id        = `spawn-${t}-btn`;
+    btn.className = 'spawn-btn';
 
-// Populate costs from config so the HTML never goes stale. Just the number —
-// the gold coin icon is rendered by the .btn-cost::before CSS pseudo-element.
-// Costs are per-tribe, so refresh whenever the player's tribe changes.
+    const name = document.createElement('span');
+    name.className   = 'card-name';
+    name.textContent = charDisplayName(tribe, t);
+    const portrait = document.createElement('span');
+    portrait.className   = 'card-portrait';
+    portrait.textContent = charIcon(tribe, t);
+    const cost = document.createElement('span');
+    cost.className   = 'btn-cost';
+    cost.id          = `${t}-cost`;
+    cost.textContent = String(charCost(tribe, t));
+    btn.append(name, portrait, cost);
+
+    // Card art is optional — the cream emoji card stays until the PNG loads.
+    const art = new Image();
+    art.onload = () => {
+      btn.classList.add('has-card');
+      btn.style.backgroundImage = `url('${art.src}')`;
+    };
+    art.src = `/cards/buy/card_buy_${t}.png`;
+
+    btn.addEventListener('click', () => game.spawnPlayer(t as CharTypeName));
+    uiOverlay.appendChild(btn);
+    spawnBtns.set(t, btn);
+  }
+  // Fresh buttons start enabled — sync disabled state to the current balance.
+  handleCoinsChanged(lastKnownCoins);
+}
+
+// Costs are per-tribe; the buttons are rebuilt on tribe change so the labels
+// are always fresh — kept as a helper for call sites that only need costs.
 function refreshCostLabels() {
   const tribe = getPlayerTribe();
-  for (const t of UNIT_TYPES) {
-    const el = document.getElementById(`${t}-cost`);
+  for (const [t, btn] of spawnBtns) {
+    const el = btn.querySelector('.btn-cost');
     if (el) el.textContent = String(charCost(tribe, t));
   }
 }
-refreshCostLabels();
 const countdownEl    = document.getElementById('countdown')!;
 const gameOverEl     = document.getElementById('game-over')!;
 const goTitle        = document.getElementById('game-over-title')!;
@@ -96,12 +129,11 @@ let gameOver = false;
 // `new Game(...)` because the Game constructor synchronously fires
 // handleCoinsChanged via notifyCoins() — TDZ otherwise.
 const lastDisabledByBtn = new Map<HTMLButtonElement, boolean>();
+// Last balance seen by handleCoinsChanged — replayed onto freshly (re)built
+// spawn buttons so they start with the correct disabled state.
+let lastKnownCoins = 0;
 
 let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged, handleEnemyTowerHpChanged, handlePlayerTowerHpChanged);
-
-for (const t of UNIT_TYPES) {
-  spawnBtns.get(t)!.addEventListener('click', () => game.spawnPlayer(t));
-}
 
 // Shared restart routine — used by Play Again, Load Map, and the tribe
 // selector. Optional mapDef forwards a new map to game.reset(); omit it to
@@ -128,8 +160,10 @@ const loadoutSub     = document.getElementById('loadout-sub')!;
 const loadoutCountEl = document.getElementById('loadout-count')!;
 const loadoutStartBtn = document.getElementById('loadout-start-btn') as HTMLButtonElement;
 
-function validLoadoutSet(types: string[]): Set<UnitType> {
-  return new Set(types.filter((t): t is UnitType => (UNIT_TYPES as readonly string[]).includes(t)));
+function validLoadoutSet(types: string[]): Set<string> {
+  // Inputs come from getOwnedCards/loadLoadout, which are already roster-
+  // filtered — just guard against unknown types lingering in localStorage.
+  return new Set(types.filter(t => ALL_CHAR_TYPES.includes(t)));
 }
 
 let loadout = validLoadoutSet(loadLoadout(getPlayerTribe()));
@@ -141,15 +175,11 @@ let pendingMapDef: ReturnType<typeof loadMapWithOverride> | null = null;
 // placeholder default, so the cards must come from THAT tribe's collection.
 let loadoutTribe: Tribe = getPlayerTribe();
 
-// Only the active tribe's roster ∩ the picked loadout gets a visible spawn
-// button. Also called by the dev tribe selector after a tribe switch.
+// Only the active tribe's roster ∩ the picked loadout gets a spawn button —
+// the bar is regenerated from config each time. Also called by the dev tribe
+// selector after a tribe switch.
 function syncSpawnButtonVisibility() {
-  const roster = TRIBE_ROSTERS[getPlayerTribe()];
-  for (const t of UNIT_TYPES) {
-    const btn = spawnBtns.get(t);
-    if (!btn) continue;
-    btn.style.display = roster.includes(t) && loadout.has(t) ? '' : 'none';
-  }
+  rebuildSpawnButtons();
 }
 
 function refreshLoadoutFooter() {
@@ -165,11 +195,11 @@ function buildLoadoutGrid() {
     const card = document.createElement('button');
     card.className = 'loadout-card';
     card.dataset.type = t;
-    if (loadout.has(t as UnitType)) card.classList.add('selected');
+    if (loadout.has(t)) card.classList.add('selected');
 
     const name = document.createElement('span');
     name.className = 'lo-name';
-    name.textContent = t;
+    name.textContent = charDisplayName(tribe, t);
     const check = document.createElement('span');
     check.className = 'lo-check';
     check.textContent = '✓';
@@ -187,7 +217,7 @@ function buildLoadoutGrid() {
     art.src = `/cards/buy/card_buy_${t}.png`;
 
     card.addEventListener('click', () => {
-      const type = t as UnitType;
+      const type = t;
       if (loadout.has(type)) {
         loadout.delete(type);
         card.classList.remove('selected');
@@ -471,11 +501,11 @@ window.addEventListener('keydown', (e) => {
     row.dataset.id  = String(char.id);
     const { label: rankLbl, color: rankCol } = rankInfo(char);
     const xp = xpInfo(char);
-    const typeLabel = char.config.type.charAt(0).toUpperCase() + char.config.type.slice(1);
+    const typeLabel = char.config.displayName ?? char.config.type.charAt(0).toUpperCase() + char.config.type.slice(1);
     row.innerHTML   = `
       <span class="cmd-row-id">#${char.id}</span>
       <span class="cmd-row-name">${char.name}</span>
-      <span class="cmd-row-type">${TYPE_ICON[char.config.type] ?? ''} ${typeLabel}</span>
+      <span class="cmd-row-type">${char.config.icon ?? ''} ${typeLabel}</span>
       <span class="cmd-row-rank" style="color:${rankCol}">${rankLbl}</span>
       <div class="cmd-row-bar">
         <div class="cmd-row-bar-label"><span>HP</span><span class="num">${hpText(char)}</span></div>
@@ -894,14 +924,16 @@ const cpuForceSelect = document.getElementById('dev-cpu-force-select') as HTMLSe
   autoOpt.value = '';
   autoOpt.textContent = 'AI (auto)';
   cpuForceSelect.appendChild(autoOpt);
-  for (const t of UNIT_TYPES) {
+  // Full cross-tribe list — the dev override may force any known type
+  // (charConfig falls back tribe → common → other tribe).
+  for (const t of ALL_CHAR_TYPES) {
     const opt = document.createElement('option');
     opt.value = t;
-    opt.textContent = `${TYPE_ICON[t] ?? ''} ${t.charAt(0).toUpperCase()}${t.slice(1)}`.trim();
+    opt.textContent = `${charIcon(getPlayerTribe(), t)} ${charDisplayName(getPlayerTribe(), t)}`.trim();
     cpuForceSelect.appendChild(opt);
   }
   cpuForceSelect.addEventListener('change', () => {
-    game.setCpuForcedType(cpuForceSelect.value ? (cpuForceSelect.value as UnitType) : null);
+    game.setCpuForcedType(cpuForceSelect.value ? (cpuForceSelect.value as CharTypeName) : null);
   });
 }
 
@@ -938,7 +970,7 @@ function handleCpuCharsChanged(chars: { id: number; name: string; type: string; 
   cpuCharsListEl.innerHTML = chars
     .map(c => {
       const label = c.behavior === 'collecting' ? 'Collect' : c.behavior === 'harass' ? 'Harass' : 'Attack';
-      return `<span class="dev-char-badge">${c.name}${TYPE_ICON[c.type] ?? ''} ${label}</span>`;
+      return `<span class="dev-char-badge">${c.name}${charIcon(getPlayerTribe(), c.type)} ${label}</span>`;
     })
     .join('');
 }
@@ -974,6 +1006,7 @@ function handleCpuStrategyChanged(info: CpuStrategyInfo) {
 }
 
 function handleCoinsChanged(coins: number) {
+  lastKnownCoins = coins;
   coinAmountEl.textContent = String(coins);
 
   // Disable spawn buttons when game is over OR when there aren't enough coins

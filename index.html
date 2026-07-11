@@ -586,15 +586,8 @@
         border-radius: 13px;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
       }
-      #spawn-conscript-btn.has-card    { background-image: url('/cards/buy/card_buy_conscript.png'); }
-      #spawn-warrior-btn.has-card      { background-image: url('/cards/buy/card_buy_warrior.png'); }
-      #spawn-archer-btn.has-card       { background-image: url('/cards/buy/card_buy_archer.png'); }
-      #spawn-rifleman-btn.has-card     { background-image: url('/cards/buy/card_buy_rifleman.png'); }
-      #spawn-sniper-btn.has-card       { background-image: url('/cards/buy/card_buy_sniper.png'); }
-      #spawn-viking-btn.has-card       { background-image: url('/cards/buy/card_buy_viking.png'); }
-      #spawn-shocktrooper-btn.has-card { background-image: url('/cards/buy/card_buy_shocktrooper.png'); }
-      #spawn-grenadier-btn.has-card    { background-image: url('/cards/buy/card_buy_grenadier.png'); }
-      #spawn-rocketeer-btn.has-card    { background-image: url('/cards/buy/card_buy_rocketeer.png'); }
+      /* Per-type card art is applied inline by rebuildSpawnButtons() (main.ts)
+         after probing /cards/buy/card_buy_<type>.png — no per-type CSS. */
       .spawn-btn:hover {
         transform: translateY(-2px);
         box-shadow: 0 7px 16px rgba(0,0,0,0.5);
@@ -1154,68 +1147,10 @@
         <span class="mute-hint">M</span>
       </div>
 
-      <div id="ui-overlay">
-        <button id="spawn-conscript-btn" class="spawn-btn has-card">
-          <span class="card-name">Conscript</span>
-          <span class="card-portrait">👊</span>
-          <span class="btn-cost" id="conscript-cost"></span>
-        </button>
-        <button id="spawn-warrior-btn"  class="spawn-btn has-card">
-          <span class="card-name">Warrior</span>
-          <span class="card-portrait">⚔</span>
-          <span class="btn-cost" id="warrior-cost"></span>
-        </button>
-        <button id="spawn-archer-btn"   class="spawn-btn has-card">
-          <span class="card-name">Archer</span>
-          <span class="card-portrait">🏹</span>
-          <span class="btn-cost" id="archer-cost"></span>
-        </button>
-        <button id="spawn-rifleman-btn" class="spawn-btn has-card">
-          <span class="card-name">Rifleman</span>
-          <span class="card-portrait">🔫</span>
-          <span class="btn-cost" id="rifleman-cost"></span>
-        </button>
-        <button id="spawn-gunslinger-btn" class="spawn-btn">
-          <span class="card-name">Gunslinger</span>
-          <span class="card-portrait">🤠</span>
-          <span class="btn-cost" id="gunslinger-cost"></span>
-        </button>
-        <button id="spawn-sniper-btn" class="spawn-btn has-card">
-          <span class="card-name">Sniper</span>
-          <span class="card-portrait">🎯</span>
-          <span class="btn-cost" id="sniper-cost"></span>
-        </button>
-        <button id="spawn-viking-btn" class="spawn-btn has-card">
-          <span class="card-name">Viking</span>
-          <span class="card-portrait">🪓</span>
-          <span class="btn-cost" id="viking-cost"></span>
-        </button>
-        <button id="spawn-shocktrooper-btn" class="spawn-btn has-card">
-          <span class="card-name">Shock Trooper</span>
-          <span class="card-portrait">💥</span>
-          <span class="btn-cost" id="shocktrooper-cost"></span>
-        </button>
-        <button id="spawn-knight-btn" class="spawn-btn">
-          <span class="card-name">Knight</span>
-          <span class="card-portrait">🛡</span>
-          <span class="btn-cost" id="knight-cost"></span>
-        </button>
-        <button id="spawn-heavy-btn" class="spawn-btn">
-          <span class="card-name">Heavy</span>
-          <span class="card-portrait">🔨</span>
-          <span class="btn-cost" id="heavy-cost"></span>
-        </button>
-        <button id="spawn-grenadier-btn" class="spawn-btn has-card">
-          <span class="card-name">Grenadier</span>
-          <span class="card-portrait">💣</span>
-          <span class="btn-cost" id="grenadier-cost"></span>
-        </button>
-        <button id="spawn-rocketeer-btn" class="spawn-btn has-card">
-          <span class="card-name">Rocketeer</span>
-          <span class="card-portrait">🚀</span>
-          <span class="btn-cost" id="rocketeer-cost"></span>
-        </button>
-      </div>
+      <!-- Spawn buttons are generated from the active tribe's roster
+           (gameConfig character blocks) by rebuildSpawnButtons() in main.ts —
+           adding a character in gameConfig needs no HTML edit. -->
+      <div id="ui-overlay"></div>
 
       <div id="game-over">
         <h1 id="game-over-title"></h1>

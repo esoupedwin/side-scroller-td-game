@@ -1,5 +1,6 @@
 import * as PIXI from 'pixi.js';
-import type { Tribe } from './Tribes';
+import { TRIBE_ROSTERS, type Tribe } from './Tribes';
+import { charSpriteFolder } from './constants';
 
 // Each character renders as two stacked PIXI.AnimatedSprite layers that
 // animate independently:
@@ -53,8 +54,8 @@ export interface LoadedSpriteSet {
 // Build a per-type spec that points each layer to its respective subfolder.
 // fps/spriteScale defaults are shared between the two layers so they stay in
 // lock-step (frame dimensions must match for the shared anchor to make sense).
-function makeTypeDefs(tribe: Tribe, type: string): SpriteSetDef {
-  const base = `/sprites/${tribe}/${type}`;
+function makeTypeDefs(tribe: Tribe, folder: string): SpriteSetDef {
+  const base = `/sprites/${tribe}/${folder}`;
   return {
     body: {
       idle:   { path: `${base}/body/idle.png`,   fps: 20, spriteScale: 4.8 },
@@ -71,33 +72,20 @@ function makeTypeDefs(tribe: Tribe, type: string): SpriteSetDef {
 }
 
 // ── Per-tribe sprite registry ────────────────────────────────────────────────
-// Each tribe maps character type → layered animation metadata. A type with no
-// entry (or one whose layered assets fail to load) falls back to Graphics
-// rendering. Add new tribes here as their sheets are produced.
-const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>> = {
-  kattgard: {
-    conscript: makeTypeDefs('kattgard', 'conscript'),
-    warrior:   makeTypeDefs('kattgard', 'warrior'),
-    rifleman:  makeTypeDefs('kattgard', 'rifleman'),
-    sniper:    makeTypeDefs('kattgard', 'sniper'),
-    archer:    makeTypeDefs('kattgard', 'archer'),
-    rocketeer: makeTypeDefs('kattgard', 'rocketeer'),
-    grenadier: makeTypeDefs('kattgard', 'grenadier'),
-    viking:    makeTypeDefs('kattgard', 'viking'),
-    shocktrooper: makeTypeDefs('kattgard', 'shocktrooper'),
-  },
-  lapinor: {
-    conscript: makeTypeDefs('lapinor', 'conscript'),
-    warrior:   makeTypeDefs('lapinor', 'warrior'),
-    rifleman:  makeTypeDefs('lapinor', 'rifleman'),
-    gunslinger: makeTypeDefs('lapinor', 'gunslinger'),
-    sniper:    makeTypeDefs('lapinor', 'Sniper'),
-    archer:    makeTypeDefs('lapinor', 'archer'),
-    rocketeer: makeTypeDefs('lapinor', 'rocketeer'),
-    grenadier: makeTypeDefs('lapinor', 'grenadier'),
-    knight:    makeTypeDefs('lapinor', 'knight'),
-  },
-};
+// AUTO-GENERATED from each tribe's roster (gameConfig character block keys):
+// every roster type gets convention-based paths /sprites/<tribe>/<type>/… (the
+// config block's `spriteFolder` overrides the folder name when the asset dir
+// differs, e.g. Lapinor's capitalised 'Sniper'). A type whose sheets are
+// missing simply falls back to Graphics rendering — so adding a character in
+// gameConfig needs no registry edit: drop the PNGs in and they're picked up.
+const SPRITE_DEFS: Partial<Record<Tribe, Partial<Record<string, SpriteSetDef>>>> = {};
+for (const tribe of Object.keys(TRIBE_ROSTERS) as Tribe[]) {
+  const defs: Partial<Record<string, SpriteSetDef>> = {};
+  for (const type of TRIBE_ROSTERS[tribe]) {
+    defs[type] = makeTypeDefs(tribe, charSpriteFolder(tribe, type));
+  }
+  SPRITE_DEFS[tribe] = defs;
+}
 
 function bodyDefFor(tribe: Tribe, type: string, anim: BodyAnimName): SpriteLayerAnimDef | undefined {
   return SPRITE_DEFS[tribe]?.[type]?.body[anim];

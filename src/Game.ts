@@ -27,7 +27,7 @@ import { Block } from './Block';
 import { Decor, DECOR_FRONT_Z } from './Decor';
 import { pickName } from './names';
 import { getSpriteSet } from './SpriteRegistry';
-import { tribeForSide, TRIBE_ROSTERS, heavyMeleeForTribe, getPlayerTribe, getEnemyTribe, setPlayerTribe, setEnemyTribe } from './Tribes';
+import { tribeForSide, TRIBE_ROSTERS, getPlayerTribe, getEnemyTribe, setPlayerTribe, setEnemyTribe, type Tribe } from './Tribes';
 import { getRenderScale } from './resolution';
 import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
@@ -37,6 +37,7 @@ import { Diagnostics } from './Diagnostics';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM, CAMERA_MAX_PAN_DOWN,
+  CAMERA_TOWER_BOTTOM_GAP,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   charConfig, charCost,
@@ -57,6 +58,7 @@ import {
   CPU_URGENT_MAX_FACTOR, CPU_COMFORT_MIN_FACTOR,
   CPU_NEUTRAL_MIN_FACTOR, CPU_NEUTRAL_MAX_FACTOR,
   CPU_RETREAT_HP_FRAC, CPU_RETREAT_RECOVER_FRAC,
+  CPU_VAL_RANGE_DIVISOR, CPU_VAL_HP_DIVISOR, CPU_VAL_SPLASH_PUSH_MULT, CPU_VAL_THREAT_NORM,
   POWERUP_DROP_INTERVAL, POWERUP_INDICATOR_LEAD,
   CHEAT_PLAYER_COIN_GRANT, CHEAT_CPU_COIN_GRANT,
   SHAKE_DECAY, SHAKE_MAX_OFFSET, SHAKE_GRENADE, SHAKE_ROCKET, SHAKE_FALLOFF_PX,
@@ -80,6 +82,18 @@ function withSpawnBoosts(cfg: CharacterConfig): CharacterConfig {
 
 const PARALLAX_FACTOR     = 0.15; // near background scrolls at 15 % of world camera speed
 const PARALLAX_FACTOR_FAR = 0.05; // far background scrolls at 5 % — feels more distant
+
+/** Attribute-derived CPU valuation of a unit type — see Game.unitProfile(). */
+interface UnitProfile {
+  cost:     number;
+  combat:   number;  // sqrt(sustained DPS × hp) — overall strength
+  reach:    number;  // 1 + attackRange/CPU_VAL_RANGE_DIVISOR — standoff bonus
+  tanky:    number;  // 1 + hp/CPU_VAL_HP_DIVISOR — frontline bonus
+  splash:   boolean; // fires an AoE projectile (grenade/rocket)
+  threat:   number;  // combat×reach normalized so a baseline warrior ≈ 1.0
+  canFight: boolean; // attackPower > 0 (excludes pure-support types)
+}
+const unitProfileCache = new Map<string, UnitProfile>();
 
 export class Game {
   readonly app: PIXI.Application;
@@ -142,6 +156,10 @@ export class Game {
   private world!:     PIXI.Container;
   private cameraX  = 0;
   private cameraY  = 0;
+  // Default resting vertical scroll — anchors the player tower's bottom
+  // CAMERA_TOWER_BOTTOM_GAP screen px above the canvas bottom. Computed in
+  // build() (depends on the map's ground/tower Y) and reused by the pan clamp.
+  private restCameraY = 0;
   // Screen shake — `trauma` (0..1) is added by blasts and bled off each tick;
   // the applied offset scales with trauma² so small hits barely register and
   // big ones punch. `shakeTime` drives the oscillation.
@@ -403,8 +421,14 @@ export class Game {
   private build() {
     const m = this.mapDef;
     this.mapGroundY = (m.worldHeight ?? GAME_HEIGHT) - (m.groundHeight ?? (GAME_HEIGHT - GROUND_Y));
-    // Default vertical scroll: ground surface sits 60px above the canvas bottom.
-    this.cameraY = (VIEWPORT_HEIGHT - 60 - this.mapGroundY) / GAME_ZOOM;
+    // Default vertical scroll: place the player tower's bottom (baseY)
+    // CAMERA_TOWER_BOTTOM_GAP screen px above the canvas bottom. The base term
+    // matches the ground anchor; the (mapGroundY − towerBaseY) correction keeps
+    // the gap tied to the tower even when it sits on an elevated block.
+    const playerTowerBaseY = m.playerTowerY ?? this.mapGroundY;
+    this.restCameraY = (VIEWPORT_HEIGHT - CAMERA_TOWER_BOTTOM_GAP - this.mapGroundY) / GAME_ZOOM
+                     + (this.mapGroundY - playerTowerBaseY);
+    this.cameraY = this.restCameraY;
     const towerFaceL = m.playerTowerX + TOWER_WIDTH / 2;
     const towerFaceR = m.enemyTowerX  - TOWER_WIDTH / 2;
 
@@ -843,27 +867,70 @@ export class Game {
 
   // ── CPU strategic assessment ─────────────────────────────────────────────────
 
+  /** Attribute-derived valuation of a unit type — computed from the live
+   *  charConfig/charCost, so editing a unit's stats in gameConfig automatically
+   *  reshapes both the threat assessment and the buy order. Cached per
+   *  (tribe, type): configs are `as const` and immutable at runtime. */
+  private static unitProfile(tribe: Tribe, type: string): UnitProfile {
+    const key = `${tribe}/${type}`;
+    let p = unitProfileCache.get(key);
+    if (p) return p;
+
+    const cfg  = charConfig(tribe, type);
+    const cost = charCost(tribe, type);
+
+    // Sustained DPS: rounds per trigger (burst), magazine reload downtime,
+    // poison damage-over-time per hit, and miss chance all folded in.
+    const roundsPerTrigger = cfg.burstCount ?? 1;
+    const poisonPerHit     = (cfg.poisonDamage ?? 0) * (cfg.poisonTicks ?? 0);
+    const damagePerTrigger = cfg.attackPower * roundsPerTrigger + poisonPerHit;
+    const magazine         = (cfg.shotsBeforeCooldown ?? 0) > 0 && (cfg.cooldownSec ?? 0) > 0;
+    const triggersPerSec   = magazine
+      ? cfg.shotsBeforeCooldown! / (cfg.shotsBeforeCooldown! * cfg.fireRate + cfg.cooldownSec!)
+      : 1 / cfg.fireRate;
+    const dps = damagePerTrigger * triggersPerSec * (1 - cfg.critical);
+
+    // combat: overall strength (damage output × durability, geometric mean so
+    // neither stat alone dominates). reach/tanky: soft bonuses for standoff
+    // range and frontline hp. threat: combat×reach normalized ≈ 1.0 baseline.
+    const combat = Math.sqrt(dps * cfg.hp);
+    const reach  = 1 + cfg.attackRange / CPU_VAL_RANGE_DIVISOR;
+    const tanky  = 1 + cfg.hp / CPU_VAL_HP_DIVISOR;
+    p = {
+      cost,
+      combat,
+      reach,
+      tanky,
+      splash: cfg.attackStyle === 'grenade' || cfg.attackStyle === 'rocket',
+      threat: combat * reach / CPU_VAL_THREAT_NORM,
+      canFight: cfg.attackPower > 0,
+    };
+    unitProfileCache.set(key, p);
+    return p;
+  }
+
   private assessCpuStance(self: 'player' | 'enemy', selfChars: Character[], oppChars: Character[]): 'push' | 'economy' | 'defend' {
     const selfTower = self === 'enemy' ? this.enemyTower : this.playerTower;
     const oppTower  = self === 'enemy' ? this.playerTower : this.enemyTower;
     const selfCoins = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
     const oppCoins  = self === 'enemy' ? this.coinBalance    : this.cpuCoinBalance;
 
-    const typeWeight = (type: string) =>
-      type === 'tanker'   ? 2.5 :
-      type === 'heavy'    ? 1.8 :
-      type === 'sniper'   ? 1.4 :
-      type === 'rifleman' ? 1.3 :
-      type === 'gunslinger' ? 1.3 :
-      type === 'archer'   ? 1.2 : 1.0;
-    const threat = (chars: Character[], discountCollecting: boolean) =>
-      chars.reduce((s, c) => {
+    // Per-unit threat is derived from live config attributes (DPS × hp × range,
+    // cached per tribe/type) — editing a unit's stats in gameConfig reshapes the
+    // assessment automatically. Scaled by the unit's current HP fraction.
+    const threat = (chars: Character[], side: 'player' | 'enemy', discountCollecting: boolean) => {
+      const tribe = tribeForSide(side);
+      let s = 0;
+      for (const c of chars) {
         const behaviorMult = discountCollecting && c.behavior === 'collecting' ? 0.15 : 1.0;
-        return s + (c.hp / c.maxHp) * typeWeight(c.config.type) * behaviorMult;
-      }, 0);
+        s += (c.hp / c.maxHp) * Game.unitProfile(tribe, c.config.type).threat * behaviorMult;
+      }
+      return s;
+    };
 
-    const oppStr  = threat(oppChars,  true);   // opponent's collectors aren't a real threat
-    const selfStr = threat(selfChars, false);  // own strength unmodified
+    const oppSide: 'player' | 'enemy' = self === 'enemy' ? 'player' : 'enemy';
+    const oppStr  = threat(oppChars,  oppSide, true);   // opponent's collectors aren't a real threat
+    const selfStr = threat(selfChars, self,    false);  // own strength unmodified
     const unitAdv   = selfStr - oppStr;
     const towerAdv  = (selfTower.hp / TOWER_HP) - (oppTower.hp / TOWER_HP);
     const coinAdv   = Math.min(1, Math.max(-1, (selfCoins - oppCoins) / 120));
@@ -929,10 +996,21 @@ export class Game {
       return;
     }
 
-    // Tanker is intentionally excluded from every order array — it's hidden
-    // from both the player UI and the CPU until further notice.
-    type UnitType = 'warrior' | 'archer' | 'rifleman' | 'gunslinger' | 'sniper' | 'viking' | 'knight' | 'heavy' | 'rocketeer' | 'grenadier';
-    let order: UnitType[];
+    // ── Attribute-driven buy order ────────────────────────────────────────────
+    // Score every combat unit in the tribe's roster from its derived profile
+    // (live config stats — no hardcoded type lists), sort best-first, then buy
+    // the first affordable. Editing a unit's stats or cost in gameConfig
+    // automatically re-ranks it; new roster types participate with no AI change.
+    //
+    // Stance shaping:
+    //   push    — raw strength × standoff range; AoE types boosted when the
+    //             opponents are clustered (splash value is real, not nominal)
+    //   defend  — outnumbered: durability-weighted wall to hold the line;
+    //             steady: cost-efficient standoff damage (√cost divisor keeps a
+    //             mid-price skew without letting cheap spam dominate)
+    //   economy — investment quality: strength × reach², favouring standoff
+    //             units that survive to fight again; the buy-first-affordable
+    //             walk yields the old "invest when rich, filler when broke" tiering
 
     // Opponent cluster result is pre-computed every 500 ms alongside the stance
     // assessment — no need to run the O(n²) scan here on every spawn call.
@@ -940,53 +1018,28 @@ export class Game {
       ? this.cachedEnemyOppClustered
       : this.cachedPlayerOppClustered;
 
-    if (stance === 'push') {
-      if (opponentsClustered && balance >= cost$('rocketeer')) {
-        // Splash-heavy: opponents are bunched up, prefer rockets/grenades
-        order = ['rocketeer', 'grenadier', 'rifleman', 'knight', 'heavy', 'warrior', 'archer'];
-      } else if (opponentsClustered && balance >= cost$('grenadier')) {
-        order = ['grenadier', 'rifleman', 'knight', 'heavy', 'warrior', 'archer'];
-      } else {
-        // Aggressive push: flood high-damage units; knight leads the melee wedge
-        order = ['knight', 'rifleman', 'gunslinger', 'heavy', 'warrior', 'archer'];
+    const stanceScore = (p: UnitProfile): number => {
+      if (stance === 'push') {
+        const splashMult = opponentsClustered && p.splash ? CPU_VAL_SPLASH_PUSH_MULT : 1;
+        return p.combat * p.reach * splashMult;
       }
-    } else if (stance === 'defend') {
-      if (pressure >= 3) {
-        // Severely outnumbered — knight tanks while warriors plug the gap
-        order = ['knight', 'warrior', 'heavy', 'archer', 'sniper'];
-      } else {
-        // Steady defence: archers for harassment, knight as frontline wall
-        order = ['archer', 'knight', 'warrior', 'sniper'];
+      if (stance === 'defend') {
+        return pressure >= 3
+          ? p.combat * p.tanky
+          : p.combat * p.reach * p.tanky / Math.sqrt(p.cost);
       }
-    } else {
-      // Economy: invest in better units
-      if (balance >= cost$('sniper') && selfChars.length >= 3) {
-        order = ['sniper', 'rifleman', 'knight', 'archer', 'heavy', 'warrior'];
-      } else if (balance >= cost$('knight')) {
-        order = ['knight', 'rifleman', 'gunslinger', 'archer', 'heavy', 'warrior'];
-      } else if (balance >= cost$('rifleman')) {
-        order = ['rifleman', 'gunslinger', 'archer', 'heavy', 'warrior'];
-      } else {
-        order = ['archer', 'heavy', 'warrior'];
-      }
-    }
+      return p.combat * p.reach * p.reach; // economy
+    };
 
-    // Translate AI orders (which were authored around the Lapinor roster with
-    // 'knight' as the heavy melee) into the actual CPU tribe's roster:
-    //   - 'knight' / 'viking' both resolve to the tribe's own heavy melee
-    //   - anything else not in the tribe's roster is dropped
-    const roster     = TRIBE_ROSTERS[cpuTribe];
-    const heavyMelee = heavyMeleeForTribe(cpuTribe);
-    const rosterSet = new Set<string>(roster);
-    const resolved: UnitType[] = [];
-    for (const t of order) {
-      const mapped = (t === 'knight' || t === 'viking') ? heavyMelee as UnitType : t;
-      if (rosterSet.has(mapped)) resolved.push(mapped);
+    const order: { type: CharacterConfig['type']; cost: number; score: number }[] = [];
+    for (const type of TRIBE_ROSTERS[cpuTribe]) {
+      const p = Game.unitProfile(cpuTribe, type);
+      if (!p.canFight || !Number.isFinite(p.cost)) continue; // skip support / unpriced types
+      order.push({ type: type as CharacterConfig['type'], cost: p.cost, score: stanceScore(p) });
     }
-    order = resolved;
+    order.sort((a, b) => b.score - a.score);
 
-    for (const type of order) {
-      const cost = cost$(type);
+    for (const { type, cost } of order) {
       if (balance < cost) continue;
       if (self === 'enemy') {
         this.cpuCoinBalance -= cost;
@@ -1000,7 +1053,7 @@ export class Game {
       return;
     }
     if (self === 'enemy') {
-      const needCost = Math.min(...order.map(t => cost$(t)));
+      const needCost = order.reduce((m, o) => Math.min(m, o.cost), Infinity);
       this.cpuStrategyInfo.decision = `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
     }
     this.resetSpawnTimer(self, pressure);
@@ -1266,9 +1319,8 @@ export class Game {
     // World-bottom limit on how far down the camera may scroll…
     const camYMinWorld = Math.min(0, VIEWPORT_HEIGHT / GAME_ZOOM - worldH + this.mapGroundY * (GAME_ZOOM - 1) / GAME_ZOOM);
     // …further restricted so it can't pan more than CAMERA_MAX_PAN_DOWN screen px
-    // below the default resting view (restCameraY). Higher of the two = less down-pan.
-    const restCameraY = (VIEWPORT_HEIGHT - 60 - this.mapGroundY) / GAME_ZOOM;
-    const camYMin = Math.max(camYMinWorld, restCameraY - CAMERA_MAX_PAN_DOWN / GAME_ZOOM);
+    // below the default resting view (this.restCameraY). Higher of the two = less down-pan.
+    const camYMin = Math.max(camYMinWorld, this.restCameraY - CAMERA_MAX_PAN_DOWN / GAME_ZOOM);
     this.cameraY  = Math.max(camYMin, Math.min(camYMax, this.cameraY));
     this.world.x        = -this.cameraX * GAME_ZOOM;
     this.world.y        = this.mapGroundY * (1 - GAME_ZOOM) + this.cameraY * GAME_ZOOM;
@@ -2221,9 +2273,14 @@ export class Game {
     this.cpuCollectAIMs      = 0;
     this.cullingFrame        = 0;
     this.cameraX = 0;
-    // cameraY default is set by build() based on mapGroundY
+    // cameraY default (restCameraY) is set by build() from the player tower baseY
     this.hud.clear();
-    this.app.stage.removeChildren();
+    // removeChildren() alone would leak the old scene tree (Graphics geometry,
+    // Text canvas textures in towers/indicator, parallax layers) on every
+    // restart — destroy the detached children. Entities were already destroyed
+    // above (their containers detach themselves), and texture defaults to
+    // false so Assets-cached sprite textures survive for the rebuild.
+    for (const child of this.app.stage.removeChildren()) child.destroy({ children: true });
     this.build();
     this.resetSpawnTimerFirst('enemy');
     if (this.cpuVsCpu) this.resetSpawnTimerFirst('player');

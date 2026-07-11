@@ -1,6 +1,10 @@
-import { GameConfig } from './gameConfig';
+import { GameConfig, type AttackStyle, type CharTypeName } from './gameConfig';
 import type { CharacterConfig } from './Character';
 import type { Tribe } from './Tribes';
+
+// Re-export the config-derived character types — source files import from
+// constants.ts, never from gameConfig.ts directly.
+export type { AttackStyle, CharTypeName };
 
 const { canvas, groundY, colors, towers, characters, cpu, economy } = GameConfig;
 const ch    = characters;
@@ -30,6 +34,13 @@ export const VIEWPORT_HEIGHT = 1000;
 // Lower = less peeking below the ground; 0 = no downward pan at all. The
 // world-bottom limit still applies, so this only ever further restricts it.
 export const CAMERA_MAX_PAN_DOWN = 160;
+
+// Distance (screen px) between the bottom edge of the camera view and the
+// player tower's bottom (baseY) in the default resting view. Larger = the
+// tower sits higher up the screen, leaving more room below it; smaller = the
+// tower bottom hugs the canvas bottom. Anchoring on the tower base (not the
+// ground) keeps this gap consistent even when the tower is placed on a block.
+export const CAMERA_TOWER_BOTTOM_GAP = 210;
 
 // In-world rendering zoom. Applied to the `world` PIXI container so all game
 // objects, backgrounds, and characters scale uniformly. Ground stays anchored
@@ -74,6 +85,10 @@ export const CPU_NEUTRAL_MIN_FACTOR  = cpu.neutralMinFactor;
 export const CPU_NEUTRAL_MAX_FACTOR  = cpu.neutralMaxFactor;
 export const CPU_RETREAT_HP_FRAC      = cpu.retreatHpFrac;
 export const CPU_RETREAT_RECOVER_FRAC = cpu.retreatRecoverFrac;
+export const CPU_VAL_RANGE_DIVISOR    = cpu.valuation.rangeReachDivisor;
+export const CPU_VAL_HP_DIVISOR       = cpu.valuation.hpTankyDivisor;
+export const CPU_VAL_SPLASH_PUSH_MULT = cpu.valuation.splashPushMult;
+export const CPU_VAL_THREAT_NORM      = cpu.valuation.threatNorm;
 
 // ── Platform ─────────────────────────────────────────────────────────────────
 export const PLATFORM_X      = GameConfig.platform.x;
@@ -211,19 +226,26 @@ export const CHAR_HEIGHT = ch.height;
 
 /** Shape of a raw per-type block in gameConfig.characters.<tribe>. Superset of
  *  CharacterConfig fields; width/height are optional (defaulted from ch.width /
- *  ch.height) and burst-only fields are ignored here. */
+ *  ch.height). burstCount is carried through so the CPU's attribute-driven unit
+ *  valuation can price burst weapons correctly (burstIntervalSec stays a
+ *  gunslinger-global constant). */
 type RawCharCfg = {
   type: CharacterConfig['type'];
+  attackStyle: AttackStyle;
   hp: number; speed: number; attackRange: number; attackPower: number;
   fireRate: number; cost: number; critical: number; knockback: number;
   width?: number; height?: number;
   shotsBeforeCooldown?: number; cooldownSec?: number;
+  burstCount?: number;
   poisonDamage?: number; poisonTicks?: number; poisonIntervalSec?: number;
+  displayName?: string; icon?: string; uiColor?: string;
+  spriteFolder?: string;   // sprite-only concern — consumed by SpriteRegistry, not CharacterConfig
 };
 
 function toCharConfig(c: RawCharCfg): CharacterConfig {
   return {
     type:        c.type,
+    attackStyle: c.attackStyle,
     hp:          c.hp,
     speed:       c.speed,
     attackRange: c.attackRange,
@@ -235,9 +257,13 @@ function toCharConfig(c: RawCharCfg): CharacterConfig {
     knockback:   c.knockback,
     shotsBeforeCooldown: c.shotsBeforeCooldown,
     cooldownSec:         c.cooldownSec,
+    burstCount:          c.burstCount,
     poisonDamage:      c.poisonDamage,
     poisonTicks:       c.poisonTicks,
     poisonIntervalSec: c.poisonIntervalSec,
+    displayName:       c.displayName,
+    icon:              c.icon,
+    uiColor:           c.uiColor,
   };
 }
 
@@ -287,6 +313,44 @@ export function charCost(tribe: Tribe, type: string): number {
       ?? CHAR_COST_BY_TRIBE[otherTribe(tribe)][type]
       ?? Infinity;
 }
+
+// ── Config-driven character UI lookups ───────────────────────────────────────
+// Display name / icon / accent colour come from the character's config block
+// (with graceful generic fallbacks) so a new character needs no UI-table edits.
+
+/** UI display name — config `displayName`, else the capitalized type key. */
+export function charDisplayName(tribe: Tribe, type: string): string {
+  return charConfig(tribe, type)?.displayName
+      ?? type.charAt(0).toUpperCase() + type.slice(1);
+}
+
+/** HUD/button emoji — config `icon`, else a generic per-attackStyle glyph. */
+export function charIcon(tribe: Tribe, type: string): string {
+  const cfg = charConfig(tribe, type);
+  if (cfg?.icon) return cfg.icon;
+  const byStyle: Record<AttackStyle, string> = {
+    melee: '⚔', blast: '💥', arrow: '🏹', bullet: '🔫', grenade: '💣', rocket: '🚀',
+  };
+  return cfg ? byStyle[cfg.attackStyle] : '❓';
+}
+
+/** HUD accent colour — config `uiColor`, else neutral white. */
+export function charUiColor(tribe: Tribe, type: string): string {
+  return charConfig(tribe, type)?.uiColor ?? '#ffffff';
+}
+
+/** Sprite-sheet folder under /public/sprites/<tribe>/ — config `spriteFolder`
+ *  override (e.g. Lapinor's capitalised 'Sniper' asset dir), else the type key. */
+export function charSpriteFolder(tribe: Tribe, type: string): string {
+  const raw = (tribe === 'kattgard' ? kattgardRaw : lapinorRaw)[type] ?? commonRaw[type];
+  return raw?.spriteFolder ?? type;
+}
+
+/** Every character type known to the game (both tribes + common). Used by dev
+ *  tools that need the full cross-tribe list (e.g. the forced-spawn dropdown). */
+export const ALL_CHAR_TYPES: readonly string[] = [...new Set([
+  ...Object.keys(kattgardRaw), ...Object.keys(lapinorRaw), ...Object.keys(commonRaw),
+])];
 
 // Burst-fire tunables — Lapinor's gunslinger fires `burstCount` rounds spaced
 // `burstIntervalSec` apart on each trigger pull (see Character.tickPendingBurst).

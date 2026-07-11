@@ -1,4 +1,5 @@
 import type { Side } from './Tower';
+import { GameConfig } from './gameConfig';
 
 /**
  * Visual / identity grouping for characters. Each side fields a tribe; the
@@ -21,22 +22,16 @@ export const TRIBES: Record<Tribe, TribeInfo> = {
 };
 
 /**
- * The fixed roster of unit types each tribe can field. The player UI hides
- * spawn buttons for types not in the active tribe's roster, and the CPU AI
- * filters its spawn-order arrays through the same list.
- *
- * Heavy melee differs per tribe (Viking for Kattgard, Knight for Lapinor) — the
- * `heavyMeleeForTribe` helper translates between them when the AI's pre-baked
- * order arrays mention one but the tribe has the other.
+ * The roster of unit types each tribe can field — DERIVED from the tribe's
+ * character block keys in gameConfig.ts, in declaration order (which is also
+ * the UI display order). Adding a character block to a tribe automatically
+ * fields it: spawn button, loadout card, sprite lookup, and CPU AI all read
+ * this list. Types in `characters.common` (heavy, tanker) belong to no roster.
  */
 export const TRIBE_ROSTERS: Record<Tribe, readonly string[]> = {
-  kattgard: ['conscript', 'warrior', 'archer', 'rifleman', 'sniper', 'viking', 'shocktrooper', 'grenadier', 'rocketeer'],
-  lapinor: ['conscript', 'warrior', 'archer', 'rifleman', 'gunslinger', 'sniper', 'knight', 'grenadier', 'rocketeer'],
+  kattgard: Object.keys(GameConfig.characters.kattgard),
+  lapinor:  Object.keys(GameConfig.characters.lapinor),
 };
-
-export function heavyMeleeForTribe(t: Tribe): 'viking' | 'knight' {
-  return t === 'kattgard' ? 'viking' : 'knight';
-}
 
 // ── Runtime tribe state ─────────────────────────────────────────────────────
 // Both tribes are independently mutable. On map load, Game.reset() seeds

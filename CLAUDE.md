@@ -56,22 +56,13 @@ Per-layer animation lets any body pose pair with any leg state. A marching rifle
 
 ### Adding sprites for a character type
 
-1. Place sprite sheet PNGs under `public/sprites/<tribe>/<type>/`:
+`SPRITE_DEFS` in `src/SpriteRegistry.ts` is **auto-generated** from each tribe's roster (gameConfig character-block keys) — there is no registry to edit. Just place sprite sheet PNGs under `public/sprites/<tribe>/<type>/`:
    ```
    public/sprites/<tribe>/<type>/
      body/{ idle.png, walk.png, attack.png, carry.png }
      legs/{ idle.png, walk.png }
    ```
-   Served by Vite at `/sprites/<tribe>/<type>/body/<anim>.png` and `…/legs/<anim>.png`.
-
-2. Add an entry to `SPRITE_DEFS` in `src/SpriteRegistry.ts`. The convenience helper `makeTypeDefs(tribe, type)` emits both layers in one call with shared default fps/spriteScale:
-
-```typescript
-kattgard: {
-  warrior: makeTypeDefs('kattgard', 'warrior'),
-  // …
-},
-```
+   Served by Vite at `/sprites/<tribe>/<type>/body/<anim>.png` and `…/legs/<anim>.png`. If the asset folder name differs from the type key (e.g. Lapinor's capitalised `Sniper/`), set `spriteFolder` in the character's gameConfig block.
 
 Sheets are laid out left-to-right, top-to-bottom with exactly `FRAMES_PER_ROW` (6) frames per row. Frame height is fixed by artist convention (`FRAME_HEIGHT_PX = 600`); row count is **auto-derived** from `sheet.height / FRAME_HEIGHT_PX` (override via the `rows` field per def if needed). The actual frame count is auto-detected by scanning cells for fill ratio above `ALPHA_THRESHOLD` — adding or removing frames within an existing row layout requires no config change. Only animations whose PNGs exist are loaded; missing entries fall back to the nearest substitute within the same layer (e.g. body `carry` → `walk` → `idle`).
 
@@ -179,14 +170,18 @@ Blocks are registered with `NavGraph.build()` as walkable surfaces alongside pla
 
 ## Character system
 
-### Unit types
-Eight types: `warrior`, `archer`, `rifleman`, `sniper`, `medic`, `heavy`, `tanker`, `grenadier`.  
-Each has its own `build*Sprite()` method in `Character.ts`. The dispatch is in `buildSprite()`.  
-- Melee: `warrior`, `heavy` — deal damage via `takeDamage()` on contact
-- Ranged: `archer` (arrow), `rifleman` (bullet, fast fire), `sniper` (bullet, long range, slow fire), `tanker` (bullet, slow, high damage)
-- Explosive: `grenadier` (grenade arc, splash damage, fuse delay)
-- Support: `medic` (no attack; heals nearby allies; player-only)
-- `heavy`, `tanker`, and `grenadier` have custom `width`/`height` overrides in `gameConfig.ts`
+### Unit types — config-driven
+Unit types are **defined entirely by the character blocks in `gameConfig.characters.<tribe>`** (plus `characters.common` for tribe-less CPU types like `heavy`/`tanker`). The `CharacterConfig['type']` union (`CharTypeName`) is derived from the block keys; rosters, spawn buttons, loadout cards, sprite lookups, and CPU AI all follow automatically.
+
+Combat semantics come from the block's **`attackStyle`** attribute:
+- `'melee'` — close swing (`pendingMeleeSwing`); e.g. conscript, warrior, viking, knight, heavy
+- `'blast'` — frontal shotgun cone hitting every enemy in it; e.g. shocktrooper
+- `'arrow'` — snap-fire projectile, no muzzle flash; e.g. archer
+- `'bullet'` — snap-fire projectile with muzzle flash; `burstCount > 1` makes it burst-fire (gunslinger); e.g. rifleman, sniper, tanker
+- `'grenade'` — arcing AoE with lead targeting; e.g. grenadier
+- `'rocket'` — flat-arc AoE; e.g. rocketeer
+
+Established types have bespoke `build*Sprite()` Graphics builders dispatched by type in `buildSprite()`; a new type without sprites or a builder falls back to the Graphics body matching its `attackStyle`.
 
 ### Behavior vs State
 - **`behavior`** (`'attacking' | 'collecting' | 'harass' | 'defend'`) — the character's strategic intent; player-controlled or set by CPU AI
@@ -201,8 +196,10 @@ Setting `behavior` via the setter handles side effects automatically:
 **Defend behavior**: patrol within own tower's attack range, engaging any enemy that enters range. Ranged units kite away from closing melee.
 
 ### isRanged / isMeleeType helpers
-- `private get isRanged()` — true for `archer`, `rifleman`, `sniper`. Use this instead of inline type checks.
-- `private static isMeleeType(type)` — true for `warrior`, `heavy`. Used in kiting logic to classify an enemy's type.
+Both derive from `attackStyle` — never add inline type-name checks:
+- `private get isRanged()` — any projectile style (not `melee`/`blast`); gates LOS checks and kiting.
+- `private static isMeleeType(cfg)` — `melee` or `blast` (both hurt at close range). Used in kiting logic to classify an enemy.
+- `private canSnapHit(target)` — plane-restriction applies only to `arrow`/`bullet` (flat trajectory); other styles aim freely.
 
 ### UpdateContext
 `Character.update(ctx: UpdateContext)` receives everything it needs per-tick. No direct references to `Game.ts` internals.
@@ -428,10 +425,22 @@ Spawn interval scales with pressure (`playerCount - cpuCount`):
 - Comfortable (`≤ -CPU_PRESSURE_THRESHOLD`): slow spawn
 - Neutral: middle range
 
-Unit selection prioritises cheap warriors when outnumbered or broke; riflemen when comfortable and well-funded. CPU does not spawn medics.
+### Attribute-driven unit valuation
+Unit selection and threat assessment are **derived from live config attributes** — there are no hardcoded per-type preference lists. `Game.unitProfile(tribe, type)` (cached per tribe/type in a module-level Map) computes from `charConfig`/`charCost`:
+- `dps` — sustained damage/sec folding in burst rounds (`burstCount`), magazine reload (`shotsBeforeCooldown`/`cooldownSec`), poison DoT per hit, and miss chance (`critical`)
+- `combat` = `sqrt(dps × hp)`; `reach` = `1 + attackRange/CPU_VAL_RANGE_DIVISOR`; `tanky` = `1 + hp/CPU_VAL_HP_DIVISOR`
+- `splash` — true when `projectileKindForType(type)` (exported by `Character.ts`, single source of truth with combat) is grenade/rocket
+- `threat` = `combat × reach / CPU_VAL_THREAT_NORM` (≈ 1.0 for a baseline warrior) — used by `assessCpuStance`, scaled by each unit's current HP fraction
 
-### CHAR_CONFIGS
-`Game.ts` exports a module-level `CHAR_CONFIGS` object mapping unit type strings to their config objects. Use this instead of inline `{ warrior: WARRIOR, ... }` maps wherever a config lookup by type string is needed.
+`spawnCpu` scores the tribe's whole roster per stance, sorts best-first, and buys the first affordable:
+- **push** — `combat × reach`, AoE types × `CPU_VAL_SPLASH_PUSH_MULT` when opponents are clustered
+- **defend** — outnumbered: `combat × tanky`; steady: `combat × reach × tanky / √cost`
+- **economy** — `combat × reach²` (investment quality; the affordability walk gives "invest when rich, filler when broke" tiering)
+
+Types with `attackPower ≤ 0` (support) or no cost are skipped; `heavy`/`tanker` are excluded by not being in `TRIBE_ROSTERS`. Editing a unit's stats or cost in `gameConfig.ts` automatically re-ranks the AI's decisions; the shaping knobs live in `gameConfig.cpu.valuation`. CPU does not spawn medics.
+
+### Config lookups by type string
+`constants.ts` exports `charConfig(tribe, type)` / `charCost(tribe, type)` (fallback chain tribe → common → other tribe) plus the UI helpers `charDisplayName` / `charIcon` / `charUiColor` / `charSpriteFolder` and the cross-tribe `ALL_CHAR_TYPES` list. Use these instead of inline `{ warrior: WARRIOR, ... }` maps or hand-maintained icon/color tables.
 
 ## Medic
 
@@ -453,7 +462,7 @@ Unit selection prioritises cheap warriors when outnumbered or broke; riflemen wh
 - **`lastMoveDir` vs side direction**: use `lastMoveDir` when you need the character's actual travel direction. `side === 'player' ? 1 : -1` is wrong for collecting characters returning home.
 - **`updatePlatformPassthrough` mask corruption**: this function rebuilds the collision mask each tick. It must preserve non-ground/platform bits using the `extraBits` pattern above. Do not simplify it to `baseMask` alone — this silently strips wall, tower, and block collision from coins and power-ups.
 - **Coin body removal on pickup**: `coin.pickup()` removes the physics body immediately. This prevents the invisible carried-coin body from colliding with the tower during carry. Use the `bodyInWorld` flag pattern (idempotent guard) in any class that wraps a Matter.js body.
-- **Adding a new unit type**: update `CharacterConfig.type` union, `buildSprite()` dispatch + new `build*Sprite()` method, `this.isRanged` getter + `Character.isMeleeType()` if needed, `CHAR_CONFIGS` in `Game.ts`, `CharacterHUD.ts` `TYPE_ICON`/`TYPE_COLOR`, `main.ts` button/cost/handler, `index.html` button + CSS, `constants.ts` export + `CHAR_COST`.
+- **Adding a new unit type**: add a character block to `gameConfig.characters.<tribe>` (key = type name) with `attackStyle` + stats + optional `displayName`/`icon`/`uiColor` — that's the whole job. The type union, roster, spawn button, loadout card, HUD card, CPU AI valuation, and sprite lookup all derive from the block. Drop sheets in `public/sprites/<tribe>/<type>/` when art is ready (until then the Graphics body matching `attackStyle` renders). Only add code when the unit needs a NEW mechanic (a new `attackStyle`, a bespoke `build*Sprite()`, or type-specific behavior like the tanker's no-jump rule).
 - **Adding a new environment element**: add a category bit in `Physics.ts`, create a visual class, add a `createXBody()` factory, add the field to `MapDefinition` in `maps.ts`, wire into `Game.build()` (visual + body), update `Character.syncFromBody`, update `NavGraph.build`.
 - **Per-frame precomputation pattern**: constants derived from `dt` (e.g. `Math.exp(-decay * dt)`) are identical for every character in the same tick. Compute them once in `Game.tick()` and pass to the relevant method rather than recomputing inside each character's update. Current example: `knockbackDecayFactor` precomputed in the grenade explosion loop and stored via `applyKnockback`.
 - **Grenade knockback abstraction**: `Character` has no direct knowledge of grenade constants. `Game.ts` computes `knockbackDecayFactor = Math.exp(-GRENADE_KNOCKBACK_DECAY * dt)` and passes it into `applyKnockback(vx, vy, dt, decayFactor)`. Adding a new knockback source follows the same pattern.
@@ -463,4 +472,4 @@ Unit selection prioritises cheap warriors when outnumbered or broke; riflemen wh
 - **Sprite facing direction**: sheets must be drawn facing **right**. `tickAnimSprite` flips `scale.x` on both `bodySprite` and `legsSprite` using a shared `facingDir`; the absolute scales are stored in `bodyBaseScale` / `legsBaseScale` and must not be written directly to `sprite.scale.x` or the flip sign is lost on the next tick.
 - **`switchBodyAnimation` / `switchLegsAnimation` re-start playback**: assigning new textures to an `AnimatedSprite` via `.textures = frames` resets the frame index to 0. Only call the switchers when the target animation name actually changes (guarded by `currentBodyAnim` / `currentLegsAnim`), otherwise the sprite stutters back to frame 0 every tick.
 - **Both layers required**: a type is sprite-rendered only if both `body/` and `legs/` have at least one PNG present. If only one layer's PNGs are on disk, the loader warns and caches `null` — the type falls back to Graphics rendering. Drop in both layers together when adding a new type's sprite assets.
-- **New melee unit types**: add the type to both the `warrior || heavy` branch in `attackEnemy` and the early-return guard in `canSnapHit`. Omitting either causes the unit to silently skip attacks or mis-evaluate shot feasibility.
+- **Never key combat on type names**: `attackEnemy`/`attackTower` dispatch, `canSnapHit`, `isRanged`, `isMeleeType`, muzzle/shotgun VFX, and CPU splash valuation all read `config.attackStyle` (and `burstCount` for burst fire). A new unit gets correct combat behavior from its config block alone — adding a type-name check to any of these reintroduces the old silent-skip bugs.

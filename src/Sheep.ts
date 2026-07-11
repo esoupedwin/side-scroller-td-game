@@ -14,6 +14,7 @@ export class Sheep {
   readonly body:      Matter.Body;
   readonly container: PIXI.Container;
   private  gfx:       PIXI.Graphics;
+  private readonly physics: Physics;
 
   private state:         'walking' | 'eating' = 'walking';
   private stateTimer     = 0;
@@ -34,6 +35,7 @@ export class Sheep {
     this.nextStateDuration();
 
     // Drop from above the canvas — body center at y = -150
+    this.physics = physics;
     this.body = physics.createSheepBody(x, -150);
     this.x    = x;
     this.y    = -150 + HALF_H;
@@ -198,6 +200,11 @@ export class Sheep {
   }
 
   destroy() {
+    // Remove the Matter body — today the whole Physics engine is rebuilt on
+    // reset so an orphaned body would be GC'd anyway, but this keeps Sheep
+    // safe if it ever becomes respawnable or Physics gets reused (mirrors
+    // Coin.removePhysicsBody / PowerUp.removeBody).
+    this.physics.removeBody(this.body);
     this.container.destroy({ children: true });
   }
 }

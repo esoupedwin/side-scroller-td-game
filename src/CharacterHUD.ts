@@ -21,38 +21,6 @@ export function xpProgress(ap: number, rank: number): { frac: number; text: stri
   return { frac: into / span, text: `${Math.floor(ap)} / ${next}`, isMax: false };
 }
 
-export const TYPE_ICON: Record<string, string> = {
-  conscript: '👊',
-  warrior:   '⚔',
-  archer:    '🏹',
-  rifleman:  '🔫',
-  gunslinger: '🤠',
-  sniper:    '🎯',
-  viking:    '🪓',
-  shocktrooper: '💥',
-  knight:    '🛡',
-  heavy:     '🔨',
-  tanker:    '🪖',
-  grenadier: '💣',
-  rocketeer: '🚀',
-};
-
-const TYPE_COLOR: Record<string, string> = {
-  conscript: '#b07040',
-  warrior:   '#00b4d8',
-  archer:    '#43aa8b',
-  rifleman:  '#7a8c42',
-  gunslinger: '#b8860b',
-  sniper:    '#e07b39',
-  viking:    '#7a9e7e',
-  shocktrooper: '#c25b3a',
-  knight:    '#8b9faa',
-  heavy:     '#8899bb',
-  tanker:    '#8b4513',
-  grenadier: '#6b7a2a',
-  rocketeer: '#cc4400',
-};
-
 interface CardEntry {
   char:       Character;
   root:       HTMLElement;
@@ -80,8 +48,9 @@ export class CharacterHUD {
   add(char: Character) {
     const id    = char.id;
     const type  = char.config.type;
-    const color = TYPE_COLOR[type] ?? '#ffffff';
-    const icon  = TYPE_ICON[type]  ?? '?';
+    // Config-driven — the character block supplies its own UI metadata.
+    const color = char.config.uiColor ?? '#ffffff';
+    const icon  = char.config.icon    ?? '?';
 
     // ── Root card ───────────────────────────────────────────────────────────────
     const card = document.createElement('div');
@@ -106,7 +75,7 @@ export class CharacterHUD {
     // ── Type label ──────────────────────────────────────────────────────────────
     const label = document.createElement('div');
     label.className   = 'char-card-label';
-    label.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+    label.textContent = char.config.displayName ?? type.charAt(0).toUpperCase() + type.slice(1);
 
     // ── HP bar ──────────────────────────────────────────────────────────────────
     const hpTrack = document.createElement('div');

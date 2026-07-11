@@ -17,7 +17,8 @@ import {
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
   POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
   GRENADE_MAX_VX,
-  GUNSLINGER_BURST_COUNT, GUNSLINGER_BURST_INTERVAL,
+  GUNSLINGER_BURST_INTERVAL,
+  type AttackStyle, type CharTypeName,
 } from './constants';
 import type { Physics } from './Physics';
 import { NavGraph, type PathStep } from './Pathfinding';
@@ -45,6 +46,33 @@ const BEHAVIOR_ICON: Record<'attacking' | 'collecting' | 'harass' | 'defend' | '
 // sizing (sprite scale, HP bar, label) continues to use config.height.
 const BODY_HEIGHT_MULT = 1.9;
 
+// Module-scratch collections reused across per-tick behavior code. Character
+// updates run strictly sequentially within a tick (no reentrancy), so a
+// clear-and-fill scratch avoids allocating a fresh Set per character per tick.
+const scratchClaimedSet     = new Set<Character>();
+const scratchClaimedCoinSet = new Set<Coin>();
+
+// Animation fallback chains — constant, hoisted so switch*Animation doesn't
+// rebuild the Record on every animation change.
+const BODY_ANIM_FALLBACK: Record<BodyAnimName, BodyAnimName[]> = {
+  idle:   ['idle',   'walk'],
+  walk:   ['walk',   'idle'],
+  attack: ['attack', 'idle',   'walk'],
+  carry:  ['carry',  'walk',   'idle'],
+  throw:  ['throw',  'carry',  'walk',  'idle'],
+};
+const LEGS_ANIM_FALLBACK: Record<LegsAnimName, LegsAnimName[]> = {
+  idle: ['idle', 'walk'],
+  walk: ['walk', 'idle'],
+};
+
+// Clamp a harass pursuit x so it never crosses the safe line toward the enemy
+// tower. Module-level so the per-tick harass path allocates no closure.
+function clampToSafeX(v: number, dir: number, safeX: number): number {
+  return dir > 0 ? Math.min(v, safeX) : Math.max(v, safeX);
+}
+
+
 // Liang-Barsky segment-AABB intersection test.
 // Returns true if the segment (x0,y0)â†'(x1,y1) intersects the rectangle.
 function segmentIntersectsAABB(
@@ -54,17 +82,22 @@ function segmentIntersectsAABB(
 ): boolean {
   const dx = x1 - x0, dy = y1 - y0;
   let tMin = 0, tMax = 1;
-  const check = (p: number, q: number) => {
-    if (p === 0) return q >= 0;
+  // Four clip edges unrolled (p, q pairs) — no closure allocation; this runs
+  // per-block inside hasLineOfSight on the ranged-attack hot path.
+  for (let i = 0; i < 4; i++) {
+    let p: number, q: number;
+    switch (i) {
+      case 0:  p = -dx; q = x0 - b.x;              break;
+      case 1:  p =  dx; q = b.x + b.width  - x0;   break;
+      case 2:  p = -dy; q = y0 - b.y;              break;
+      default: p =  dy; q = b.y + b.height - y0;   break;
+    }
+    if (p === 0) { if (q < 0) return false; continue; }
     const t = q / p;
     if (p < 0) { if (t > tMax) return false; if (t > tMin) tMin = t; }
     else        { if (t < tMin) return false; if (t < tMax) tMax = t; }
-    return true;
-  };
-  return check(-dx, x0 - b.x) &&
-         check( dx, b.x + b.width  - x0) &&
-         check(-dy, y0 - b.y) &&
-         check( dy, b.y + b.height - y0);
+  }
+  return true;
 }
 import type { Side } from './Tower';
 import type { Coin, CoinKind } from './Coin';
@@ -73,7 +106,12 @@ import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 
 export interface CharacterConfig {
-  type:        'conscript' | 'warrior' | 'archer' | 'rifleman' | 'gunslinger' | 'sniper' | 'viking' | 'knight' | 'heavy' | 'tanker' | 'grenadier' | 'rocketeer' | 'shocktrooper';
+  // Derived from the gameConfig character-block keys — adding a new block
+  // automatically extends this union.
+  type:        CharTypeName;
+  // How the unit delivers damage — drives combat dispatch, snap-fire gating,
+  // kiting classification, muzzle VFX, and the Graphics-fallback body.
+  attackStyle: AttackStyle;
   hp:          number;
   speed:       number;
   attackRange: number;
@@ -89,6 +127,10 @@ export interface CharacterConfig {
   // indefinitely at fireRate. Optional so unconfigured types default to no cooldown.
   shotsBeforeCooldown?: number;
   cooldownSec?:         number;
+  // Rounds released per trigger pull (burst weapons, e.g. gunslinger). Combat
+  // uses the GUNSLINGER_BURST_* constants; this copy exists so the CPU's
+  // attribute-driven valuation can derive true sustained DPS from config alone.
+  burstCount?:          number;
   // Poison: a direct hit from this unit applies a damage-over-time effect to the
   // victim — `poisonDamage` HP every `poisonIntervalSec`, `poisonTicks` times.
   // All three must be > 0 for poison to apply. Optional so unconfigured types
@@ -97,6 +139,10 @@ export interface CharacterConfig {
   poisonDamage?:      number;
   poisonTicks?:       number;
   poisonIntervalSec?: number;
+  // Optional UI metadata (spawn button / HUD card) — generic fallbacks apply.
+  displayName?: string;
+  icon?:        string;
+  uiColor?:     string;
 }
 
 export interface FireRequest {
@@ -280,6 +326,7 @@ export class Character {
   private tintTargets:      (PIXI.Sprite | PIXI.Graphics)[] = [];
   private lowHealthPhase    = 0;     // advances while low on health; drives the pulse
   private isLowHealthTinted = false; // true while a non-white tint is applied (skip redundant resets)
+  private lastAppliedTint   = -1;    // last tint written to tintTargets; applyTint skips same-value writes
   // Sweat droplets that bead beside the head and drip while low on health.
   // Created lazily (most characters never get this low), cleared when healed/dead.
   private sweatGfx:         PIXI.Graphics | null = null;
@@ -512,7 +559,19 @@ export class Character {
     else if (this.config.type === 'grenadier')  this.buildGrenadierSprite();
     else if (this.config.type === 'rocketeer')  this.buildRocketeerSprite();
     else if (this.config.type === 'shocktrooper') this.buildShockTrooperSprite();
-    else                                         this.buildWarriorSprite();
+    else {
+      // New config-defined type without sprite sheets or a bespoke builder —
+      // borrow the Graphics body that matches its attack style so it reads
+      // correctly on the battlefield until real art lands.
+      switch (this.config.attackStyle) {
+        case 'blast':   this.buildShockTrooperSprite(); break;
+        case 'arrow':   this.buildArcherSprite();       break;
+        case 'bullet':  this.buildRiflemanSprite();     break;
+        case 'grenade': this.buildGrenadierSprite();    break;
+        case 'rocket':  this.buildRocketeerSprite();    break;
+        default:        this.buildWarriorSprite();      break;  // melee
+      }
+    }
   }
 
   // Creates two animated leg containers (added to container before body, so legs render behind).
@@ -590,7 +649,12 @@ export class Character {
    * the character fired recently (even if not in fighting state, e.g. Rush
    * units firing while marching).
    */
-  private selectAnimations(): { body: BodyAnimName; legs: LegsAnimName } {
+  // Out-params for selectAnimations — written in place each visible tick so no
+  // {body, legs} object is allocated per character per frame.
+  private selBody: BodyAnimName = 'idle';
+  private selLegs: LegsAnimName = 'idle';
+
+  private selectAnimations(): void {
     // Asymmetric hysteresis on idleâ†”walk so single-tick movement noise doesn't
     // thrash the animation:
     //   - already in walk   â†' keep moving unless still for > 0.15 s
@@ -611,7 +675,8 @@ export class Character {
       body = inMotion ? 'walk' : 'idle';
     else                                                            body = 'idle';
 
-    return { body, legs };
+    this.selBody = body;
+    this.selLegs = legs;
   }
 
   private switchBodyAnimation(name: BodyAnimName) {
@@ -619,16 +684,9 @@ export class Character {
     const set    = this.spriteSet?.body;
     if (!sprite || !set) return;
 
-    const fallback: Record<BodyAnimName, BodyAnimName[]> = {
-      idle:   ['idle',   'walk'],
-      walk:   ['walk',   'idle'],
-      attack: ['attack', 'idle',   'walk'],
-      carry:  ['carry',  'walk',   'idle'],
-      throw:  ['throw',  'carry',  'walk',  'idle'],
-    };
     let frames: PIXI.Texture[] | undefined;
     let picked: BodyAnimName = name;
-    for (const n of fallback[name]) {
+    for (const n of BODY_ANIM_FALLBACK[name]) {
       if (set[n]) { frames = set[n]; picked = n; break; }
     }
     if (!frames) return;
@@ -646,13 +704,9 @@ export class Character {
     const set    = this.spriteSet?.legs;
     if (!sprite || !set) return;
 
-    const fallback: Record<LegsAnimName, LegsAnimName[]> = {
-      idle: ['idle', 'walk'],
-      walk: ['walk', 'idle'],
-    };
     let frames: PIXI.Texture[] | undefined;
     let picked: LegsAnimName = name;
-    for (const n of fallback[name]) {
+    for (const n of LEGS_ANIM_FALLBACK[name]) {
       if (set[n]) { frames = set[n]; picked = n; break; }
     }
     if (!frames) return;
@@ -673,11 +727,11 @@ export class Character {
     // Switch anims FIRST so the base scale is current before we apply scale.x.
     // Previously the order was reversed and the new base-scale was visible only
     // on the *next* tick.
-    const target = this.selectAnimations();
-    const bodyChanged = target.body !== this.currentBodyAnim;
-    const legsChanged = target.legs !== this.currentLegsAnim;
-    if (bodyChanged) this.switchBodyAnimation(target.body);
-    if (legsChanged) this.switchLegsAnimation(target.legs);
+    this.selectAnimations();
+    const bodyChanged = this.selBody !== this.currentBodyAnim;
+    const legsChanged = this.selLegs !== this.currentLegsAnim;
+    if (bodyChanged) this.switchBodyAnimation(this.selBody);
+    if (legsChanged) this.switchLegsAnimation(this.selLegs);
 
     // Face the attack target while fighting OR within the brief post-fire window
     // (Rush/Collect fire opportunistically without entering fighting state).
@@ -1972,13 +2026,16 @@ export class Character {
 
   get claimedCoin(): Coin | null { return this.targetCoin; }
 
+  /** Fires a projectile (needs LOS through blocks, kites from close combat). */
   private get isRanged() {
-    const t = this.config.type;
-    return t === 'archer' || t === 'rifleman' || t === 'gunslinger' || t === 'sniper' || t === 'grenadier' || t === 'rocketeer';
+    const s = this.config.attackStyle;
+    return s !== 'melee' && s !== 'blast';
   }
 
-  private static isMeleeType(type: CharacterConfig['type']) {
-    return type === 'conscript' || type === 'warrior' || type === 'viking' || type === 'knight' || type === 'heavy' || type === 'shocktrooper';
+  /** Close-combat classifier for kiting — melee swings and shotgun blasts both
+   *  hurt at short range, so ranged units back away from either. */
+  private static isMeleeType(cfg: CharacterConfig) {
+    return cfg.attackStyle === 'melee' || cfg.attackStyle === 'blast';
   }
 
   update(ctx: UpdateContext) {
@@ -2492,7 +2549,7 @@ export class Character {
 
     // Kiting is a movement nuance of the attack behaviour, not an attack gate:
     // a ranged unit backs away from a closing melee enemy (but never into its own tower).
-    if (nearest && this.isRanged && Character.isMeleeType(nearest.config.type)
+    if (nearest && this.isRanged && Character.isMeleeType(nearest.config)
         && Math.abs(this.x - nearest.x) < RANGED_KITE_THRESHOLD) {
       this.state = 'marching';
       const retreatX = this.x - dir * this.moveSpeed * dt;
@@ -2531,12 +2588,13 @@ export class Character {
     // Dodge enemies directly in front by jumping over them.
     const RUSH_DODGE_LOOKAHEAD = 90;
     const RUSH_FLOOR_TOL       = 25;
-    const blocker = enemies.find(c =>
-      !c.isDead &&
-      dir * (c.x - this.x) > 0 &&
-      dir * (c.x - this.x) < RUSH_DODGE_LOOKAHEAD &&
-      Math.abs(c.floorY - this.floorY) < RUSH_FLOOR_TOL,
-    );
+    // Plain loop — no closure allocation in this per-tick path.
+    let blocker: Character | null = null;
+    for (const c of enemies) {
+      if (c.isDead) continue;
+      const ahead = dir * (c.x - this.x);
+      if (ahead > 0 && ahead < RUSH_DODGE_LOOKAHEAD && Math.abs(c.floorY - this.floorY) < RUSH_FLOOR_TOL) { blocker = c; break; }
+    }
 
     if (blocker && this.config.type !== 'tanker') {
       this.jump(dir, dt);
@@ -2567,11 +2625,13 @@ export class Character {
         ? Math.sign(homeTowerFrontX - this.x)
         : this.targetCoin ? Math.sign(this.targetCoin.x - this.x) : 0;
       if (dirToTarget !== 0) {
-        const blocking = enemies.find(c =>
-          !c.isDead &&
-          Math.sign(c.x - this.x) === dirToTarget &&
-          Math.abs(c.x - this.x) < EVASIVE_JUMP_SCAN_RANGE,
-        );
+        // Plain loop — no closure allocation in this per-tick path.
+        let blocking: Character | null = null;
+        for (const c of enemies) {
+          if (c.isDead) continue;
+          const dx = c.x - this.x;
+          if (Math.sign(dx) === dirToTarget && Math.abs(dx) < EVASIVE_JUMP_SCAN_RANGE) { blocking = c; break; }
+        }
         if (blocking) {
           this.evasiveJumpTimer = EVASIVE_JUMP_COOLDOWN;
           if (Math.random() < EVASIVE_JUMP_CHANCE) this.jump(dirToTarget, dt);
@@ -2631,14 +2691,18 @@ export class Character {
     }
 
     if (!this.targetCoin) {
-      // Exclude coins already claimed by an ally collector so teammates spread out
-      const claimed = new Set(
-        allies
-          .filter(c => c !== this && c.behavior === 'collecting' && c.claimedCoin)
-          .map(c => c.claimedCoin!),
-      );
-      const free = coins.filter(c => !claimed.has(c));
-      this.targetCoin = this.coinClosestToTower(free.length > 0 ? free : coins, homeTowerFrontX);
+      // Exclude coins already claimed by an ally collector so teammates spread
+      // out. Single pass into a reused scratch Set — no filter/map/array
+      // allocation per collector per tick; the claimed-vs-fallback pick is
+      // folded into coinClosestToTower.
+      const claimed = scratchClaimedCoinSet;
+      claimed.clear();
+      for (const c of allies) {
+        if (c === this || c.behavior !== 'collecting') continue;
+        const cc = c.claimedCoin;
+        if (cc) claimed.add(cc);
+      }
+      this.targetCoin = this.coinClosestToTower(coins, homeTowerFrontX, claimed);
     }
 
     if (this.targetCoin) {
@@ -2709,7 +2773,7 @@ export class Character {
 
       // Kiting: ranged harass units retreat when a melee enemy closes in
       if (this.isRanged) {
-        const isMelee = Character.isMeleeType(inRange.config.type);
+        const isMelee = Character.isMeleeType(inRange.config);
         if (isMelee && Math.abs(this.x - inRange.x) < RANGED_KITE_THRESHOLD) {
           const retreatX = this.x - dir * this.moveSpeed * dt;
           this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
@@ -2732,7 +2796,6 @@ export class Character {
       if (d < closestDist) { closestDist = d; closest = c; }
     }
 
-    const clamp = (v: number) => dir > 0 ? Math.min(v, safeX) : Math.max(v, safeX);
 
     const charOnPlatform = this.floorY < this.groundY;
 
@@ -2742,7 +2805,7 @@ export class Character {
       // Closest enemy is on a platform and we're on the ground — use pathfinding
       // to navigate up. The old primitive froze when Math.sign(0) = 0 (same X, different floor).
       if (closest.isOnPlatform && !charOnPlatform) {
-        this.requestPath(clamp(closest.x), closest.floorY, navGraph, dt);
+        this.requestPath(clampToSafeX(closest.x, dir, safeX), closest.floorY, navGraph, dt);
         this.followPath(dt, ctx.platforms);
         this.state = 'marching';
       } else if (toEnemy > 0 && closestDist > this.config.attackRange * 0.8) {
@@ -2750,7 +2813,7 @@ export class Character {
         // Pass the enemy's floor (not this.floorY): if the character is on a platform and the
         // enemy is on the ground/a different surface, using this.floorY snaps the destination
         // to the current platform's edge and the character can stall there.
-        this.requestPath(clamp(closest.x), closest.floorY, navGraph, dt);
+        this.requestPath(clampToSafeX(closest.x, dir, safeX), closest.floorY, navGraph, dt);
         this.followPath(dt, ctx.platforms);
         if (this.state !== 'fighting') this.state = 'marching';
       } else if (toEnemy <= 0) {
@@ -2770,7 +2833,7 @@ export class Character {
         // their floor so we either jump up onto their platform or walk off an
         // edge to drop down. Without this, the character holds position
         // indefinitely thinking it's already in range.
-        this.requestPath(clamp(closest.x), closest.floorY, navGraph, dt);
+        this.requestPath(clampToSafeX(closest.x, dir, safeX), closest.floorY, navGraph, dt);
         this.followPath(dt, ctx.platforms);
         if (this.state !== 'fighting') this.state = 'marching';
       }
@@ -2820,8 +2883,11 @@ export class Character {
     // dog-pile on the same enemy *while other threats remain*. Each defender
     // exposes its pursuit target via claimedIntruder; we filter those out when
     // picking our own -- but fall back to a claimed enemy below when there is
-    // nothing else to engage.
-    const claimed = new Set<Character>();
+    // nothing else to engage. Reuses a module-scratch Set — character updates
+    // are strictly sequential within a tick, so clear-and-fill is safe and
+    // avoids one Set allocation per defender per tick.
+    const claimed = scratchClaimedSet;
+    claimed.clear();
     for (const c of allies) {
       if (c === this || c.isDead) continue;
       if (c.behavior !== 'defend') continue;
@@ -2840,25 +2906,22 @@ export class Character {
         this.defendTargetIntruder.x >= atkNearX && this.defendTargetIntruder.x <= atkFarX) {
       intruder = this.defendTargetIntruder;
     } else {
-      let minDist = Infinity;
+      // Single pass over enemies tracks both candidates: nearest unclaimed in
+      // the attack zone (primary) and nearest of any in the defence zone
+      // (fallback — gang up when it is the only threat present).
+      let minDist = Infinity, minClaimed = Infinity;
+      let fallback: Character | null = null;
       for (const c of enemies) {
         if (c.isDead) continue;
+        const d = Math.abs(c.x - this.x);
+        if (c.x >= defNearX && c.x <= defFarX && d < minClaimed) {
+          minClaimed = d; fallback = c;
+        }
         if (c.x < atkNearX || c.x > atkFarX) continue;
         if (claimed.has(c)) continue;   // already covered by another defender
-        const d = Math.abs(c.x - this.x);
         if (d < minDist) { minDist = d; intruder = c; }
       }
-      // Fallback -- nothing unclaimed: engage an already-targeted enemy inside
-      // the defence zone (gang up when it is the only threat present).
-      if (!intruder) {
-        let minClaimed = Infinity;
-        for (const c of enemies) {
-          if (c.isDead) continue;
-          if (c.x < defNearX || c.x > defFarX) continue;
-          const d = Math.abs(c.x - this.x);
-          if (d < minClaimed) { minClaimed = d; intruder = c; }
-        }
-      }
+      if (!intruder) intruder = fallback;
     }
 
     // Engage: if any enemy is in weapon range, fire -- even when we have no
@@ -2870,7 +2933,7 @@ export class Character {
 
       // Ranged: kite back from closing melee, stay within own safe zone
       if (this.isRanged) {
-        const isMelee = Character.isMeleeType(target.config.type);
+        const isMelee = Character.isMeleeType(target.config);
         if (isMelee && Math.abs(this.x - target.x) < RANGED_KITE_THRESHOLD) {
           const retreatX = this.x - dir * this.moveSpeed * dt;
           this.x = dir > 0 ? Math.max(retreatX, homeTowerFrontX) : Math.min(retreatX, homeTowerFrontX);
@@ -2940,13 +3003,15 @@ export class Character {
       this.lowHealthPhase += dt * CHAR_LOW_HEALTH_BLINK_HZ * Math.PI * 2;
       const k    = 0.5 - 0.5 * Math.cos(this.lowHealthPhase);   // 0 at trough → 1 at peak
       const tint = lerpColor(0xffffff, CHAR_LOW_HEALTH_BLINK_COLOR, k);
-      for (const t of this.tintTargets) t.tint = tint;
+      this.applyTint(tint);
       this.isLowHealthTinted = true;
       return;
     }
     if (this.poisonTicksLeft > 0) {
-      // Not low health but poisoned: hold a static green tint.
-      for (const t of this.tintTargets) t.tint = CHAR_POISON_COLOR;
+      // Not low health but poisoned: hold a static green tint. applyTint's
+      // change guard collapses this to a single write on entry rather than
+      // re-tinting every sprite every tick for the poison duration.
+      this.applyTint(CHAR_POISON_COLOR);
       this.isLowHealthTinted = true;
       return;
     }
@@ -2954,9 +3019,17 @@ export class Character {
     if (this.isLowHealthTinted) this.clearLowHealthTint();
   }
 
+  /** Write `tint` to all tint targets, skipping the writes when the value is
+   *  already applied — assigning `.tint` dirties the object even unchanged. */
+  private applyTint(tint: number): void {
+    if (tint === this.lastAppliedTint) return;
+    this.lastAppliedTint = tint;
+    for (const t of this.tintTargets) t.tint = tint;
+  }
+
   /** Reset the body tint to its natural colour (no tint). */
   private clearLowHealthTint(): void {
-    for (const t of this.tintTargets) t.tint = 0xffffff;
+    this.applyTint(0xffffff);
     this.isLowHealthTinted = false;
     this.lowHealthPhase    = 0;
   }
@@ -3140,11 +3213,16 @@ export class Character {
   }
 
   private get projectileKind(): 'arrow' | 'bullet' | 'grenade' | 'rocket' {
-    const t = this.config.type;
-    if (t === 'grenadier') return 'grenade';
-    if (t === 'rocketeer') return 'rocket';
-    if (t === 'rifleman' || t === 'gunslinger' || t === 'sniper' || t === 'tanker') return 'bullet';
-    return 'arrow';
+    const s = this.config.attackStyle;
+    // melee/blast never reach a projectile-firing branch; arrow is a safe default.
+    return s === 'melee' || s === 'blast' ? 'arrow' : s;
+  }
+
+  /** Rounds released per trigger pull — config `burstCount`, else the
+   *  gunslinger-global default only applies to configs that set nothing and
+   *  never fired bursts (1). > 1 turns a bullet-style unit into burst fire. */
+  private get burstRounds(): number {
+    return this.config.burstCount ?? 1;
   }
 
   /**
@@ -3222,7 +3300,7 @@ export class Character {
     } else if (swing.onTower) {
       swing.onTower(swing.damage);
       ctx.onMeleeHit?.(this.config.type, this.x);
-      if (this.config.type === 'shocktrooper') {
+      if (this.config.attackStyle === 'blast') {
         const range = this.config.attackRange + this.config.width * 0.5;
         spawnShotgunBlast(this.x + this.lastAttackDir * 16, this.bowY, this.lastAttackDir, range);
       }
@@ -3337,16 +3415,17 @@ export class Character {
     const windUp = this.beginAttack();
     const miss   = Math.random() < this.config.critical;
     const damage = miss ? 0 : this.effectiveAtk;
-    if (this.config.type === 'shocktrooper') {
+    const style = this.config.attackStyle;
+    if (style === 'blast') {
       // Shotgun: no projectile — queue a short-range blast that hits EVERY enemy in
       // the frontal cone when the wind-up lands (resolved in tickPendingBlast, which
       // also fires the muzzle-flash + pellet-cone VFX at the moment of the shot).
       this.pendingBlast = { damage, delay: windUp, dir: this.lastAttackDir };
-    } else if (this.config.type === 'conscript' || this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'knight' || this.config.type === 'heavy') {
+    } else if (style === 'melee') {
       this.pendingMeleeSwing = { target, damage, delay: windUp };
       spawnSlashArc(this.x, this.y - this.config.height * 0.4, this.lastAttackDir, this.side);
     } else if (onFire) {
-      if (this.config.type === 'grenadier') {
+      if (style === 'grenade') {
         // Lead targeting: predict where the target will be when the grenade arrives.
         // vxAbs mirrors the formula in Grenade.ts; two iterations refine the estimate.
         const leadTime = (dx: number) => {
@@ -3362,7 +3441,7 @@ export class Character {
           damage, projectileKind: 'grenade',
           shooter: miss ? undefined : this,
         });
-      } else if (this.config.type === 'rocketeer') {
+      } else if (style === 'rocket') {
         // Rockets compute their own arc from tx; fire directly at current position
         onFire({
           side: this.side, sx: this.x, sy: this.bowY,
@@ -3370,12 +3449,12 @@ export class Character {
           damage, projectileKind: 'rocket',
           shooter: miss ? undefined : this,
         });
-      } else if (this.config.type === 'gunslinger') {
+      } else if (this.burstRounds > 1) {
         // Burst fire: loose the first round now; the remaining rounds are queued
         // and released one per GUNSLINGER_BURST_INTERVAL by tickPendingBurst.
         this.fireBullet(target.x, target.bowY, onFire);
         this.pendingBurst = {
-          shotsLeft: GUNSLINGER_BURST_COUNT - 1,
+          shotsLeft: this.burstRounds - 1,
           delay:     GUNSLINGER_BURST_INTERVAL,
           target,
           towerX:    0,
@@ -3412,34 +3491,35 @@ export class Character {
     const windUp = this.beginAttack();
     this.attackTimer = this.config.fireRate;
     this.registerShot();
-    // The gunslinger rolls crit per burst round inside fireBullet, so it skips
-    // this single whole-attack miss roll.
-    if (this.config.type !== 'gunslinger' && Math.random() < this.config.critical) return;  // miss â€” silent, towers have no label system
-    if (this.config.type === 'shocktrooper') {
+    const style = this.config.attackStyle;
+    // Burst weapons roll crit per round inside fireBullet, so they skip this
+    // single whole-attack miss roll.
+    if (this.burstRounds <= 1 && Math.random() < this.config.critical) return;  // miss â€” silent, towers have no label system
+    if (style === 'blast') {
       // Short-range shotgun blast on the tower (single target — one swing). The
       // shotgun VFX fires when the swing lands (tickPendingMeleeSwing).
       this.pendingMeleeSwing = { target: null, damage: this.effectiveAtk, delay: windUp, onTower: onDamageTower };
-    } else if (this.config.type === 'warrior' || this.config.type === 'viking' || this.config.type === 'knight' || this.config.type === 'heavy') {
+    } else if (style === 'melee') {
       this.pendingMeleeSwing = { target: null, damage: this.effectiveAtk, delay: windUp, onTower: onDamageTower };
       spawnSlashArc(this.x, this.y - this.config.height * 0.4, this.lastAttackDir, this.side);
     } else if (onFire) {
-      if (this.config.type === 'grenadier') {
+      if (style === 'grenade') {
         onFire({
           side: this.side, sx: this.x, sy: this.bowY,
           tx: towerFrontX, ty: towerY,
           damage: this.effectiveAtk, projectileKind: 'grenade',
         });
-      } else if (this.config.type === 'rocketeer') {
+      } else if (style === 'rocket') {
         onFire({
           side: this.side, sx: this.x, sy: this.bowY,
           tx: towerFrontX, ty: towerY,
           damage: this.effectiveAtk, projectileKind: 'rocket',
         });
-      } else if (this.config.type === 'gunslinger') {
+      } else if (this.burstRounds > 1) {
         // Burst fire on the tower — first round now, the rest via tickPendingBurst.
         this.fireBullet(towerFrontX, towerY, onFire);
         this.pendingBurst = {
-          shotsLeft: GUNSLINGER_BURST_COUNT - 1,
+          shotsLeft: this.burstRounds - 1,
           delay:     GUNSLINGER_BURST_INTERVAL,
           target:    null,
           towerX:    towerFrontX,
@@ -3476,8 +3556,10 @@ export class Character {
    * always return true â€” they aim freely.
    */
   private canSnapHit(target: Character): boolean {
-    const t = this.config.type;
-    if (t === 'conscript' || t === 'warrior' || t === 'viking' || t === 'knight' || t === 'heavy' || t === 'grenadier' || t === 'rocketeer' || t === 'shocktrooper') return true;
+    // Only snap-firing styles (flat trajectory) are plane-restricted; melee,
+    // blast, and ballistic AoE (grenade/rocket) aim freely.
+    const s = this.config.attackStyle;
+    if (s !== 'arrow' && s !== 'bullet') return true;
     // Horizontal-only fire â€” the projectile travels along the shooter's bowY
     // without arcing. A target is hittable only when its collision box
     // vertically spans the bow line (i.e. they're on roughly the same plane).
@@ -3539,16 +3621,25 @@ export class Character {
     return best;
   }
 
-  /** Coin closest to own tower front â€” prioritises easy-to-deposit coins. */
-  private coinClosestToTower(coins: Coin[], homeTowerFrontX: number): Coin | null {
+  /** Coin closest to own tower front â€” prioritises easy-to-deposit coins.
+   *  Coins in `excluded` are skipped while any unexcluded coin exists; when
+   *  every live coin is excluded, falls back to the closest excluded one
+   *  (same semantics as the old "free pool first, else full pool" filter,
+   *  without allocating the intermediate arrays). */
+  private coinClosestToTower(coins: Coin[], homeTowerFrontX: number, excluded?: ReadonlySet<Coin>): Coin | null {
     let best: Coin | null = null;
-    let minDistToTower = Infinity;
+    let bestExcluded: Coin | null = null;
+    let minDistToTower = Infinity, minExcluded = Infinity;
     for (const c of coins) {
       if (c.isDead || c.isPickedUp) continue;
       const distToTower = Math.abs(c.x - homeTowerFrontX);
+      if (excluded?.has(c)) {
+        if (distToTower < minExcluded) { minExcluded = distToTower; bestExcluded = c; }
+        continue;
+      }
       if (distToTower < minDistToTower) { minDistToTower = distToTower; best = c; }
     }
-    return best;
+    return best ?? bestExcluded;
   }
 
   destroy() {

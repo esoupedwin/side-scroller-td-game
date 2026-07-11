@@ -91,12 +91,12 @@ export class NavGraph {
     // Skip rebuild when geometry is effectively unchanged (4 px granularity).
     // This prevents animated blocks from forcing path invalidation on every tick
     // even when the navgraph topology hasn't meaningfully changed.
+    // Built with plain string concatenation — no intermediate map() arrays or
+    // spread; this runs ~30×/s while any block animates.
     const R = (n: number) => Math.round(n / 4) * 4;
-    const sig = [
-      `${R(playerTowerX)},${R(enemyTowerX)}`,
-      ...platforms.map(p => `${R(p.x)},${R(p.y)},${R(p.width)}`),
-      ...blocks.map(b => `${R(b.x)},${R(b.y)},${R(b.width)},${R(b.height ?? 0)}`),
-    ].join('|');
+    let sig = `${R(playerTowerX)},${R(enemyTowerX)}`;
+    for (const p of platforms) sig += `|${R(p.x)},${R(p.y)},${R(p.width)}`;
+    for (const b of blocks)    sig += `|${R(b.x)},${R(b.y)},${R(b.width)},${R(b.height ?? 0)}`;
     if (sig === this._geoSig) return;
     this._geoSig = sig;
 

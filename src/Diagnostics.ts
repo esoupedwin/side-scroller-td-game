@@ -60,6 +60,10 @@ const SNAPSHOT_INTERVAL_S = 1.5;
 const ANOMALY_DEBOUNCE_S  = 2;
 const STUCK_THRESHOLD_S   = 2;
 const THRASH_REBUILDS_PER_SEC = 8;   // path rebuilt this often = something keeps clearing it
+// Hard cap on retained log entries — a long diagnose session would otherwise
+// grow memory without bound (snapshots alone add one entry per 1.5 s, each
+// holding a per-character object array). Oldest entries are dropped in bulk.
+const MAX_LOG_ENTRIES = 10000;
 
 export class Diagnostics {
   private active            = false;
@@ -68,6 +72,9 @@ export class Diagnostics {
   private nextSnapshotAt    = 0;
   private trackById:        Map<number, CharTrack> = new Map();
   private knownIds:         Set<number>            = new Set();
+  // Scratch set ping-ponged with knownIds each tick — avoids a Set allocation
+  // per tick while diagnose mode is active.
+  private scratchLiveIds:   Set<number>            = new Set();
 
   isActive(): boolean { return this.active; }
   entryCount(): number { return this.log.length; }
@@ -96,13 +103,17 @@ export class Diagnostics {
 
   private note(now: number, category: EntryCategory, msg: string, data?: Record<string, unknown>) {
     this.log.push({ t: now, category, msg, data });
+    // Drop the oldest 10% in one splice (amortised) rather than shift()-ing
+    // one entry per push once the cap is reached.
+    if (this.log.length > MAX_LOG_ENTRIES) this.log.splice(0, Math.ceil(MAX_LOG_ENTRIES * 0.1));
   }
 
   tick(input: TickInput) {
     if (!this.active) return;
     const { time, chars, platforms, blocks } = input;
 
-    const liveIds = new Set<number>();
+    const liveIds = this.scratchLiveIds;
+    liveIds.clear();
     for (const c of chars) {
       liveIds.add(c.id);
       if (!this.knownIds.has(c.id)) {
@@ -112,6 +123,7 @@ export class Diagnostics {
     for (const id of this.knownIds) {
       if (!liveIds.has(id)) this.note(time, 'event', `Despawn #${id}`);
     }
+    this.scratchLiveIds = this.knownIds;   // old set becomes next tick's scratch
     this.knownIds = liveIds;
 
     for (const c of chars) {
@@ -271,7 +283,8 @@ export class Diagnostics {
       }
     }
 
-    for (const id of Array.from(this.trackById.keys())) {
+    // Map supports delete-during-iteration — no throwaway Array.from copy.
+    for (const id of this.trackById.keys()) {
       if (!liveIds.has(id)) this.trackById.delete(id);
     }
 
@@ -299,7 +312,7 @@ export class Diagnostics {
             : null,
         };
       });
-      this.log.push({ t: time, category: 'snapshot', msg: 'snapshot', data: { chars: snaps } });
+      this.note(time, 'snapshot', 'snapshot', { chars: snaps });
     }
   }
 
