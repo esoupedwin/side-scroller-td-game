@@ -151,6 +151,7 @@ let tribePU: TribePowerUpId = loadTribePU();
 game.setPlayerTribePowerUp(tribePU);
 
 const tribePUBtn   = document.getElementById('tribe-pu-btn')  as HTMLButtonElement;
+const tribePUArt   = document.getElementById('tribe-pu-art')  as HTMLElement;
 const tribePUIcon  = document.getElementById('tribe-pu-icon')!;
 const tribePUCd    = document.getElementById('tribe-pu-cd')!;
 const cpuTribePUEl = document.getElementById('cpu-tribe-pu')!;
@@ -164,11 +165,11 @@ function refreshTribePUBtn() {
   if (tribePUBtn.dataset.artId !== state.id) {
     tribePUBtn.dataset.artId = state.id;
     tribePUBtn.classList.remove('no-art');
-    tribePUBtn.style.backgroundImage = `url('${meta.art}')`;
+    tribePUArt.style.backgroundImage = `url('${meta.art}')`;
     const probe = new Image();
     probe.onerror = () => {
       if (tribePUBtn.dataset.artId !== state.id) return;
-      tribePUBtn.style.backgroundImage = '';
+      tribePUArt.style.backgroundImage = '';
       tribePUBtn.classList.add('no-art');
     };
     probe.src = meta.art;
@@ -177,6 +178,8 @@ function refreshTribePUBtn() {
   tribePUBtn.disabled     = !state.ready;
   tribePUBtn.classList.toggle('is-ready', state.ready);
   tribePUCd.textContent   = state.cooldown > 0 ? `${state.cooldown}s` : '';
+  // Recharge ring: gold arc sweeps the circumference as --cd goes 0→1.
+  tribePUBtn.style.setProperty('--cd', String(state.frac));
 
   // Dev bar: CPU's pick + cooldown state (element lives in the dev panel).
   const cpu     = game.cpuTribePowerUp;
@@ -189,9 +192,9 @@ tribePUBtn.addEventListener('click', () => {
   if (game.activateTribePowerUp('player')) refreshTribePUBtn();
 });
 refreshTribePUBtn();
-// Cooldown countdown — cheap 4 Hz poll (cooldown only changes in whole seconds
-// on screen, but this also catches restarts and game-over promptly).
-window.setInterval(refreshTribePUBtn, 250);
+// 10 Hz poll — smooth enough for the recharge ring sweep (the registered
+// @property --cd transition interpolates between updates), still trivial cost.
+window.setInterval(refreshTribePUBtn, 100);
 
 // Squad-screen picker: one option card per power-up, highlighted selection.
 {

@@ -260,38 +260,72 @@
 
       /* ── Coin counter (top-left, cream pill) ───────────────────────────── */
       /* ── Tribe power-up activation button (bottom-right, above COMMANDS) ── */
+      /* Recharge progress 0→1: drives the conic-gradient ring below. Registered
+         so the browser interpolates between the 10 Hz poll updates (falls back
+         to stepped updates where @property is unsupported). MUST inherit: the
+         ring lives on ::after, which only sees the button's --cd via inheritance
+         — inherits:false would pin the ring at the initial value forever. */
+      @property --cd { syntax: '<number>'; initial-value: 1; inherits: true; }
       #tribe-pu-btn {
         position: absolute;
-        bottom: 64px; right: 18px;
+        bottom: 18px; right: 162px;   /* left of the 134px commands button + 10px gap */
         z-index: 30;
-        width: 76px; height: 76px;
+        width: 134px; height: 134px;
         padding: 0;
-        background-color: #1b2540;
-        background-size: cover;
-        background-position: center;
-        border: 3px solid #1d2540;
-        border-radius: 16px;
+        background: #1b2540;
+        border: 4px solid #1d2540;
+        border-radius: 30px;
         box-shadow: 0 3px 10px rgba(0,0,0,0.45);
         cursor: pointer;
         pointer-events: all;
-        transition: filter 0.12s ease, transform 0.1s;
+        transition: transform 0.1s;
       }
-      #tribe-pu-btn:hover:not(:disabled)  { filter: brightness(1.15); transform: translateY(-1px); }
+      /* PNG art lives on a child span so the disabled grey-out never touches
+         the cooldown ring (a filter on the button would grey ::after too). */
+      #tribe-pu-art {
+        position: absolute; inset: 0;
+        border-radius: 25px;
+        background-size: cover;
+        background-position: center;
+        transition: filter 0.12s ease;
+      }
+      #tribe-pu-btn:hover:not(:disabled) #tribe-pu-art { filter: brightness(1.15); }
+      #tribe-pu-btn:hover:not(:disabled)  { transform: translateY(-1px); }
       #tribe-pu-btn:active:not(:disabled) { transform: scale(0.94); }
-      #tribe-pu-btn:disabled { filter: grayscale(0.9) brightness(0.6); cursor: default; }
+      #tribe-pu-btn:disabled { cursor: default; }
+      #tribe-pu-btn:disabled #tribe-pu-art { filter: grayscale(0.9) brightness(0.6); }
       #tribe-pu-btn.is-ready { border-color: #ffd166; box-shadow: 0 0 14px rgba(255, 209, 102, 0.6); }
+      /* Cooldown ring: a gold arc sweeping clockwise from 12 o'clock around the
+         button's circumference as the power-up recharges (--cd 0→1); the ring
+         is complete exactly when it becomes usable. Masked so only the outer
+         band renders; the faint remainder shows the track still to cover. */
+      #tribe-pu-btn::after {
+        content: '';
+        position: absolute;
+        inset: -11px;
+        border-radius: 40px;
+        padding: 7px;   /* ring thickness */
+        background: conic-gradient(#ffd166 calc(var(--cd) * 1turn), rgba(255, 255, 255, 0.14) 0);
+        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+        mask-composite: exclude;
+        pointer-events: none;
+        transition: --cd 0.12s linear;
+      }
       /* Emoji fallback — hidden while the PNG skin is applied */
-      #tribe-pu-icon { display: none; font-size: 30px; line-height: 76px; color: #fff; }
+      #tribe-pu-icon { display: none; position: absolute; inset: 0; font-size: 54px; line-height: 126px; color: #fff; }
       #tribe-pu-btn.no-art #tribe-pu-icon { display: block; }
       /* Cooldown countdown pill overlaid at the bottom edge of the art */
       #tribe-pu-cd {
         position: absolute;
         left: 50%; bottom: 4px;
         transform: translateX(-50%);
-        padding: 1px 8px;
+        padding: 3px 14px;
         background: rgba(10, 14, 24, 0.82);
         border-radius: 999px;
-        font-size: 15px; font-weight: 800; color: #ffd166;
+        font-size: 26px; font-weight: 800; color: #ffd166;
+        z-index: 1;
       }
       #tribe-pu-cd:empty { display: none; }
 
@@ -373,18 +407,14 @@
         right: 18px;
         z-index: 30;
         pointer-events: all;
-        padding: 8px 14px;
-        font-family: inherit;
-        font-size: 13px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: #fff;
-        background: linear-gradient(135deg, #2c7be5, #1e5fb0);
-        border: 1px solid #4a93f0;
-        border-radius: 6px;
+        width: 134px; height: 134px;
+        padding: 0;
+        font-size: 0;   /* hide the fallback text — the PNG skin is the face */
+        background: #1b2540 url('/sprites/misc/command_hud.png') center / cover no-repeat;
+        border: 4px solid #1d2540;
+        border-radius: 30px;
         cursor: pointer;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.4) inset;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.45);
         transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
       }
       #cmd-open-btn:hover {
@@ -1205,6 +1235,7 @@
         <span id="coin-amount">150</span>
       </div>
       <button id="tribe-pu-btn" title="Activate tribe power-up">
+        <span id="tribe-pu-art"></span>
         <span id="tribe-pu-icon">⚡</span>
         <span id="tribe-pu-cd"></span>
       </button>

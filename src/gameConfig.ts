@@ -425,7 +425,7 @@ export const GameConfig = {
     // Dev fast-start: skip the splash screen and character selection on game
     // load (and on tribe/map switches) and jump straight into the match with
     // EVERY owned character card loaded — no 7-card cap, no 3-2-1 countdown.
-    skipIntroScreens: true,
+    skipIntroScreens: false,
   },
 
   vfx: {

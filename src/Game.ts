@@ -869,12 +869,14 @@ export class Game {
    *  reset() — it's a meta choice, not per-match state. */
   setPlayerTribePowerUp(id: TribePowerUpId): void { this.playerTribePU = id; }
 
-  /** Player-side state for the activation button UI. */
-  get playerTribePowerUp(): { id: TribePowerUpId; cooldown: number; ready: boolean } {
+  /** Player-side state for the activation button UI. `frac` is the recharge
+   *  progress 0→1 (1 = fully charged) driving the circumference ring. */
+  get playerTribePowerUp(): { id: TribePowerUpId; cooldown: number; ready: boolean; frac: number } {
     return {
       id:       this.playerTribePU,
       cooldown: Math.ceil(this.playerTribePUCooldown),
       ready:    this.playerTribePUCooldown <= 0 && !this.isOver,
+      frac:     Math.max(0, Math.min(1, 1 - this.playerTribePUCooldown / TRIBE_PU_COOLDOWN_SEC)),
     };
   }
 
