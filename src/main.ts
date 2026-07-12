@@ -4,7 +4,8 @@ import {
   charCost, charDisplayName, charIcon, ALL_CHAR_TYPES,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS, CHEAT_TOWER_DAMAGE,
   CHEAT_CLOCK_SKIP_SEC,
-  type CharTypeName,
+  TRIBE_POWER_UPS, TRIBE_PU_IDS, TRIBE_PU_PLAYER_DEFAULT,
+  type CharTypeName, type TribePowerUpId,
 } from './constants';
 import { getOwnedCards, loadLoadout, saveLoadout } from './CardCollection';
 import { rankLabel, xpProgress } from './CharacterHUD';
@@ -135,6 +136,97 @@ const lastDisabledByBtn = new Map<HTMLButtonElement, boolean>();
 let lastKnownCoins = 0;
 
 let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged, handleEnemyTowerHpChanged, handlePlayerTowerHpChanged);
+
+// ── Tribe power-up: selection persistence + activation button ───────────────
+const TRIBE_PU_KEY = 'coin_tribe_powerup';
+
+function loadTribePU(): TribePowerUpId {
+  const stored = localStorage.getItem(TRIBE_PU_KEY);
+  return (TRIBE_PU_IDS as readonly string[]).includes(stored ?? '')
+    ? stored as TribePowerUpId
+    : TRIBE_PU_PLAYER_DEFAULT;
+}
+
+let tribePU: TribePowerUpId = loadTribePU();
+game.setPlayerTribePowerUp(tribePU);
+
+const tribePUBtn   = document.getElementById('tribe-pu-btn')  as HTMLButtonElement;
+const tribePUIcon  = document.getElementById('tribe-pu-icon')!;
+const tribePUCd    = document.getElementById('tribe-pu-cd')!;
+const cpuTribePUEl = document.getElementById('cpu-tribe-pu')!;
+
+function refreshTribePUBtn() {
+  const state = game.playerTribePowerUp;
+  const meta  = TRIBE_POWER_UPS[state.id];
+  // PNG skin as the button face; the emoji span is a fallback shown only when
+  // the art fails to load (.no-art, set by the error probe below).
+  tribePUIcon.textContent = meta.icon;
+  if (tribePUBtn.dataset.artId !== state.id) {
+    tribePUBtn.dataset.artId = state.id;
+    tribePUBtn.classList.remove('no-art');
+    tribePUBtn.style.backgroundImage = `url('${meta.art}')`;
+    const probe = new Image();
+    probe.onerror = () => {
+      if (tribePUBtn.dataset.artId !== state.id) return;
+      tribePUBtn.style.backgroundImage = '';
+      tribePUBtn.classList.add('no-art');
+    };
+    probe.src = meta.art;
+  }
+  tribePUBtn.title        = `${meta.name} — ${meta.desc}`;
+  tribePUBtn.disabled     = !state.ready;
+  tribePUBtn.classList.toggle('is-ready', state.ready);
+  tribePUCd.textContent   = state.cooldown > 0 ? `${state.cooldown}s` : '';
+
+  // Dev bar: CPU's pick + cooldown state (element lives in the dev panel).
+  const cpu     = game.cpuTribePowerUp;
+  const cpuMeta = TRIBE_POWER_UPS[cpu.id];
+  cpuTribePUEl.textContent = `${cpuMeta.icon} ${cpuMeta.name} ${cpu.ready ? '· ready' : `· ${cpu.cooldown}s`}`;
+  cpuTribePUEl.style.color = cpu.ready ? '#7ee081' : '#f4a261';
+}
+
+tribePUBtn.addEventListener('click', () => {
+  if (game.activateTribePowerUp('player')) refreshTribePUBtn();
+});
+refreshTribePUBtn();
+// Cooldown countdown — cheap 4 Hz poll (cooldown only changes in whole seconds
+// on screen, but this also catches restarts and game-over promptly).
+window.setInterval(refreshTribePUBtn, 250);
+
+// Squad-screen picker: one option card per power-up, highlighted selection.
+{
+  const optionsEl = document.getElementById('tribe-pu-options')!;
+  for (const id of TRIBE_PU_IDS) {
+    const meta = TRIBE_POWER_UPS[id];
+    const opt  = document.createElement('button');
+    opt.className    = 'tp-option';
+    opt.dataset.puId = id;
+    if (id === tribePU) opt.classList.add('selected');
+    // PNG art with emoji fallback if the asset is missing.
+    const icon = document.createElement('span');
+    icon.className   = 'tp-icon';
+    const art = new Image();
+    art.className = 'tp-art';
+    art.src       = meta.art;
+    art.alt       = meta.name;
+    art.onload    = () => { icon.replaceChildren(art); };
+    icon.textContent = meta.icon;
+    const name = document.createElement('span');
+    name.textContent = meta.name;
+    const desc = document.createElement('span');
+    desc.className   = 'tp-desc';
+    desc.textContent = meta.desc;
+    opt.append(icon, name, desc);
+    opt.addEventListener('click', () => {
+      tribePU = id;
+      localStorage.setItem(TRIBE_PU_KEY, id);
+      game.setPlayerTribePowerUp(id);
+      for (const el of optionsEl.children) el.classList.toggle('selected', el === opt);
+      refreshTribePUBtn();
+    });
+    optionsEl.appendChild(opt);
+  }
+}
 
 // Shared restart routine — used by Play Again, Load Map, and the tribe
 // selector. Optional mapDef forwards a new map to game.reset(); omit it to

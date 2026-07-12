@@ -183,6 +183,9 @@ Combat semantics come from the block's **`attackStyle`** attribute:
 
 Established types have bespoke `build*Sprite()` Graphics builders dispatched by type in `buildSprite()`; a new type without sprites or a builder falls back to the Graphics body matching its `attackStyle`.
 
+### Shield block (`blockChance` / `blockPercent`)
+Optional per-block config (currently viking 0.25/0.5, knight 0.35/0.6). Rolled in `takeDamage` for **character-sourced direct hits only** (tower fire has no `killer`; poison ticks are exempt). A blocked hit: deals `(1 − blockPercent)` of its damage, scales its knockback by the same factor (via `pendingKnockbackScale`, set in `takeDamage` and consumed by the paired `applyKnockback` call — every damage path pairs them), suppresses the flinch jump, floats a steel-blue "Blocked" label (`pendingDamages` events support an optional `text` field), and pops `spawnBlockFlash` facing the attacker. `blockPercent = 1` fully absorbs the hit including its poison application. CPU valuation folds block into effective HP: `hp / (1 − blockChance × blockPercent)`.
+
 ### Behavior vs State
 - **`behavior`** (`'attacking' | 'collecting' | 'harass' | 'defend'`) — the character's strategic intent; player-controlled or set by CPU AI
 - **`state`** (`'marching' | 'fighting' | 'collecting' | 'returning' | 'dead'`) — what the character is doing this frame; set inside `update()`
@@ -307,6 +310,14 @@ Power-ups drop from the sky every `POWERUP_DROP_INTERVAL` seconds (default 40 s)
 `PowerUp.ts` uses a Matter.js circle body (`CAT_POWERUP`, radius `POWERUP_BODY_RADIUS`). The body collides with ground, platform, walls, towers, and blocks. Once settled (speed < 0.05 near a surface), the body is set static and the visual bobs vertically. `updatePlatformPassthrough()` is called each tick for non-settled power-ups — same one-way platform mechanism used by coins.
 
 All tunable values live in `gameConfig.powerUp` → exported from `constants.ts` as `POWERUP_*` constants.
+
+## Tribe power-ups
+
+One ability per side per match (`gameConfig.tribePowerUp`; type `TribePowerUpId`): `speed` (own-side move-speed buff), `vitality` (own-side heal-over-time aura — Game-side timer so mid-effect spawns benefit), `plague` (poisons all enemy characters via `applyPlague`), `aggression` (own-side temporary attack multiplier via `tribeAtkMult`). All tunables (duration, multipliers, 30 s cooldown, player default) live in the config block; UI metadata in `TRIBE_POWER_UPS` (constants.ts).
+
+- Player picks on the squad screen (`#tribe-pu-picker`, persisted in localStorage `coin_tribe_powerup`, default `speed`); activates via the top-left `#tribe-pu-btn` (cooldown countdown polled at 4 Hz in main.ts).
+- CPU picks uniformly at random each `reset()` and auto-fires in `tickCpuBehaviorAI` when the ability pays off (push/all-in with ≥3 units for buffs, ≥2 wounded for vitality, ≥3 targets for plague).
+- `Game.activateTribePowerUp(side)` is the single entry point (cooldown-gated, no-op when paused/over). Speed reuses the drop-power-up speed fields (shared streak/afterimage visuals); plague reuses the poison system with `poisonSource = null`.
 
 ## Physics
 

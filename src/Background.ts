@@ -2,7 +2,7 @@ import * as PIXI from 'pixi.js';
 import {
   GAME_HEIGHT, GROUND_Y,
   TOWER_WIDTH, TOWER_ATTACK_RANGE, DEFEND_PURSUIT_RANGE,
-  PLAYER_COLOR, ENEMY_COLOR,
+  PLAYER_COLOR, ENEMY_COLOR, COIN_BOX_VISUAL_SCALE,
 } from './constants';
 import type { CoinBoxDef } from './maps';
 
@@ -150,8 +150,17 @@ export function buildTowerRangeMarkers(
   return container;
 }
 
+// Stock coin-box skin, used whenever the map doesn't supply its own
+// coinBox.skin override (map-builder data URL).
+const DEFAULT_COIN_BOX_SKIN = '/sprites/misc/box_01.png';
+
 export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
-  const { x, y, width: w, height: h } = coinBox;
+  const { x, y: logicalY, width: logicalW, height: logicalH } = coinBox;
+  // Cosmetic-only render scale (gameConfig.coinBox.visualScale), centred on
+  // the logical box — the coin spawn strip and map footprint are unaffected.
+  const w = logicalW * COIN_BOX_VISUAL_SCALE;
+  const h = logicalH * COIN_BOX_VISUAL_SCALE;
+  const y = logicalY - (h - logicalH) / 2;
   const g = new PIXI.Graphics();
 
   // Drop shadow
@@ -188,7 +197,7 @@ export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
   // Star icon centred in the box
   const cx = x;
   const cy = y + h / 2;
-  const outerR = 15, innerR = 6, points = 5;
+  const outerR = 15 * COIN_BOX_VISUAL_SCALE, innerR = 6 * COIN_BOX_VISUAL_SCALE, points = 5;
   const starPts: number[] = [];
   for (let i = 0; i < points * 2; i++) {
     const r     = i % 2 === 0 ? outerR : innerR;
@@ -201,21 +210,22 @@ export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
   g.endFill();
   g.lineStyle(0);
 
-  // Custom PNG skin (map coinBox.skin): overlay a sprite covering the box and
-  // hide the procedural graphic once it loads. Async — graphic shows meanwhile.
-  if (coinBox.skin) {
-    PIXI.Assets.load<PIXI.Texture>(coinBox.skin)
-      .then(tex => {
-        const sprite  = new PIXI.Sprite(tex);
-        sprite.x      = x - w / 2;
-        sprite.y      = y;
-        sprite.width  = w;
-        sprite.height = h;
-        world.addChild(sprite);
-        g.visible = false;
-      })
-      .catch(() => { /* missing/corrupt data URL — keep the procedural box */ });
-  }
+  // PNG skin: the map's coinBox.skin (data URL from the map builder) wins,
+  // else the stock asset below. The sprite overlays the box footprint and the
+  // procedural graphic hides once it loads (async — graphic shows meanwhile,
+  // and stays if the asset is missing/corrupt).
+  const skinUrl = coinBox.skin ?? DEFAULT_COIN_BOX_SKIN;
+  PIXI.Assets.load<PIXI.Texture>(skinUrl)
+    .then(tex => {
+      const sprite  = new PIXI.Sprite(tex);
+      sprite.x      = x - w / 2;
+      sprite.y      = y;
+      sprite.width  = w;
+      sprite.height = h;
+      world.addChild(sprite);
+      g.visible = false;
+    })
+    .catch(() => { /* missing/corrupt skin — keep the procedural box */ });
 }
 
 /**

@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import Matter from 'matter-js';
-import { GROUND_Y, PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH } from './constants';
+import { GROUND_Y, PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH, COIN_VISUAL_SCALE } from './constants';
 
 const DEFAULT_WALL_L = PLAYER_TOWER_X - TOWER_WIDTH / 2;
 const DEFAULT_WALL_R = ENEMY_TOWER_X  + TOWER_WIDTH / 2;
@@ -84,6 +84,10 @@ export class Coin {
     this.lifetimeRemaining = lifetimeSec;
 
     this.container = new PIXI.Container();
+    // Cosmetic-only render scale (gameConfig.economy.coinVisualScale) — the
+    // coin art is centred on the container origin so this scales in place;
+    // the physics body and pickup distances are unaffected.
+    this.container.scale.set(COIN_VISUAL_SCALE);
     this.gfx       = new PIXI.Graphics();
     this.drawCoin();
     this.container.addChild(this.gfx);

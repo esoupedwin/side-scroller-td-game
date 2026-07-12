@@ -58,6 +58,9 @@ import {
   CPU_URGENT_MAX_FACTOR, CPU_COMFORT_MIN_FACTOR,
   CPU_NEUTRAL_MIN_FACTOR, CPU_NEUTRAL_MAX_FACTOR,
   CPU_RETREAT_HP_FRAC, CPU_RETREAT_RECOVER_FRAC, CPU_ENDGAME_SEC,
+  TRIBE_PU_COOLDOWN_SEC, TRIBE_PU_DURATION_SEC, TRIBE_PU_SPEED_MULT, TRIBE_PU_HEAL_PER_SEC,
+  TRIBE_PU_PLAGUE_DAMAGE, TRIBE_PU_PLAGUE_TICKS, TRIBE_PU_PLAGUE_INTERVAL, TRIBE_PU_AGGRESSION_MULT,
+  TRIBE_PU_PLAYER_DEFAULT, TRIBE_PU_IDS, TRIBE_POWER_UPS, type TribePowerUpId,
   CPU_VAL_RANGE_DIVISOR, CPU_VAL_HP_DIVISOR, CPU_VAL_SPLASH_PUSH_MULT, CPU_VAL_THREAT_NORM,
   POWERUP_DROP_INTERVAL, POWERUP_INDICATOR_LEAD, POWERUP_BODY_RADIUS,
   CHEAT_PLAYER_COIN_GRANT, CHEAT_CPU_COIN_GRANT,
@@ -311,6 +314,17 @@ export class Game {
   // side to claim wins). Validated each collect-AI tick — entries drop when
   // the power-up is taken/expired or the fetcher dies.
   private readonly puFetchers = new Map<PowerUp, Character>();
+  // ── Tribe power-ups ────────────────────────────────────────────────────────
+  // One ability per side per match, manually triggered, 30 s cooldown. The
+  // player's pick survives reset() (it's a meta choice from the squad screen);
+  // the CPU re-picks each match in reset().
+  private playerTribePU: TribePowerUpId = TRIBE_PU_PLAYER_DEFAULT;
+  private cpuTribePU:    TribePowerUpId = TRIBE_PU_IDS[Math.floor(Math.random() * TRIBE_PU_IDS.length)];
+  private playerTribePUCooldown = 0;   // seconds until re-usable (0 = ready)
+  private cpuTribePUCooldown    = 0;
+  // Vitality is a lasting effect — remaining seconds of the heal-over-time aura.
+  private playerVitalityTimer = 0;
+  private cpuVitalityTimer    = 0;
   // AI combat units currently retreating to heal (low HP). WeakSet so dead units
   // are GC'd automatically without manual cleanup.
   private readonly retreatingUnits = new WeakSet<Character>();
@@ -849,6 +863,63 @@ export class Game {
   /** Dev cheat: when ON the player's coin balance is pinned to 9999. */
   setGameShark(on: boolean): void { this.gameShark = on; }
 
+  // ── Tribe power-ups ──────────────────────────────────────────────────────────
+
+  /** Set the player's tribe power-up (squad-selection screen). Persists across
+   *  reset() — it's a meta choice, not per-match state. */
+  setPlayerTribePowerUp(id: TribePowerUpId): void { this.playerTribePU = id; }
+
+  /** Player-side state for the activation button UI. */
+  get playerTribePowerUp(): { id: TribePowerUpId; cooldown: number; ready: boolean } {
+    return {
+      id:       this.playerTribePU,
+      cooldown: Math.ceil(this.playerTribePUCooldown),
+      ready:    this.playerTribePUCooldown <= 0 && !this.isOver,
+    };
+  }
+
+  /** CPU-side state for the dev bar. */
+  get cpuTribePowerUp(): { id: TribePowerUpId; cooldown: number; ready: boolean } {
+    return {
+      id:       this.cpuTribePU,
+      cooldown: Math.ceil(this.cpuTribePUCooldown),
+      ready:    this.cpuTribePUCooldown <= 0 && !this.isOver,
+    };
+  }
+
+  /** Activate a side's tribe power-up — affects ALL of that side's live
+   *  characters (Plague: all enemy characters). Returns false while cooling
+   *  down or after game over. */
+  activateTribePowerUp(side: 'player' | 'enemy'): boolean {
+    if (this.isOver || this.isPaused) return false;
+    const cooldown = side === 'player' ? this.playerTribePUCooldown : this.cpuTribePUCooldown;
+    if (cooldown > 0) return false;
+
+    const id  = side === 'player' ? this.playerTribePU : this.cpuTribePU;
+    const own = side === 'player' ? this.playerLive : this.enemyLive;
+    const opp = side === 'player' ? this.enemyLive  : this.playerLive;
+    switch (id) {
+      case 'speed':
+        for (const c of own) c.applyTribeSpeed(TRIBE_PU_SPEED_MULT, TRIBE_PU_DURATION_SEC);
+        break;
+      case 'vitality':
+        if (side === 'player') this.playerVitalityTimer = TRIBE_PU_DURATION_SEC;
+        else                   this.cpuVitalityTimer    = TRIBE_PU_DURATION_SEC;
+        break;
+      case 'plague':
+        for (const c of opp) c.applyPlague(TRIBE_PU_PLAGUE_DAMAGE, TRIBE_PU_PLAGUE_TICKS, TRIBE_PU_PLAGUE_INTERVAL);
+        break;
+      case 'aggression':
+        for (const c of own) c.applyTribeAggression(TRIBE_PU_AGGRESSION_MULT, TRIBE_PU_DURATION_SEC);
+        break;
+    }
+    if (side === 'player') this.playerTribePUCooldown = TRIBE_PU_COOLDOWN_SEC;
+    else                   this.cpuTribePUCooldown    = TRIBE_PU_COOLDOWN_SEC;
+    if (side === 'enemy') this.cpuStrategyInfo.decision = `✨ Tribe power: ${TRIBE_POWER_UPS[id].name}`;
+    playSoundAt('level_up', side === 'player' ? this.mapDef.playerTowerX : this.mapDef.enemyTowerX);
+    return true;
+  }
+
   /** Dev (Game Shark): apply flat damage to a tower. Tower death is picked up
    *  by the regular end-of-tick check; HP notifications are debounced there too. */
   cheatDamageTower(side: 'player' | 'enemy', dmg: number): void {
@@ -915,12 +986,17 @@ export class Game {
       : 1 / cfg.fireRate;
     const dps = damagePerTrigger * triggersPerSec * (1 - cfg.critical);
 
+    // Effective HP folds in shield block: an expected (blockChance × blockPercent)
+    // fraction of incoming damage never lands, so durability scales by its inverse.
+    const blockFactor = 1 - (cfg.blockChance ?? 0) * (cfg.blockPercent ?? 0);
+    const effHp = cfg.hp / Math.max(0.2, blockFactor);
+
     // combat: overall strength (damage output × durability, geometric mean so
     // neither stat alone dominates). reach/tanky: soft bonuses for standoff
     // range and frontline hp. threat: combat×reach normalized ≈ 1.0 baseline.
-    const combat = Math.sqrt(dps * cfg.hp);
+    const combat = Math.sqrt(dps * effHp);
     const reach  = 1 + cfg.attackRange / CPU_VAL_RANGE_DIVISOR;
-    const tanky  = 1 + cfg.hp / CPU_VAL_HP_DIVISOR;
+    const tanky  = 1 + effHp / CPU_VAL_HP_DIVISOR;
     p = {
       cost,
       combat,
@@ -1431,6 +1507,19 @@ export class Game {
     }
     const liveChars = this.liveChars;
 
+    // Tribe power-ups: tick down cooldowns; Vitality is a heal-over-time aura
+    // on every live character of the side (also catches units spawned mid-effect).
+    this.playerTribePUCooldown = Math.max(0, this.playerTribePUCooldown - dt);
+    this.cpuTribePUCooldown    = Math.max(0, this.cpuTribePUCooldown    - dt);
+    if (this.playerVitalityTimer > 0) {
+      this.playerVitalityTimer -= dt;
+      for (const c of this.playerLive) c.heal(TRIBE_PU_HEAL_PER_SEC * dt);
+    }
+    if (this.cpuVitalityTimer > 0) {
+      this.cpuVitalityTimer -= dt;
+      for (const c of this.enemyLive) c.heal(TRIBE_PU_HEAL_PER_SEC * dt);
+    }
+
     // Throttle stance assessment to every 500 ms — frame-perfect precision not needed.
     // Also refresh the opponent-cluster cache here: same cadence, avoids a per-spawn O(n²) scan.
     this.cpuStanceMs += ticker.deltaMS;
@@ -1644,9 +1733,11 @@ export class Game {
     for (const c of liveChars) {
       const color = c.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
       for (const ev of c.pendingDamages) {
-        const label = ev.amount === 0
-          ? new DamageLabel(ev.x, ev.y, 0, 0x999999, 'Miss')
-          : new DamageLabel(ev.x, ev.y, ev.amount, ev.color ?? color);   // poison ticks carry their own green
+        const label = ev.text
+          ? new DamageLabel(ev.x, ev.y, 0, ev.color ?? 0x999999, ev.text)   // custom word (e.g. "Blocked")
+          : ev.amount === 0
+            ? new DamageLabel(ev.x, ev.y, 0, 0x999999, 'Miss')
+            : new DamageLabel(ev.x, ev.y, ev.amount, ev.color ?? color);   // poison ticks carry their own green
         this.damageLabels.push(label);
         this.labelLayer.addChild(label.container);
       }
@@ -2229,6 +2320,29 @@ export class Game {
     const allIn     = self === 'enemy' ? this.cpuAllIn  : this.playerAllIn;
     const noteDecision = (msg: string) => { if (self === 'enemy') this.cpuStrategyInfo.decision = msg; };
 
+    // ── Tribe power-up auto-use ────────────────────────────────────────────────
+    // Fire the side's ability when it pays off (cooldown gating lives in
+    // activateTribePowerUp): buffs want a committed army, Vitality wants
+    // wounded units, Plague wants targets. Runs before the all-in early-return
+    // so a last-stand charge goes in buffed.
+    {
+      const puReady = (self === 'enemy' ? this.cpuTribePUCooldown : this.playerTribePUCooldown) <= 0;
+      if (puReady) {
+        const pu = self === 'enemy' ? this.cpuTribePU : this.playerTribePU;
+        let fire = false;
+        if (pu === 'speed' || pu === 'aggression') {
+          fire = (stance === 'push' || allIn) && selfChars.length >= 3;
+        } else if (pu === 'vitality') {
+          let wounded = 0;
+          for (const c of selfChars) if (c.hp < c.maxHp * 0.6) wounded++;
+          fire = wounded >= 2;
+        } else {   // plague
+          fire = oppChars.length >= 3;
+        }
+        if (fire) this.activateTribePowerUp(self);
+      }
+    }
+
     // ── Endgame all-in ─────────────────────────────────────────────────────────
     // Losing on tower HP with the clock running out: every unit attacks the
     // tower directly. No harass (it holds outside tower range and deals zero
@@ -2420,6 +2534,14 @@ export class Game {
     this.cpuAllIn              = false;
     this.playerAllIn           = false;
     this.puFetchers.clear();
+    // Tribe power-ups: fresh cooldowns; the CPU picks its ability for the new
+    // match (uniform random — all four are situationally strong). The player's
+    // pick persists (set from the squad screen via setPlayerTribePowerUp).
+    this.playerTribePUCooldown = 0;
+    this.cpuTribePUCooldown    = 0;
+    this.playerVitalityTimer   = 0;
+    this.cpuVitalityTimer      = 0;
+    this.cpuTribePU = TRIBE_PU_IDS[Math.floor(Math.random() * TRIBE_PU_IDS.length)];
     this.cpuStrategyInfo       = { stance: 'economy', score: 0, unitAdv: 0, towerAdv: 0, coinAdv: 0, decision: '—' };
     this.coinBalance           = STARTING_COINS;
     this.cpuCoinBalance        = STARTING_COINS;

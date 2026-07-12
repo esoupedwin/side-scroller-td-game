@@ -92,7 +92,12 @@ export const GameConfig = {
     //     'rocket'  — flat-arc AoE
     //   Optional: displayName (default: capitalized key), icon (emoji),
     //             uiColor (HUD accent), width/height, shotsBeforeCooldown +
-    //             cooldownSec (magazine), poison*, spriteFolder.
+    //             cooldownSec (magazine), poison*, spriteFolder,
+    //             blockChance + blockPercent (shield block — see viking/knight:
+    //             each incoming character hit has blockChance probability of
+    //             being blocked; a blocked hit deals (1 − blockPercent) of its
+    //             damage and knockback, flashes a shield arc, and floats a
+    //             "Blocked" label; a 100% block also stops poison).
     kattgard: {
       conscript: {
         id:          'conscript' as const,
@@ -141,6 +146,7 @@ export const GameConfig = {
         attackStyle: 'melee' as const, icon: '🪓', uiColor: '#7a9e7e',
         hp:          350, speed: 100, attackRange: 44, attackPower: 20,
         fireRate:    1.0, cost: 120, critical: 0.12, knockback: 400,
+        blockChance: 0.25, blockPercent: 0.5,   // axe-haft parry — 25% chance to halve a hit
       },
       shocktrooper: {
         id:          'shocktrooper' as const,
@@ -159,13 +165,13 @@ export const GameConfig = {
         id:          'rocketeer' as const,
         attackStyle: 'rocket' as const, icon: '🚀', uiColor: '#cc4400',
         hp:          120, speed: 68, attackRange: 260, attackPower: 70,
-        fireRate:    2.5, cost: 120, critical: 0.06, knockback: 0,
+        fireRate:    3.5, cost: 120, critical: 0.06, knockback: 0,
       },
       pirateking: {
         id:          'pirateking' as const,
         attackStyle: 'bullet' as const, icon: '🤠', uiColor: '#b8860b',
         hp:          105, speed: 100, attackRange: 200, attackPower: 7,
-        fireRate:    1.4, cost: 100, critical: 0.09, knockback: 100,
+        fireRate:    2.4, cost: 100, critical: 0.09, knockback: 100,
         burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
       },
     },
@@ -215,6 +221,7 @@ export const GameConfig = {
         attackStyle: 'melee' as const, icon: '🛡', uiColor: '#8b9faa',
         hp:          280, speed: 80, attackRange: 44, attackPower: 28,
         fireRate:    1.1, cost: 150, critical: 0.08, knockback: 250,
+        blockChance: 0.35, blockPercent: 0.6,   // shield block — 35% chance to stop 60% of a hit
       },
       grenadier: {
         id:          'grenadier' as const,
@@ -226,7 +233,7 @@ export const GameConfig = {
         id:          'rocketeer' as const,
         attackStyle: 'rocket' as const, icon: '🚀', uiColor: '#cc4400',
         hp:          120, speed: 68, attackRange: 260, attackPower: 70,
-        fireRate:    2.5, cost: 120, critical: 0.06, knockback: 0,
+        fireRate:    3.5, cost: 120, critical: 0.06, knockback: 0,
       },
     },
     // Tribe-less types: CPU-only / hidden (not in any roster). Shared fallback.
@@ -244,6 +251,23 @@ export const GameConfig = {
         fireRate:    3.2, cost: 160, critical: 0.08, width: 80, height: 70, knockback: 0,
       },
     },
+  },
+
+  // ── Tribe power-ups ─────────────────────────────────────────────────────────
+  // One-per-match ability each side brings into the game (player picks on the
+  // squad-selection screen — default below; CPU picks before the match) and
+  // triggers manually in-game (player: top-left button; CPU: behavior AI).
+  // Affects ALL of the side's characters at once; reusable after cooldownSec.
+  tribePowerUp: {
+    cooldownSec:       30,    // seconds between activations
+    durationSec:       6,     // buff length (speed / vitality / aggression)
+    speedMult:         2.1,   // Speed: move-speed multiplier for all own characters
+    vitalityHealPerSec: 12,   // Vitality: HP/s restored to all own characters for the duration
+    plagueDamage:      3,     // Plague: poison damage per tick applied to all enemy characters…
+    plagueTicks:       6,     // …for this many ticks…
+    plagueIntervalSec: 1.0,   // …spaced this many seconds apart
+    aggressionMult:    2.0,   // Aggression: attack multiplier for all own characters
+    playerDefault:     'speed' as const,   // pre-selected on the squad screen
   },
 
   rocket: {
@@ -315,6 +339,9 @@ export const GameConfig = {
     width:     48,
     height:    48,
     spreadDeg: 25,                // ± degrees from vertical coins can be released
+    // Cosmetic-only render scale of the box art, centred on the logical box —
+    // the coin spawn strip and map-builder footprint are unaffected.
+    visualScale: 1.25,
   },
 
   economy: {
@@ -348,6 +375,9 @@ export const GameConfig = {
     coinFrictionAir:      0.003,// air resistance per tick — higher than default to settle faster
     surfaceFriction:      0.8,  // friction on ground/platform surfaces; characters unaffected
                                 // because char friction=0 → sqrt(0 × 0.8)=0
+    // Cosmetic-only render scale of every field coin (procedural graphic and
+    // PNG skin alike), centred on the coin — physics body/pickup unaffected.
+    coinVisualScale:      1.2,
   },
 
   projectiles: {
@@ -445,6 +475,9 @@ export const GameConfig = {
 // classification, muzzle VFX, CPU splash valuation, and the Graphics-fallback
 // body. Set per character block above.
 export type AttackStyle = 'melee' | 'blast' | 'arrow' | 'bullet' | 'grenade' | 'rocket';
+
+// The four tribe power-ups a side can bring into a match (see tribePowerUp above).
+export type TribePowerUpId = 'speed' | 'vitality' | 'plague' | 'aggression';
 
 // The unit-type union, derived from the config block keys — adding a new
 // character block automatically extends it (no hand-maintained union).

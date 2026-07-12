@@ -122,6 +122,119 @@ class SlashArc implements VfxEffect {
   }
 }
 
+// ── BlockFlash ──────────────────────────────────────────────────────────────
+// A vertical shield crescent that pops in front of a character when its block
+// ability absorbs an incoming hit — bright rim + steel-blue inner arc with a
+// few radial glints, expanding slightly and fading out fast.
+
+const BLOCK_DUR      = 0.28;  // seconds
+const BLOCK_R0       = 18;    // start radius (px)
+const BLOCK_R1       = 27;    // end radius (px)
+const BLOCK_HALF_A   = 1.15;  // arc half-angle — a tall guard covering the body front
+const BLOCK_OFFSET_X = 14;    // held slightly in front of the character
+const BLOCK_TINT     = 0x9fc4e8;  // steel blue — matches the "Blocked" label
+
+class BlockFlash implements VfxEffect {
+  container: PIXI.Container;
+  isDone   = false;
+  private g:    PIXI.Graphics;
+  private life = 0;
+  private dir:  1 | -1;
+
+  constructor(x: number, y: number, dir: 1 | -1) {
+    this.dir = dir;
+    this.container = new PIXI.Container();
+    this.container.x = x + dir * BLOCK_OFFSET_X;
+    this.container.y = y;
+    this.g = new PIXI.Graphics();
+    this.container.addChild(this.g);
+  }
+
+  update(dt: number): void {
+    this.life += dt;
+    const t = this.life / BLOCK_DUR;
+    if (t >= 1) { this.isDone = true; return; }
+
+    const r     = BLOCK_R0 + (BLOCK_R1 - BLOCK_R0) * t;
+    const alpha = 0.9 * (1 - t);
+
+    this.g.clear();
+    // Bright rim + steel inner arc (centred on the +x axis, flipped via scale).
+    this.g.lineStyle(5, 0xffffff, alpha);
+    this.g.arc(0, 0, r, -BLOCK_HALF_A, BLOCK_HALF_A);
+    this.g.lineStyle(3, BLOCK_TINT, alpha * 0.85);
+    this.g.arc(0, 0, r - 6, -BLOCK_HALF_A * 0.9, BLOCK_HALF_A * 0.9);
+    // Deflection glints spraying off the guard.
+    this.g.lineStyle(2, 0xffffff, alpha * 0.7);
+    for (const a of [-0.7, 0, 0.7]) {
+      const gx = Math.cos(a), gy = Math.sin(a);
+      this.g.moveTo(gx * (r + 2), gy * (r + 2));
+      this.g.lineTo(gx * (r + 8 + 8 * t), gy * (r + 8 + 8 * t));
+    }
+    this.g.lineStyle(0);
+
+    this.container.scale.x = this.dir;
+  }
+}
+
+// ── AggroWave ───────────────────────────────────────────────────────────────
+// Violent shockwave pulse emitted by characters under the Aggression tribe
+// power-up: a jagged red-hot ring that bursts outward and fades, with a softer
+// inner ring trailing it. Spawned repeatedly (Character.tickAggressionWaves)
+// for the buff's duration, so the unit reads as radiating fury.
+
+const AGGRO_DUR   = 0.45;   // seconds per pulse
+const AGGRO_R0    = 12;     // start radius (px)
+const AGGRO_R1    = 46;     // end radius (px)
+const AGGRO_SEGS  = 12;     // jagged ring segments
+const AGGRO_HOT   = 0xff4d2e;  // outer blazing ring
+const AGGRO_EMBER = 0xffb066;  // inner ember trail
+
+class AggroWave implements VfxEffect {
+  container: PIXI.Container;
+  isDone   = false;
+  private g:    PIXI.Graphics;
+  private life = 0;
+  // Per-instance phase so simultaneous waves from one character don't overlap
+  // their spikes perfectly (deterministic — derived from spawn position).
+  private readonly phase: number;
+
+  constructor(x: number, y: number) {
+    this.container = new PIXI.Container();
+    this.container.x = x;
+    this.container.y = y;
+    this.phase = (x * 7 + y * 13) % (Math.PI * 2);
+    this.g = new PIXI.Graphics();
+    this.container.addChild(this.g);
+  }
+
+  update(dt: number): void {
+    this.life += dt;
+    const t = this.life / AGGRO_DUR;
+    if (t >= 1) { this.isDone = true; return; }
+
+    // Fast burst outward (ease-out), fading as it expands.
+    const ease  = 1 - (1 - t) * (1 - t);
+    const r     = AGGRO_R0 + (AGGRO_R1 - AGGRO_R0) * ease;
+    const alpha = 0.85 * (1 - t);
+
+    // Jagged ring: alternating spike/dip radii around the circle.
+    this.g.clear();
+    this.g.lineStyle(4, AGGRO_HOT, alpha);
+    const pts: number[] = [];
+    for (let i = 0; i < AGGRO_SEGS; i++) {
+      const a  = (i / AGGRO_SEGS) * Math.PI * 2 + this.phase;
+      const rr = r + (i % 2 === 0 ? 4 : -4);
+      pts.push(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    this.g.drawPolygon(pts);
+    // Softer ember ring trailing inside the shockwave.
+    this.g.lineStyle(2, AGGRO_EMBER, alpha * 0.7);
+    this.g.drawCircle(0, 0, Math.max(4, r - 9));
+    this.g.lineStyle(0);
+  }
+}
+
 // ── HitSpark ────────────────────────────────────────────────────────────────
 // Radial spark + tiny expanding ring at the impact point. Used by melee
 // land and by ranged projectile-on-character hits.
@@ -623,6 +736,16 @@ export function spawnExplosion(x: number, y: number, radius: number): void {
 
 export function spawnHitSpark(x: number, y: number): void {
   register(new HitSpark(x, y));
+}
+
+/** Shield-block flash: vertical crescent facing `dir` (toward the attacker). */
+export function spawnBlockFlash(x: number, y: number, dir: 1 | -1): void {
+  register(new BlockFlash(x, y, dir));
+}
+
+/** Aggression-buff shockwave pulse centred on the character's torso. */
+export function spawnAggroWave(x: number, y: number): void {
+  register(new AggroWave(x, y));
 }
 
 export function spawnMuzzleGlow(x: number, y: number, dir: 1 | -1 = 1): void {

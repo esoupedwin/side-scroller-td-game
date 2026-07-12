@@ -1,10 +1,10 @@
-import { GameConfig, type AttackStyle, type CharTypeName } from './gameConfig';
+import { GameConfig, type AttackStyle, type CharTypeName, type TribePowerUpId } from './gameConfig';
 import type { CharacterConfig } from './Character';
 import type { Tribe } from './Tribes';
 
 // Re-export the config-derived character types — source files import from
 // constants.ts, never from gameConfig.ts directly.
-export type { AttackStyle, CharTypeName };
+export type { AttackStyle, CharTypeName, TribePowerUpId };
 
 const { canvas, groundY, colors, towers, characters, cpu, economy } = GameConfig;
 const ch    = characters;
@@ -103,6 +103,7 @@ export const COIN_BOX_Y          = GameConfig.coinBox.y;
 export const COIN_BOX_W          = GameConfig.coinBox.width;
 export const COIN_BOX_H          = GameConfig.coinBox.height;
 export const COIN_BOX_SPREAD_DEG = GameConfig.coinBox.spreadDeg;
+export const COIN_BOX_VISUAL_SCALE = GameConfig.coinBox.visualScale;
 
 // ── Economy ──────────────────────────────────────────────────────────────────
 export const STARTING_COINS      = economy.startingCoins;
@@ -132,6 +133,7 @@ export const COIN_BOUNCE_INIT_VX_MAX = economy.coinBounceInitVxMax;
 export const COIN_FRICTION           = economy.coinFriction;
 export const COIN_FRICTION_AIR       = economy.coinFrictionAir;
 export const SURFACE_FRICTION        = economy.surfaceFriction;
+export const COIN_VISUAL_SCALE       = economy.coinVisualScale;
 
 // ── Projectiles ──────────────────────────────────────────────────────────────
 export const BULLET_SPEED        = proj.bulletSpeed;
@@ -150,6 +152,29 @@ export const DMG_LABEL_RISE      = ui.damageLabel.risePx;
 
 // ── Loadout ──────────────────────────────────────────────────────────────────
 export const LOADOUT_MAX_CARDS   = GameConfig.loadout.maxCards;
+
+// ── Tribe power-ups ──────────────────────────────────────────────────────────
+const tpu = GameConfig.tribePowerUp;
+export const TRIBE_PU_COOLDOWN_SEC     = tpu.cooldownSec;
+export const TRIBE_PU_DURATION_SEC     = tpu.durationSec;
+export const TRIBE_PU_SPEED_MULT       = tpu.speedMult;
+export const TRIBE_PU_HEAL_PER_SEC     = tpu.vitalityHealPerSec;
+export const TRIBE_PU_PLAGUE_DAMAGE    = tpu.plagueDamage;
+export const TRIBE_PU_PLAGUE_TICKS     = tpu.plagueTicks;
+export const TRIBE_PU_PLAGUE_INTERVAL  = tpu.plagueIntervalSec;
+export const TRIBE_PU_AGGRESSION_MULT  = tpu.aggressionMult;
+export const TRIBE_PU_PLAYER_DEFAULT: TribePowerUpId = tpu.playerDefault;
+
+/** UI metadata for the four tribe power-ups (picker cards + activation button).
+ *  `art` is the PNG skin used by the in-game button and picker; `icon` stays as
+ *  the compact emoji fallback (dev bar, text rows). */
+export const TRIBE_POWER_UPS: Record<TribePowerUpId, { name: string; icon: string; desc: string; art: string }> = {
+  speed:      { name: 'Speed',      icon: '⚡', desc: `All your characters move faster for ${tpu.durationSec}s`,       art: '/sprites/misc/powerup_speed.png' },
+  vitality:   { name: 'Vitality',   icon: '💚', desc: `All your characters heal for ${tpu.durationSec}s`,              art: '/sprites/misc/powerup_vitality.png' },
+  plague:     { name: 'Plague',     icon: '☠️', desc: `All enemy characters are poisoned`,                             art: '/sprites/misc/powerup_plague.png' },
+  aggression: { name: 'Aggression', icon: '🔥', desc: `All your characters deal double damage for ${tpu.durationSec}s`, art: '/sprites/misc/powerup_aggression.png' },
+};
+export const TRIBE_PU_IDS = Object.keys(TRIBE_POWER_UPS) as readonly TribePowerUpId[];
 
 // ── Dev cheats ───────────────────────────────────────────────────────────────
 export const CHEAT_PLAYER_COIN_GRANT  = GameConfig.cheats.playerCoinGrant;
@@ -242,6 +267,7 @@ type RawCharCfg = {
   shotsBeforeCooldown?: number; cooldownSec?: number;
   burstCount?: number;
   poisonDamage?: number; poisonTicks?: number; poisonIntervalSec?: number;
+  blockChance?: number; blockPercent?: number;
   displayName?: string; icon?: string; uiColor?: string;
   spriteFolder?: string;   // sprite-only concern — consumed by SpriteRegistry, not CharacterConfig
 };
@@ -265,6 +291,8 @@ function toCharConfig(c: RawCharCfg): CharacterConfig {
     poisonDamage:      c.poisonDamage,
     poisonTicks:       c.poisonTicks,
     poisonIntervalSec: c.poisonIntervalSec,
+    blockChance:       c.blockChance,
+    blockPercent:      c.blockPercent,
     displayName:       c.displayName,
     icon:              c.icon,
     uiColor:           c.uiColor,

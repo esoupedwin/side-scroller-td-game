@@ -259,6 +259,42 @@
       }
 
       /* ── Coin counter (top-left, cream pill) ───────────────────────────── */
+      /* ── Tribe power-up activation button (bottom-right, above COMMANDS) ── */
+      #tribe-pu-btn {
+        position: absolute;
+        bottom: 64px; right: 18px;
+        z-index: 30;
+        width: 76px; height: 76px;
+        padding: 0;
+        background-color: #1b2540;
+        background-size: cover;
+        background-position: center;
+        border: 3px solid #1d2540;
+        border-radius: 16px;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.45);
+        cursor: pointer;
+        pointer-events: all;
+        transition: filter 0.12s ease, transform 0.1s;
+      }
+      #tribe-pu-btn:hover:not(:disabled)  { filter: brightness(1.15); transform: translateY(-1px); }
+      #tribe-pu-btn:active:not(:disabled) { transform: scale(0.94); }
+      #tribe-pu-btn:disabled { filter: grayscale(0.9) brightness(0.6); cursor: default; }
+      #tribe-pu-btn.is-ready { border-color: #ffd166; box-shadow: 0 0 14px rgba(255, 209, 102, 0.6); }
+      /* Emoji fallback — hidden while the PNG skin is applied */
+      #tribe-pu-icon { display: none; font-size: 30px; line-height: 76px; color: #fff; }
+      #tribe-pu-btn.no-art #tribe-pu-icon { display: block; }
+      /* Cooldown countdown pill overlaid at the bottom edge of the art */
+      #tribe-pu-cd {
+        position: absolute;
+        left: 50%; bottom: 4px;
+        transform: translateX(-50%);
+        padding: 1px 8px;
+        background: rgba(10, 14, 24, 0.82);
+        border-radius: 999px;
+        font-size: 15px; font-weight: 800; color: #ffd166;
+      }
+      #tribe-pu-cd:empty { display: none; }
+
       #coin-counter {
         position: absolute;
         top: 8px; left: 10px;
@@ -785,6 +821,32 @@
         font-size: 16px; font-weight: 700; color: #cfe2ff;
         min-width: 120px; text-align: center;
       }
+      /* ── Tribe power-up picker (squad screen) ───────────────────────────── */
+      #tribe-pu-picker {
+        display: flex; align-items: center; gap: 10px;
+        justify-content: center;
+        margin-top: 14px; padding-top: 12px;
+        border-top: 1px solid rgba(120, 160, 200, 0.2);
+      }
+      #tribe-pu-picker .tp-label { font-size: 14px; font-weight: 700; color: #8aa0b6; }
+      #tribe-pu-options { display: flex; gap: 8px; }
+      .tp-option {
+        display: flex; flex-direction: column; align-items: center; gap: 2px;
+        min-width: 92px;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 2px solid rgba(120, 160, 200, 0.25);
+        border-radius: 10px;
+        color: #cfe2ff;
+        font-size: 13px; font-weight: 700;
+        cursor: pointer;
+        transition: border-color 0.12s, background 0.12s;
+      }
+      .tp-option:hover    { border-color: rgba(180, 210, 255, 0.6); }
+      .tp-option.selected { border-color: #ffd166; background: rgba(255, 209, 102, 0.12); }
+      .tp-option .tp-icon { font-size: 22px; line-height: 1; }
+      .tp-option .tp-art  { width: 44px; height: 44px; border-radius: 8px; display: block; }
+      .tp-option .tp-desc { font-size: 10.5px; font-weight: 500; color: #8aa0b6; text-align: center; max-width: 110px; }
       #loadout-start-btn {
         background: linear-gradient(135deg, #1f6feb, #0d47a1);
         color: #fff; border: none; border-radius: 8px;
@@ -1142,6 +1204,10 @@
         <div class="coin-icon"></div>
         <span id="coin-amount">150</span>
       </div>
+      <button id="tribe-pu-btn" title="Activate tribe power-up">
+        <span id="tribe-pu-icon">⚡</span>
+        <span id="tribe-pu-cd"></span>
+      </button>
       <div id="mute-indicator" title="Toggle mute (M)">
         <span id="mute-icon">🔇</span>
         <span class="mute-hint">M</span>
@@ -1180,6 +1246,10 @@
             <div class="dev-item">
               <span class="dev-item-label">Tower HP</span>
               <span class="dev-item-value" id="enemy-tower-hp">—</span>
+            </div>
+            <div class="dev-item" title="CPU tribe power-up and its cooldown state">
+              <span class="dev-item-label">Power</span>
+              <span class="dev-item-value" id="cpu-tribe-pu">—</span>
             </div>
           </div>
           <div class="dev-score-block">
@@ -1281,6 +1351,11 @@
         <h2 class="lo-title">Choose Your Squad</h2>
         <p class="lo-sub" id="loadout-sub"></p>
         <div id="loadout-grid"></div>
+        <!-- Tribe power-up picker: one ability per match, options built by main.ts -->
+        <div id="tribe-pu-picker">
+          <span class="tp-label">Tribe Power:</span>
+          <div id="tribe-pu-options"></div>
+        </div>
         <div class="lo-footer">
           <span id="loadout-count"></span>
           <button id="loadout-start-btn">▶ Start</button>

@@ -29,7 +29,7 @@ import {
   getLegsAnimFps, getLegsSpriteScale, getLegsFeetAnchorY,
 } from './SpriteRegistry';
 import { type Tribe, tribeForSide } from './Tribes';
-import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow, spawnShotgunBlast, spawnSpeedStreak, spawnAfterImage, type AfterImagePart } from './Vfx';
+import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow, spawnShotgunBlast, spawnSpeedStreak, spawnAfterImage, spawnBlockFlash, spawnAggroWave, type AfterImagePart } from './Vfx';
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
 
@@ -46,6 +46,9 @@ const BEHAVIOR_ICON: Record<'attacking' | 'collecting' | 'harass' | 'defend' | '
 // stacking interactions register reliably even when sprite art is small. Visual
 // sizing (sprite scale, HP bar, label) continues to use config.height.
 const BODY_HEIGHT_MULT = 1.9;
+
+// Steel-blue used for the floating "Blocked" label (matches the shield flash).
+const BLOCK_LABEL_COLOR = 0x9fc4e8;
 
 // Module-scratch collections reused across per-tick behavior code. Character
 // updates run strictly sequentially within a tick (no reentrancy), so a
@@ -141,6 +144,13 @@ export interface CharacterConfig {
   poisonDamage?:      number;
   poisonTicks?:       number;
   poisonIntervalSec?: number;
+  // Shield block: each incoming direct hit from an enemy CHARACTER (not tower
+  // fire, not poison ticks) has `blockChance` probability of being blocked.
+  // A blocked hit deals (1 − blockPercent) of its damage AND knockback, flashes
+  // a shield arc, and floats a "Blocked" label. blockPercent = 1 absorbs the
+  // hit entirely (and with it the poison it would have applied).
+  blockChance?:  number;
+  blockPercent?: number;
   // Optional UI metadata (spawn button / HUD card) — generic fallbacks apply.
   displayName?: string;
   icon?:        string;
@@ -239,7 +249,7 @@ export class Character {
   private get isKnockedBack(): boolean { return Math.abs(this.knockbackVx) > 20; }
 
   /** Damage events emitted this tick; Game.ts reads and clears each frame. */
-  readonly pendingDamages: { amount: number; x: number; y: number; color?: number }[] = [];
+  readonly pendingDamages: { amount: number; x: number; y: number; color?: number; text?: string }[] = [];
   /** Set when the character drops or throws a carried coin; Game.ts spawns the coin.
    *  vx/vy present â†' deliberate throw (directed velocity, no recovery chase). */
   pendingCoinDrop: { x: number; y: number; value: number; kind: CoinKind; vx?: number; vy?: number } | null = null;
@@ -267,6 +277,10 @@ export class Character {
   private randomJumpTimer    = Math.random() * 3;  // stagger across characters
   private evasiveJumpTimer   = 0;
   private lastMoveDir:         1 | -1 = 1;
+  // Knockback multiplier for the CURRENT hit — set by the block roll in
+  // takeDamage, consumed by the applyKnockback that follows the same hit
+  // (every damage path pairs them: melee swing, blast, projectile, AoE).
+  private pendingKnockbackScale = 1;
   // Direction of the most recent attack target â€” used to flip the sprite while
   // attacking, so a character moving forward but attacking a target behind
   // them faces the target (not their travel direction).
@@ -430,6 +444,12 @@ export class Character {
   private powerUpAtkMult     = 1.0;
   private speedStreakTimer   = 0;
   private afterImageTimer    = 0;
+  // Tribe power-up: temporary attack multiplier (Aggression). Speed reuses the
+  // powerUpSpeed fields above (shared streak/afterimage visuals); Vitality and
+  // Plague are applied externally (Game heal tick / poison system).
+  private tribeAtkMult       = 1.0;
+  private tribeAtkTimer      = 0;
+  private aggroWaveTimer     = 0;   // seconds until the next Aggression shockwave pulse
 
   constructor(side: Side, startX: number, startY: number, config: CharacterConfig, id: number, name: string, physics: Physics, spriteSet?: LoadedSpriteSet | null, groundY: number = GROUND_Y) {
     this.groundY   = groundY;
@@ -1919,6 +1939,27 @@ export class Character {
   }
 
   takeDamage(dmg: number, killer?: Character, poisonTick = false) {
+    // ── Shield block ─────────────────────────────────────────────────────────
+    // Character-sourced direct hits only: tower fire has no `killer` and poison
+    // ticks stem from an earlier (unblocked) hit. The knockback scale is
+    // consumed by the applyKnockback call that follows this hit (every damage
+    // path pairs them); reset here so a stale scale never leaks onto a later hit.
+    this.pendingKnockbackScale = 1;
+    let blocked = false;
+    const blockChance = this.config.blockChance ?? 0;
+    if (dmg > 0 && !poisonTick && killer && this.hp > 0 && blockChance > 0 && Math.random() < blockChance) {
+      blocked = true;
+      const pct = Math.min(1, this.config.blockPercent ?? 1);
+      this.pendingKnockbackScale = Math.max(0, 1 - pct);
+      dmg = Math.round(dmg * (1 - pct));
+      // "Blocked" floats above where the damage number will sit; shield-flash
+      // faces the attacker.
+      this.pendingDamages.push({ amount: 0, x: this.x, y: this.y - this.config.height - 28, color: BLOCK_LABEL_COLOR, text: 'Blocked' });
+      const faceDir = (Math.sign(killer.x - this.x) || this.lastMoveDir) as 1 | -1;
+      spawnBlockFlash(this.x, this.y - this.config.height * 0.55, faceDir);
+      if (dmg <= 0) return;  // fully absorbed — no damage, no flinch, no poison
+    }
+
     // Always queue a label event (amount=0 â†' "Miss" in Game.ts). Poison ticks
     // render green so the damage-over-time reads distinctly from a direct hit.
     this.pendingDamages.push({ amount: dmg, x: this.x, y: this.y - this.config.height - 6, color: poisonTick ? CHAR_POISON_COLOR : undefined });
@@ -1930,8 +1971,9 @@ export class Character {
     if (!poisonTick) {
       if (this.carryingCoin) this.dropCarriedCoin();
       // Defenders stay planted under fire â€” jumping mid-defence drags them off
-      // the rally point and out of the defence zone.
-      const hitJumpChance = this._behavior === 'defend' ? HIT_JUMP_CHANCE * 0.15 : HIT_JUMP_CHANCE;
+      // the rally point and out of the defence zone. A blocking character is
+      // braced behind its guard — no flinch jump at all.
+      const hitJumpChance = blocked ? 0 : this._behavior === 'defend' ? HIT_JUMP_CHANCE * 0.15 : HIT_JUMP_CHANCE;
       if (!this.isAirborne && Math.random() < hitJumpChance) this.pendingHitJump = true;
     }
     if (this.hp <= 0) {
@@ -2066,6 +2108,15 @@ export class Character {
       }
     }
 
+    // Tribe power-up: Aggression attack buff expiry
+    if (this.tribeAtkTimer > 0) {
+      this.tribeAtkTimer -= ctx.dt;
+      if (this.tribeAtkTimer <= 0) {
+        this.tribeAtkTimer = 0;
+        this.tribeAtkMult  = 1.0;
+      }
+    }
+
     // Evasive jump on hit
     if (this.pendingHitJump) {
       this.pendingHitJump = false;
@@ -2077,6 +2128,7 @@ export class Character {
     if (inSafeZone) this.heal(SAFE_ZONE_HEAL_RATE * ctx.dt);
     this.tickHealParticles(ctx.dt, inSafeZone);
     this.tickSpeedStreaks(ctx.dt);
+    this.tickAggressionWaves(ctx.dt);
 
     if (this.coinPickupCooldown > 0) {
       this.coinPickupCooldown = Math.max(0, this.coinPickupCooldown - ctx.dt);
@@ -2193,6 +2245,14 @@ export class Character {
   }
 
   applyKnockback(vx: number, vy: number, _dt: number, decayFactor: number) {
+    // A blocked hit dampens (or fully stops) its own knockback — the scale was
+    // set by the block roll in takeDamage for THIS hit and is consumed here.
+    if (this.pendingKnockbackScale !== 1) {
+      vx *= this.pendingKnockbackScale;
+      vy *= this.pendingKnockbackScale;
+      this.pendingKnockbackScale = 1;
+      if (Math.abs(vx) < 1 && Math.abs(vy) < 1) return;  // fully absorbed — stay planted
+    }
     this.knockbackVx          = vx;
     this.knockbackDecayFactor = decayFactor;
     this.isAirborne           = true;
@@ -3179,6 +3239,18 @@ export class Character {
     }
   }
 
+  /** Aggression tribe power-up visual: pulse a violent shockwave ring from the
+   *  torso every ~0.35 s while the attack buff is active. First pulse fires
+   *  immediately on activation (applyTribeAggression zeroes the timer). */
+  private tickAggressionWaves(dt: number): void {
+    if (this.tribeAtkMult <= 1) { this.aggroWaveTimer = 0; return; }
+    this.aggroWaveTimer -= dt;
+    if (this.aggroWaveTimer <= 0) {
+      this.aggroWaveTimer = 0.35;
+      spawnAggroWave(this.x, this.y - this.config.height * 0.55);
+    }
+  }
+
   private tickSpeedStreaks(dt: number): void {
     const isMoving = this.currentLegsAnim === 'walk' ? this.stillTimer < 0.15 : this.movingTimer > 0.05;
     if (this.powerUpSpeedMult <= 1 || !isMoving) { this.speedStreakTimer = 0; this.afterImageTimer = 0; return; }
@@ -3224,7 +3296,35 @@ export class Character {
   }
 
   private get effectiveAtk() {
-    return this.config.attackPower * (1 + this.rank * PROMO_ATK_BOOST) * this.powerUpAtkMult;
+    return this.config.attackPower * (1 + this.rank * PROMO_ATK_BOOST) * this.powerUpAtkMult * this.tribeAtkMult;
+  }
+
+  // ── Tribe power-up applications (Game.activateTribePowerUp) ────────────────
+
+  /** Speed: temporary move-speed boost. Reuses the drop-power-up speed fields so
+   *  the streak/afterimage visuals and locomotion-fps sync come for free; takes
+   *  the stronger of the two if both are active. */
+  applyTribeSpeed(mult: number, durSec: number) {
+    this.powerUpSpeedMult  = Math.max(this.powerUpSpeedMult, mult);
+    this.powerUpSpeedTimer = Math.max(this.powerUpSpeedTimer, durSec);
+  }
+
+  /** Aggression: temporary attack multiplier (expires in update()). */
+  applyTribeAggression(mult: number, durSec: number) {
+    this.tribeAtkMult   = mult;
+    this.tribeAtkTimer  = durSec;
+    this.aggroWaveTimer = 0;   // first shockwave pulse fires this tick
+  }
+
+  /** Plague: poison this character with explicit parameters (no attacker —
+   *  kill credit falls to 'tower' and no source config is involved). */
+  applyPlague(damage: number, ticks: number, intervalSec: number) {
+    if (this.isDead) return;
+    this.poisonPerTick     = damage;
+    this.poisonTicksLeft   = ticks;
+    this.poisonIntervalSec = intervalSec;
+    this.poisonTimer       = intervalSec;
+    this.poisonSource      = null;
   }
 
   applyPowerUp(type: 'heal' | 'speed' | 'attack' | 'promote') {
