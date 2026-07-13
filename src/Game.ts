@@ -289,6 +289,16 @@ export class Game {
   private isOver           = false;
   private isPaused         = false;
 
+  // ── Match statistics (surfaced on the game-over screen) ──────────────────
+  // Every enemy-side death counts as a player kill (all damage an enemy unit
+  // can take is player-sourced) and vice versa.
+  private matchStats = {
+    playerKills:        0,   // enemy characters killed
+    playerDeaths:       0,   // player characters lost
+    playerSpawns:       0,   // characters the player fielded
+    playerSpawnsByType: {} as Record<string, number>,
+  };
+
   private readonly hud:               CharacterHUD;
   private readonly onGameOver:         (winner: 'player' | 'enemy', reason: 'tower' | 'timeout') => void;
   private readonly onCoinsChanged:     (amount: number) => void;
@@ -806,7 +816,33 @@ export class Game {
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
+    this.recordPlayerSpawn(type);
     return true;
+  }
+
+  private recordPlayerSpawn(type: string) {
+    this.matchStats.playerSpawns++;
+    this.matchStats.playerSpawnsByType[type] = (this.matchStats.playerSpawnsByType[type] ?? 0) + 1;
+  }
+
+  /** Read-only match-stats snapshot for the game-over screen, with the
+   *  player's most-spawned type resolved (null when nothing was spawned). */
+  get stats(): {
+    playerKills: number; playerDeaths: number; playerSpawns: number;
+    mostSpawnedType: string | null; mostSpawnedCount: number;
+  } {
+    const s = this.matchStats;
+    let mostSpawnedType: string | null = null;
+    let mostSpawnedCount = 0;
+    for (const [type, n] of Object.entries(s.playerSpawnsByType)) {
+      if (n > mostSpawnedCount) { mostSpawnedCount = n; mostSpawnedType = type; }
+    }
+    return {
+      playerKills:  s.playerKills,
+      playerDeaths: s.playerDeaths,
+      playerSpawns: s.playerSpawns,
+      mostSpawnedType, mostSpawnedCount,
+    };
   }
 
   get paused() { return this.isPaused; }
@@ -1202,7 +1238,10 @@ export class Game {
     const c = new Character(self, cpuSpawnX, spawnY, cpuConfig, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type), this.mapGroundY);
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
-    if (self === 'player') this.hud.add(c);
+    if (self === 'player') {
+      this.hud.add(c);
+      this.recordPlayerSpawn(type);   // CPU-vs-CPU mode drives the player side
+    }
     return c;
   }
 
@@ -1840,8 +1879,8 @@ export class Game {
           this.releaseCharId(c.id);
           const reward = c.killedBy === 'tower' ? TOWER_KILL_REWARD : KILL_REWARD;
           c.destroy();
-          if (c.side === 'enemy') { this.coinBalance += reward; this.notifyCoins(); }
-          else                    { this.cpuCoinBalance += reward; this.notifyCpuCoins(); }
+          if (c.side === 'enemy') { this.coinBalance += reward; this.notifyCoins(); this.matchStats.playerKills++; }
+          else                    { this.cpuCoinBalance += reward; this.notifyCpuCoins(); this.matchStats.playerDeaths++; }
         } else { this.characters[wi++] = c; }
       }
       this.characters.length = wi; }
@@ -2527,6 +2566,7 @@ export class Game {
     this.powerUpLastCountdown   = -1;
     this.isOver                = false;
     this.isPaused              = false;
+    this.matchStats            = { playerKills: 0, playerDeaths: 0, playerSpawns: 0, playerSpawnsByType: {} };
     this.nextCharId            = 1;
     this.freeCharIds           = [];
     this.lastCpuCharsSig       = '';

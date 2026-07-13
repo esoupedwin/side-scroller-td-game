@@ -86,26 +86,119 @@ function mapById(id: string): MapDefinition {
   return m;
 }
 
-const W1M1 = mapById('w1m1');
-const W1M2 = mapById('w1m2');
-const W2M1 = mapById('w2m1');
-const W2M2 = mapById('w2m2');
+// ── Map registry (campaign order) ─────────────────────────────────────────────
+// The campaign structure — which maps exist and their order per world — is a
+// localStorage-backed registry so the map builder can create new maps and
+// reorder existing ones without a code change. Baked maps resolve from
+// defaultMapData.json; builder-created maps resolve from the saved-maps store.
+
+export interface MapRegistry {
+  worlds: { id: number; name: string; mapIds: string[] }[];
+}
+
+const REGISTRY_KEY = 'coin_map_registry';
+
+const DEFAULT_REGISTRY: MapRegistry = {
+  worlds: [
+    { id: 1, name: 'Grasslands', mapIds: ['w1m1', 'w1m2'] },
+    { id: 2, name: 'Highlands',  mapIds: ['w2m1', 'w2m2'] },
+  ],
+};
+
+export function loadMapRegistry(): MapRegistry {
+  try {
+    const raw = localStorage.getItem(REGISTRY_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as MapRegistry;
+      if (Array.isArray(parsed.worlds) && parsed.worlds.length > 0) return parsed;
+    }
+  } catch { /* corrupt or unavailable — fall through to default */ }
+  return structuredClone(DEFAULT_REGISTRY);
+}
+
+export function saveMapRegistry(reg: MapRegistry): void {
+  try { localStorage.setItem(REGISTRY_KEY, JSON.stringify(reg)); }
+  catch { /* localStorage full or unavailable */ }
+}
+
+/**
+ * Resolve a map's BASE definition by id: baked defaults first, then
+ * builder-created maps in the saved-maps store. Callers still apply
+ * loadMapWithOverride so localStorage edits win for baked maps too.
+ */
+export function resolveMapById(id: string): MapDefinition | null {
+  const baked = RAW_MAPS.find(m => m.id === id);
+  if (baked) return baked;
+  const stored = loadStoredMaps()[id];
+  return stored ? migrateStoredMap(stored) : null;
+}
+
+/** Append a map id to a world's ordered list (no-op if already registered). */
+export function registerMapInWorld(id: string, worldId: number): void {
+  const reg = loadMapRegistry();
+  if (reg.worlds.some(w => w.mapIds.includes(id))) return;
+  let world = reg.worlds.find(w => w.id === worldId);
+  if (!world) {
+    world = { id: worldId, name: `World ${worldId}`, mapIds: [] };
+    reg.worlds.push(world);
+    reg.worlds.sort((a, b) => a.id - b.id);
+  }
+  world.mapIds.push(id);
+  saveMapRegistry(reg);
+}
+
+/** Move a map one slot up (-1) or down (+1) within its world. */
+export function moveMapInWorld(id: string, dir: -1 | 1): boolean {
+  const reg = loadMapRegistry();
+  for (const w of reg.worlds) {
+    const i = w.mapIds.indexOf(id);
+    if (i === -1) continue;
+    const j = i + dir;
+    if (j < 0 || j >= w.mapIds.length) return false;
+    [w.mapIds[i], w.mapIds[j]] = [w.mapIds[j], w.mapIds[i]];
+    saveMapRegistry(reg);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Build the campaign structure from the registry, dropping ids that no longer
+ * resolve. Falls back to the baked two-world layout if the registry yields
+ * nothing usable.
+ */
+export function buildWorlds(): WorldDef[] {
+  const worlds: WorldDef[] = [];
+  for (const w of loadMapRegistry().worlds) {
+    const maps = w.mapIds
+      .map(id => resolveMapById(id))
+      .filter((m): m is MapDefinition => m !== null);
+    if (maps.length > 0) worlds.push({ id: w.id, name: w.name, maps });
+  }
+  if (worlds.length === 0) {
+    return [
+      { id: 1, name: 'Grasslands', maps: [mapById('w1m1'), mapById('w1m2')] },
+      { id: 2, name: 'Highlands',  maps: [mapById('w2m1'), mapById('w2m2')] },
+    ];
+  }
+  return worlds;
+}
 
 // ── Campaign structure ────────────────────────────────────────────────────────
+// Computed once per page load from the registry. The map builder mutates the
+// registry live and re-reads via buildWorlds(); the game picks changes up on
+// refresh (same model as saved map edits).
 
-export const WORLDS: WorldDef[] = [
-  { id: 1, name: 'Grasslands', maps: [W1M1, W1M2] },
-  { id: 2, name: 'Highlands',  maps: [W2M1, W2M2] },
-];
+export const WORLDS: WorldDef[] = buildWorlds();
 
-/** Flat ordered list of all maps — World 1 Map 1 first. */
+/** Flat ordered list of all maps — first world's first map first. */
 export const ALL_MAPS: MapDefinition[] = WORLDS.flatMap(w => [...w.maps]);
 
 /**
- * Canonical first map.  Game.ts and the map builder default to this.
- * Always resolves to World 1 Map 1.
+ * Canonical first map. Game.ts and the map builder default to this —
+ * the first map in campaign order.
  */
-export const DEFAULT_MAP: MapDefinition = W1M1;
+export const DEFAULT_MAP: MapDefinition = ALL_MAPS[0] ?? mapById('w1m1');
 
 /**
  * Returns the map that follows `current` in campaign order, or `null` if

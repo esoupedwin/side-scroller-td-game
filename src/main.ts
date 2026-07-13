@@ -1145,6 +1145,15 @@ function handleGameOver(winner: 'player' | 'enemy', reason: 'tower' | 'timeout')
   // Trigger button-state update through the coins handler
   handleCoinsChanged(parseInt(coinAmountEl.textContent ?? '0'));
 
+  // Match statistics
+  const stats = game.stats;
+  document.getElementById('go-stat-kills')!.textContent   = String(stats.playerKills);
+  document.getElementById('go-stat-spawned')!.textContent = String(stats.playerSpawns);
+  document.getElementById('go-stat-deaths')!.textContent  = String(stats.playerDeaths);
+  document.getElementById('go-stat-most')!.textContent    = stats.mostSpawnedType
+    ? `${charIcon(getPlayerTribe(), stats.mostSpawnedType)} ${charDisplayName(getPlayerTribe(), stats.mostSpawnedType)} ×${stats.mostSpawnedCount}`
+    : '—';
+
   if (winner === 'player') {
     goTitle.textContent = '🏆 Victory!';
     goTitle.style.color = '#00b4d8';

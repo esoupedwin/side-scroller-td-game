@@ -699,6 +699,23 @@
       #game-over { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
       #game-over h1 { font-size: 48px; font-weight: 900; text-shadow: 0 0 20px currentColor; }
       #game-over p  { font-size: 18px; margin-top: 8px; color: #ccc; }
+      #game-over-stats {
+        margin: 20px auto 4px;
+        width: 320px;
+        background: rgba(10, 14, 22, 0.72);
+        border: 1px solid rgba(120, 160, 200, 0.3);
+        border-radius: 10px;
+        padding: 12px 18px;
+        text-align: left;
+      }
+      .go-stat {
+        display: flex; justify-content: space-between; align-items: baseline;
+        padding: 6px 2px;
+        font-size: 15px;
+      }
+      .go-stat + .go-stat { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+      .go-stat-label { color: #8aa0b6; }
+      .go-stat-value { color: #e6edf5; font-weight: 800; }
       #restart-btn { margin-top: 16px; pointer-events: all; background: #e63946; color: #fff; border: none; border-radius: 8px; padding: 10px 28px; font-size: 16px; font-weight: 700; cursor: pointer; }
 
       /* ── Pause menu (Esc) ───────────────────────────────────────────────── */
@@ -1252,6 +1269,12 @@
       <div id="game-over">
         <h1 id="game-over-title"></h1>
         <p id="game-over-sub"></p>
+        <div id="game-over-stats">
+          <div class="go-stat"><span class="go-stat-label">Enemies defeated</span><span class="go-stat-value" id="go-stat-kills"></span></div>
+          <div class="go-stat"><span class="go-stat-label">Characters spawned</span><span class="go-stat-value" id="go-stat-spawned"></span></div>
+          <div class="go-stat"><span class="go-stat-label">Most spawned</span><span class="go-stat-value" id="go-stat-most"></span></div>
+          <div class="go-stat"><span class="go-stat-label">Characters lost</span><span class="go-stat-value" id="go-stat-deaths"></span></div>
+        </div>
         <button id="restart-btn">Play Again</button>
       </div>
 

@@ -1,4 +1,7 @@
-import { DEFAULT_MAP, WORLDS, saveMapToStorage, loadMapWithOverride, type MapDefinition } from './maps';
+import {
+  DEFAULT_MAP, saveMapToStorage, loadMapWithOverride, type MapDefinition,
+  buildWorlds, loadMapRegistry, registerMapInWorld, moveMapInWorld, resolveMapById,
+} from './maps';
 import { DECOR_FRONT_Z, type DecorData } from './Decor';
 import { GameConfig } from './gameConfig';
 import { TRIBES, type Tribe } from './Tribes';
@@ -99,6 +102,7 @@ class MapBuilder {
     this.bindControls();
     this.bindCanvas();
     this.populatePresets();
+    this.setupManageMaps();
 
     // Sidebar toggle
     const sidebar = document.getElementById('sidebar')!;
@@ -2075,9 +2079,24 @@ class MapBuilder {
 
   private populatePresets() {
     const sel = document.getElementById('preset-select') as HTMLSelectElement;
+    this.rebuildPresetOptions();
+    sel.addEventListener('change', () => {
+      if (sel.value) this.openMapForEdit(sel.value);
+    });
+  }
+
+  /** Re-read the registry and rebuild the preset dropdown — called after the
+   *  Manage Maps modal creates or reorders maps so the list never goes stale. */
+  private rebuildPresetOptions() {
+    const sel = document.getElementById('preset-select') as HTMLSelectElement;
+    sel.replaceChildren();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.text  = '— select —';
+    sel.appendChild(placeholder);
 
     // Group maps by world using <optgroup> so the selector shows the hierarchy.
-    for (const world of WORLDS) {
+    for (const world of buildWorlds()) {
       const group   = document.createElement('optgroup');
       group.label   = `World ${world.id} — ${world.name}`;
       for (let mi = 0; mi < world.maps.length; mi++) {
@@ -2091,19 +2110,123 @@ class MapBuilder {
     }
 
     sel.value = this.map.id;   // reflect the currently loaded map
-    sel.addEventListener('change', () => {
-      // Flatten all maps to find by id
-      for (const world of WORLDS) {
-        const found = world.maps.find(m => m.id === sel.value);
-        if (found) {
-          // Load the saved version of the preset if one exists, so edits aren't lost on switch.
-          this.pushUndo();
-          this.map = structuredClone(loadMapWithOverride(found));
-          this.clearSelection();
-          this.syncInputsFromMap();
-          return;
-        }
+  }
+
+  /** Load a map into the editor by id (saved version wins over the base so
+   *  edits aren't lost on switch). */
+  private openMapForEdit(id: string) {
+    const base = resolveMapById(id);
+    if (!base) return;
+    this.pushUndo();
+    this.map = structuredClone(loadMapWithOverride(base));
+    this.clearSelection();
+    this.syncInputsFromMap();
+    (document.getElementById('preset-select') as HTMLSelectElement).value = id;
+  }
+
+  /** Fresh ground-only map with sane defaults, ready for editing. */
+  private createBlankMap(): MapDefinition {
+    return {
+      id:           `custom-${Date.now().toString(36)}`,
+      name:         'New Map',
+      worldWidth:   2808,
+      playerTowerX: 120,
+      enemyTowerX:  2688,
+      platforms:    [],
+      blocks:       [],
+      coinBox:      { x: 1404, y: 30, width: 48, height: 48, spreadDeg: 25 },
+    };
+  }
+
+  private setupManageMaps() {
+    const modal    = document.getElementById('manage-maps-modal')!;
+    const worldsEl = document.getElementById('mm-worlds')!;
+    const worldSel = document.getElementById('mm-new-world-select') as HTMLSelectElement;
+
+    const rebuild = () => {
+      const reg = loadMapRegistry();
+
+      worldsEl.replaceChildren();
+      for (const w of reg.worlds) {
+        const header = document.createElement('div');
+        header.className   = 'mm-world-header';
+        header.textContent = `World ${w.id} — ${w.name}`;
+        worldsEl.appendChild(header);
+
+        w.mapIds.forEach((id, i) => {
+          const def = resolveMapById(id);
+          if (!def) return;
+
+          const row = document.createElement('div');
+          row.className = 'mm-row';
+          if (id === this.map.id) row.classList.add('current');
+
+          const order = document.createElement('span');
+          order.className   = 'mm-row-order';
+          order.textContent = `${i + 1}.`;
+          const name = document.createElement('span');
+          name.className   = 'mm-row-name';
+          name.textContent = def.name;
+          const idEl = document.createElement('span');
+          idEl.className   = 'mm-row-id';
+          idEl.textContent = id;
+          const spacer = document.createElement('span');
+          spacer.style.flex = '1';
+
+          const up   = document.createElement('button');
+          up.textContent = '↑';
+          up.title       = 'Move up';
+          up.disabled    = i === 0;
+          up.addEventListener('click', () => {
+            if (moveMapInWorld(id, -1)) { rebuild(); this.rebuildPresetOptions(); }
+          });
+          const down = document.createElement('button');
+          down.textContent = '↓';
+          down.title       = 'Move down';
+          down.disabled    = i === w.mapIds.length - 1;
+          down.addEventListener('click', () => {
+            if (moveMapInWorld(id, 1)) { rebuild(); this.rebuildPresetOptions(); }
+          });
+          const edit = document.createElement('button');
+          edit.textContent = 'Edit';
+          edit.addEventListener('click', () => {
+            this.openMapForEdit(id);
+            modal.style.display = 'none';
+          });
+
+          row.append(order, name, idEl, spacer, up, down, edit);
+          worldsEl.appendChild(row);
+        });
       }
+
+      worldSel.replaceChildren();
+      for (const w of reg.worlds) {
+        const opt = document.createElement('option');
+        opt.value = String(w.id);
+        opt.text  = `World ${w.id} — ${w.name}`;
+        worldSel.appendChild(opt);
+      }
+    };
+
+    document.getElementById('btn-manage-maps')!.addEventListener('click', () => {
+      rebuild();
+      modal.style.display = 'flex';
+    });
+    document.getElementById('btn-mm-close')!.addEventListener('click', () => {
+      modal.style.display = 'none';
+    });
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.style.display = 'none';
+    });
+
+    document.getElementById('btn-mm-new-map')!.addEventListener('click', () => {
+      const worldId = parseInt(worldSel.value, 10) || 1;
+      const def = this.createBlankMap();
+      saveMapToStorage(def);            // full definition lives in the saved-maps store
+      registerMapInWorld(def.id, worldId);
+      this.rebuildPresetOptions();
+      this.openMapForEdit(def.id);
+      modal.style.display = 'none';
     });
   }
 
@@ -2641,7 +2764,7 @@ class MapBuilder {
   private exportAllToFile(): void {
     // Use the live in-memory map for whichever campaign map is currently loaded
     // so unsaved edits are captured without requiring "Save to Game" first.
-    const allMaps = WORLDS.flatMap(w => [...w.maps]).map(m =>
+    const allMaps = buildWorlds().flatMap(w => [...w.maps]).map(m =>
       m.id === this.map.id ? this.map : loadMapWithOverride(m),
     );
     const pkg = {
