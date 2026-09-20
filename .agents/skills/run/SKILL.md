@@ -41,12 +41,10 @@ Then:
 
 1. `browser_navigate` → `http://localhost:3000/` (game) or
    `http://localhost:3000/map-builder.html` (editor).
-2. A splash screen shows first — press `Enter` to reach the squad screen, then
-   click `#loadout-start-btn`. Sprite sheets for the picked cards load on Start
-   (the button reads "Loading…" for ~1–2 s), then a 3-2-1 countdown runs — wait
-   for the text `GO!` before screenshotting gameplay. CPU unit sheets load on
-   each type's first buy. (With `cheats.skipIntroScreens` on, the match starts
-   immediately instead.)
+2. The game **auto-starts** — no click-to-start gate. A loading screen
+   (`#loading-screen`) shows while sprites preload (`await preloadAllSprites()`),
+   then fades out (gains class `fade-out`). Give it ~2–3s before screenshotting
+   gameplay (a blank/loading frame means you screenshotted too early).
 3. `browser_take_screenshot` and **look at it** — a battlefield with two towers,
    ground, and a HUD means it launched. A blank frame is a failure.
 

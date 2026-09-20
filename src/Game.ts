@@ -12,6 +12,7 @@ export interface CpuStrategyInfo {
 import { Physics } from './Physics';
 import { buildBackground, buildGround, buildTowerRangeMarkers, buildCoinBox, buildParallaxMountains } from './Background';
 import { DEFAULT_MAP, loadMapWithOverride, type MapDefinition } from './maps';
+import { getTowerTemplate } from './TribeTowerTemplates';
 import { Tower } from './Tower';
 import { Character, RANK_NAMES, type CharacterConfig, type FireRequest, type UpdateContext } from './Character';
 import { Projectile } from './Projectile';
@@ -26,7 +27,7 @@ import { Platform } from './Platform';
 import { Block } from './Block';
 import { Decor, DECOR_FRONT_Z } from './Decor';
 import { pickName } from './names';
-import { getSpriteSet } from './SpriteRegistry';
+import { getSpriteSet, isSpriteSetReady, loadSpriteSet } from './SpriteRegistry';
 import { tribeForSide, TRIBE_ROSTERS, getPlayerTribe, getEnemyTribe, setPlayerTribe, setEnemyTribe, type Tribe } from './Tribes';
 import { getRenderScale } from './resolution';
 import type { PlatformData } from './Platform';
@@ -37,7 +38,7 @@ import { Diagnostics } from './Diagnostics';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM, CAMERA_MAX_PAN_DOWN,
-  CAMERA_TOWER_BOTTOM_GAP,
+  CAMERA_TOWER_BOTTOM_GAP, TEXTURE_GC_IDLE_SEC, CPU_SPRITE_RETRY_MS,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   charConfig, charCost,
@@ -147,6 +148,7 @@ export class Game {
   private powerUpTypePreview: PowerUpType = 'heal';
   private powerUpLastCountdown        = -1;
   private mapDef:        MapDefinition = loadMapWithOverride(DEFAULT_MAP);
+  private mapAssetUrls   = new Set<string>();  // skin textures the current scene may load — evicted on map switch, see reset()
   private platforms:     Platform[]    = [];
   private readonly platformData: PlatformData[] = [];
   private blocks:        Block[]       = [];
@@ -417,12 +419,22 @@ export class Game {
       antialias: false,
     });
 
+    // Sprite atlases only reach the GPU when first drawn; drop the GPU copy of
+    // any base texture that hasn't been drawn for TEXTURE_GC_IDLE_SEC (an
+    // enemy roster type the AI never buys, an anim nobody is playing). PIXI
+    // re-uploads from the resident bitmap on the next draw. Default is 1 hour.
+    const renderer = this.app.renderer;
+    if ('textureGC' in renderer) {
+      (renderer as PIXI.Renderer).textureGC.maxIdle = TEXTURE_GC_IDLE_SEC * 60;   // measured in frames
+    }
+
     // Seed tribes from the initial map's defaults so build() reads the
     // correct tribe for each side. Mirrors the same logic in reset().
     setPlayerTribe(this.mapDef.playerTowerTribe ?? 'kattgard');
     setEnemyTribe(this.mapDef.enemyTowerTribe   ?? 'lapinor');
 
     this.build();
+    this.mapAssetUrls = this.collectMapAssetUrls();
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup',   this.onKeyUp);
 
@@ -623,10 +635,10 @@ export class Game {
           const sprite = new PIXI.Sprite(tex);
           sprite.y      = m.backgroundSkin2Y ?? 0;
           sprite.width  = parallaxWide2;
-          sprite.height = this.mapGroundY;
+          sprite.height = m.backgroundSkin2H ?? this.mapGroundY;
           this.parallaxGfx2.addChild(sprite);
         })
-        .catch(() => { /* silent — far layer is purely optional */ });
+        .catch(err => console.warn('[map] far background skin failed to load — layer skipped', err));
     }
     this.app.stage.addChild(this.parallaxGfx2);
 
@@ -638,10 +650,11 @@ export class Game {
           const sprite = new PIXI.Sprite(tex);
           sprite.y      = m.backgroundSkinY ?? 0;
           sprite.width  = parallaxWide;
-          sprite.height = this.mapGroundY;
+          sprite.height = m.backgroundSkinH ?? this.mapGroundY;
           this.parallaxGfx.addChild(sprite);
         })
-        .catch(() => {
+        .catch(err => {
+          console.warn('[map] background skin failed to load — using procedural mountains', err);
           this.parallaxGfx.addChild(buildParallaxMountains(parallaxWide));
         });
     } else {
@@ -1151,6 +1164,7 @@ export class Game {
       const type = this.cpuForcedType;
       const cost = cost$(type);
       if (this.cpuCoinBalance >= cost) {
+        if (this.spriteSetPending(self, cpuTribe, type)) return;
         this.cpuCoinBalance -= cost;
         const c = this.spawnCpuUnit(self, type, spawnY);
         this.cpuStrategyInfo.decision = `Forced ${type} #${c.id}`;
@@ -1206,6 +1220,7 @@ export class Game {
 
     for (const { type, cost } of order) {
       if (balance < cost) continue;
+      if (this.spriteSetPending(self, cpuTribe, type)) return;
       if (self === 'enemy') {
         this.cpuCoinBalance -= cost;
       } else {
@@ -1222,6 +1237,20 @@ export class Game {
       this.cpuStrategyInfo.decision = `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
     }
     this.resetSpawnTimer(self, pressure);
+  }
+
+  /** CPU sprite sets load on first demand (only the player's loadout is
+   *  preloaded — see main.ts matchSpriteKeys), so resident texture memory
+   *  tracks the types a side actually fields. When the AI has settled on
+   *  `type` but its sheets aren't resident yet, kick the load and re-check
+   *  shortly instead of buying something else — the buy decision must not
+   *  depend on load state. Returns true when the spawn was deferred. */
+  private spriteSetPending(self: 'player' | 'enemy', tribe: Tribe, type: CharacterConfig['id']): boolean {
+    if (isSpriteSetReady(tribe, type)) return false;
+    void loadSpriteSet(tribe, type);
+    if (self === 'enemy') this.cpuStrategyInfo.decision = `Loading ${type} sprites…`;
+    this.setSpawnInterval(self, CPU_SPRITE_RETRY_MS);
+    return true;
   }
 
   /** Construct a CPU-side Character of `type` at the side's tower spawn point and
@@ -2530,6 +2559,23 @@ export class Game {
     this.onGameOver(winner, reason);
   }
 
+  /** Every skin URL the current map + tribe tower templates can load — the
+   *  per-map slice of the Assets cache. Shared defaults (coin PNGs, coin-box
+   *  skin, power-up art) are deliberately absent so they're never evicted. */
+  private collectMapAssetUrls(): Set<string> {
+    const m = this.mapDef;
+    const urls = [
+      m.backgroundSkin, m.backgroundSkin2, m.groundSkin, m.coinBox.skin,
+      m.coinSkins?.gold, m.coinSkins?.silver, m.coinSkins?.blue,
+      ...m.platforms.map(p => p.skin),
+      ...m.blocks.map(b => b.skin),
+      ...(m.decor ?? []).map(d => d.skin),
+      getTowerTemplate(getPlayerTribe()).skin,
+      getTowerTemplate(getEnemyTribe()).skin,
+    ];
+    return new Set(urls.filter((u): u is string => !!u));
+  }
+
   reset(mapDef?: MapDefinition) {
     if (mapDef) {
       this.mapDef = mapDef;
@@ -2608,7 +2654,15 @@ export class Game {
     // above (their containers detach themselves), and texture defaults to
     // false so Assets-cached sprite textures survive for the rebuild.
     for (const child of this.app.stage.removeChildren()) child.destroy({ children: true });
+    const prevAssetUrls = this.mapAssetUrls;
     this.build();
+    // Evict the previous map's skins the new scene doesn't reuse — backgrounds,
+    // decor, platform art and tower skins would otherwise stay cached (and
+    // decoded) for the rest of the session. Every entity that held one of
+    // these textures was destroyed above.
+    this.mapAssetUrls = this.collectMapAssetUrls();
+    const staleUrls = [...prevAssetUrls].filter(u => !this.mapAssetUrls.has(u));
+    if (staleUrls.length > 0) void PIXI.Assets.unload(staleUrls).catch(() => {});
     this.resetSpawnTimerFirst('enemy');
     if (this.cpuVsCpu) this.resetSpawnTimerFirst('player');
     this.resetCoinDropTimer();

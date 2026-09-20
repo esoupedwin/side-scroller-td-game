@@ -46,6 +46,7 @@ export const CAMERA_TOWER_BOTTOM_GAP = 210;
 // objects, backgrounds, and characters scale uniformly. Ground stays anchored
 // at its current screen position (see Game.build()).
 export const GAME_ZOOM = 1.5;
+export const TEXTURE_GC_IDLE_SEC = GameConfig.textureGcIdleSec;
 export const GAME_WIDTH       = GameConfig.worldWidth; // scrollable world width (2246 px)
 export const GAME_HEIGHT      = canvas.height;
 export const GAME_DURATION_SEC = canvas.durationSec;
@@ -76,6 +77,7 @@ export const CHAR_HP_BAR_H         = ch.hpBarHeight;
 
 // ── CPU AI ───────────────────────────────────────────────────────────────────
 export const CPU_SPAWN_MIN_MS    = cpu.spawnMinMs;
+export const CPU_SPRITE_RETRY_MS = cpu.spriteRetryMs;
 export const CPU_SPAWN_MAX_MS    = cpu.spawnMaxMs;
 export const CPU_FIRST_SPAWN_MAX = cpu.firstSpawnMaxMs;
 export const CPU_PRESSURE_THRESHOLD  = cpu.pressureThreshold;

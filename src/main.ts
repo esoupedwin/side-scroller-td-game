@@ -9,7 +9,7 @@ import {
 } from './constants';
 import { getOwnedCards, loadLoadout, saveLoadout } from './CardCollection';
 import { rankLabel, xpProgress } from './CharacterHUD';
-import { preloadAllSprites } from './SpriteRegistry';
+import { ensureSpriteSets, unloadSpriteSetsExcept, spriteTextureBytes, type SpriteSetKey } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
 import { WORLDS, ALL_MAPS, loadMapWithOverride, mapCoords } from './maps';
 import { TRIBES, TRIBE_ROSTERS, type Tribe, getPlayerTribe, setPlayerTribe } from './Tribes';
@@ -22,10 +22,14 @@ const loadingScreen = document.getElementById('loading-screen')!;
 document.getElementById('loading-version')!.textContent = __APP_VERSION__;
 
 loadTribeTowerTemplates(); // sync localStorage read — must run before `new Game()` so Tower can read skins
-await preloadAllSprites();
+// Character sheets are loaded per match (see matchSpriteKeys / launchMatch):
+// only the player's loadout plus the enemy roster stay resident, and the rest
+// is evicted on map switch. The dev fast-start skips the squad screen and its
+// match starts spawning immediately, so it needs every roster up front.
+if (CHEAT_SKIP_INTRO_SCREENS) await ensureSpriteSets(allRosterKeys());
 initAudio(); // fire-and-forget — loads in background, never delays game start
 
-// Fade out and remove the loading screen once sprites are ready
+// Fade out and remove the loading screen once startup assets are ready
 loadingScreen.classList.add('fade-out');
 loadingScreen.addEventListener('transitionend', () => loadingScreen.remove(), { once: true });
 
@@ -369,8 +373,41 @@ function runStartCountdown(onDone: () => void) {
   showStep(0);
 }
 
-function openLoadoutScreen(mapDef?: ReturnType<typeof loadMapWithOverride>) {
+// ── Per-match sprite residency ─────────────────────────────────────────────
+// Only the player's picked cards are preloaded — those spawn on a button press
+// and must be ready. Every CPU-bought type (either side) loads on its first
+// buy (Game.spriteSetPending), so resident texture memory tracks what is
+// actually fielded. launchMatch evicts everything outside the new loadout once
+// the new scene is up; CPU sets reload on demand.
+type MatchMapDef = ReturnType<typeof loadMapWithOverride>;
+
+function rosterKeys(tribe: Tribe, types: Iterable<string> = TRIBE_ROSTERS[tribe]): SpriteSetKey[] {
+  return [...types].map(type => ({ tribe, type }));
+}
+function allRosterKeys(): SpriteSetKey[] {
+  return (Object.keys(TRIBE_ROSTERS) as Tribe[]).flatMap(t => rosterKeys(t));
+}
+// Tribe default mirrors the seeding in game.reset(mapDef).
+function matchSpriteKeys(mapDef?: MatchMapDef): SpriteSetKey[] {
+  const playerTribe = mapDef ? (mapDef.playerTowerTribe ?? 'kattgard') : getPlayerTribe();
+  return rosterKeys(playerTribe, loadout);
+}
+// Call once `keys` are loaded: restarts on the map, syncs the spawn bar, and
+// frees the sets the new match can't use. reset() tears the old scene down
+// first, so nothing still references an evicted sheet.
+function launchMatch(keys: SpriteSetKey[], mapDef?: MatchMapDef) {
+  restartCurrentGame(mapDef);
+  syncSpawnButtonVisibility();
+  refreshCostLabels();
+  void unloadSpriteSetsExcept(keys);
+}
+// Bumped whenever the loadout screen (re)opens, so a Start that's still
+// loading sheets when a tribe/map change re-opens the screen stands down.
+let loadoutGen = 0;
+
+function openLoadoutScreen(mapDef?: MatchMapDef) {
   cancelStartCountdown();   // e.g. tribe/map change while a countdown is running
+  loadoutGen++;
 
   // Dev fast-start (gameConfig.cheats.skipIntroScreens): no selection screen,
   // no countdown — jump straight into the match with every owned card loaded.
@@ -378,9 +415,8 @@ function openLoadoutScreen(mapDef?: ReturnType<typeof loadMapWithOverride>) {
   if (CHEAT_SKIP_INTRO_SCREENS) {
     loadoutTribe = mapDef ? (mapDef.playerTowerTribe ?? 'kattgard') : getPlayerTribe();
     loadout = validLoadoutSet(getOwnedCards(loadoutTribe));
-    restartCurrentGame(mapDef);
-    syncSpawnButtonVisibility();
-    refreshCostLabels();
+    const keys = matchSpriteKeys(mapDef);
+    void ensureSpriteSets(keys).then(() => launchMatch(keys, mapDef));
     return;
   }
 
@@ -395,19 +431,32 @@ function openLoadoutScreen(mapDef?: ReturnType<typeof loadMapWithOverride>) {
   hudEl.style.visibility     = 'hidden';
 }
 
-loadoutStartBtn.addEventListener('click', () => {
-  if (loadout.size === 0) return;
+loadoutStartBtn.addEventListener('click', async () => {
+  if (loadout.size === 0 || loadoutStartBtn.disabled) return;
   saveLoadout(loadoutTribe, [...loadout]);
+  // Stream in the picked cards' sheets with the screen still up (the button
+  // reads Loading… meanwhile); the match launches once they're resident.
+  const gen    = loadoutGen;
+  const mapDef = pendingMapDef ?? undefined;
+  const keys   = matchSpriteKeys(mapDef);
+  loadoutStartBtn.disabled    = true;
+  loadoutStartBtn.textContent = '⏳ Loading…';
+  loadoutGrid.style.pointerEvents = 'none';   // keys are fixed now — no toggling cards mid-load
+  const t0 = performance.now();
+  await ensureSpriteSets(keys);
+  console.info(`[sprites] ${keys.length} sets ready in ${(performance.now() - t0).toFixed(0)} ms`);
+  loadoutGrid.style.pointerEvents = '';
+  loadoutStartBtn.textContent = '▶ Start';
+  refreshLoadoutFooter();
+  if (gen !== loadoutGen) return;   // screen re-opened while loading — that flow owns the start
   loadoutOpen = false;
   loadoutScreen.style.display = 'none';
   // Fresh match on the queued map (or a clean restart of the current one).
   // game.reset() also clears the pause we set when the screen opened, and —
   // when a map is queued — re-seeds the player tribe from the map, so button
-  // visibility and cost labels sync AFTER the reset.
-  restartCurrentGame(pendingMapDef ?? undefined);
+  // visibility and cost labels sync AFTER the reset (inside launchMatch).
+  launchMatch(keys, mapDef);
   pendingMapDef = null;
-  syncSpawnButtonVisibility();
-  refreshCostLabels();
   // Hold the fresh match frozen behind the 3-2-1, then release it on GO.
   if (!game.paused) game.togglePause();
   uiOverlay.style.visibility = 'hidden';
@@ -752,6 +801,7 @@ refreshMuteUi();
   const msEl     = document.getElementById('perf-ms')!;
   const memEl    = document.getElementById('perf-mem')!;
   const memRow   = document.getElementById('perf-mem-row')!;
+  const texEl    = document.getElementById('perf-tex')!;
 
   const hasMem = 'memory' in performance;
   if (hasMem) { memRow.style.display = ''; }
@@ -774,6 +824,7 @@ refreshMuteUi();
     const avgMs = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
     fpsEl.textContent = (1000 / avgMs).toFixed(0);
     msEl.textContent  = avgMs.toFixed(1) + ' ms';
+    texEl.textContent = (spriteTextureBytes() / 1_048_576).toFixed(0) + ' MB';
     if (hasMem) {
       // performance.memory is a non-standard Chrome API
       const mem = (performance as unknown as { memory: { usedJSHeapSize: number } }).memory;

@@ -1,4 +1,4 @@
-# COIN — Architecture reference for Claude Code
+# COIN — Architecture reference for Codex
 
 Tower-defense game: PixiJS v7 + Vite + TypeScript (strict).
 
@@ -81,9 +81,8 @@ The two layers should share frame dimensions (same cell width and height) — th
 | `LoadedSpriteSet` | `{ body: Partial<Record<BodyAnimName, Texture[]>>, legs: … }` — extracted frames per layer |
 | `getBody{AnimFps,SpriteScale,FeetAnchorY}(tribe, type, anim)` | Per-layer getters used by Character |
 | `getLegs{AnimFps,SpriteScale,FeetAnchorY}(tribe, type, anim)` | Per-layer getters used by Character |
-| `loadSpriteSet(tribe, type)` | Loads one set into the module-level cache; concurrent calls share one load |
-| `ensureSpriteSets(keys)` / `unloadSpriteSetsExcept(keys)` | Per-match residency (`SpriteSetKey = { tribe, type }`): load what the match can field, evict the rest once the old scene is torn down |
-| `getSpriteSet(tribe, type)` | Sync lookup called per `new Character()`; returns the layered set or `null`. A set never requested starts loading in the background (that first spawn renders as Graphics) |
+| `preloadAllSprites()` | Called once at startup (`main.ts`) before `Game` is created; populates the module-level cache |
+| `getSpriteSet(tribe, type)` | Sync lookup called per `new Character()`; returns the layered set or `null` |
 
 ### `spriteScale`
 
@@ -108,19 +107,9 @@ Each character has two sprites: `bodySprite` and `legsSprite`. Legs are added to
 
 `updateLocomotionFps()` scales the playback rate of the legs `walk` anim and the body `walk` / `carry` anims by `moveSpeed / config.speed` so promotions, carry slowdown, and speed power-ups keep the stride visually in sync. `attack` and `idle` stay at their baseline fps.
 
-### Sprite residency (per match, not per session)
+### Startup flow
 
-Raw sheets decode to ~24–36 MB each (3072 px wide, 512 px frames), so all rosters at once would be ~4.5 GB. Two mechanisms keep the resident set small:
-
-**Atlas repack at load** (`loadLayerAnim` → `probeSheet` + `packFrames`): art covers only ~23 % of each cell, so after a sheet loads its per-frame alpha bounding boxes (one downscaled probe readback, `PROBE_CELL` px per cell) are shelf-packed into a tight `ImageBitmap` atlas — scaled down to what the current render resolution can actually show (`atlasScaleFor`: `config.height × spriteScale × GAME_ZOOM × getRenderScale() × ATLAS_SCALE_HEADROOM` vs the 512-px frame; it's 1.0 at 1440p+) — and the raw sheet is `Assets.unload`ed. Frames are PIXI *trimmed* textures (`frame` = atlas rect, `orig` = the inset cell, `trim` = box offset), so `Character`'s anchor/scale maths and `spriteScale` tuning are untouched. Falls back to the raw sheet if the atlas would exceed `ATLAS_MAX_HEIGHT`. Each atlas is an `AtlasResource` (extends `ImageBitmapResource`) that **closes its bitmap right after the GPU upload** and, if the GL texture is ever needed again (context restore, texture GC), rebuilds the atlas from the source sheet (`loadSheetBitmap` → `drawAtlas` with the stored layout) — a few blank frames, by construction rare. `spriteTextureBytes()` feeds the dev panel's TEX row.
-
-**Per-match residency** (`main.ts`): `matchSpriteKeys(mapDef)` is just the player's picked loadout — those spawn on a button press and must be ready. Every CPU-bought type (either side) loads on its **first buy**: `Game.spriteSetPending()` kicks `loadSpriteSet` and re-checks after `CPU_SPRITE_RETRY_MS` rather than buying a different type, so the AI decision never depends on load state.
-- The Start button awaits `ensureSpriteSets(keys)` (reads "Loading…"), bails if the screen was re-opened meanwhile (`loadoutGen`), then `launchMatch(keys, mapDef)` → `game.reset()` → `unloadSpriteSetsExcept(keys)` (CPU sets from the previous match are evicted and reload on demand).
-- The dev fast-start (`CHEAT_SKIP_INTRO_SCREENS`) awaits every roster at top level, since its match spawns immediately.
-- `renderer.textureGC.maxIdle` is lowered to `TEXTURE_GC_IDLE_SEC` (120 s) so atlases nobody has drawn recently release their GPU copy; since that's the only copy, the next draw triggers an `AtlasResource` rebuild.
-- Map skins (background, ground, decor, platform/block, tower templates, coin overrides) load lazily per `build()`; `Game.reset()` diffs `collectMapAssetUrls()` before/after and `Assets.unload`s the previous map's leftovers. Shared defaults (coin PNGs, coin-box skin, power-up art) are never in that set.
-
-Sprites that fail to load (404) are caught silently per layer; the cache decision is made after both layers have been attempted.
+`main.ts` does `await preloadAllSprites()` (top-level await in a `<script type="module">`) before constructing `Game`. Sprites that fail to load (404) are caught silently per layer; the cache decision is made after both layers have been attempted.
 
 > To add a new body or legs animation: extend `BodyAnimName` / `LegsAnimName`, add the entry to `makeTypeDefs`, extend the fallback table in `switchBodyAnimation` / `switchLegsAnimation`, and add a case in `selectAnimations`.
 

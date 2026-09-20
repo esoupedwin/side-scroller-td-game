@@ -8,6 +8,11 @@ const GAME_DURATION_S = 300;   // seconds — total match length
 
 export const GameConfig = {
   canvas:    { width: VIEWPORT_W, height: H, durationSec: GAME_DURATION_S },
+  // Seconds a base texture may go undrawn before PIXI releases its GPU copy.
+  // Sprite atlases keep no CPU bitmap (SpriteRegistry.AtlasResource), so a
+  // reclaimed atlas is rebuilt from its sheet on the next draw — a decode plus
+  // a few blank frames — hence a longer window than the old 1-frame default.
+  textureGcIdleSec: 120,
   worldWidth: W,
   groundY:   H - 80,
   colors:  { player: 0x00b4d8, enemy: 0xe63946 },
@@ -296,6 +301,7 @@ export const GameConfig = {
   cpu: {
     spawnMinMs:           5_000,
     spawnMaxMs:           20_000,
+    spriteRetryMs:        150,      // re-check cadence while a chosen unit's sprite set is still loading (sets load on first buy)
     firstSpawnMaxMs:      3_000,    // cap on the very first spawn delay
     pressureThreshold:    2,        // unit difference that triggers urgent / comfortable mode
     urgentMaxFactor:      2,        // urgent: interval ∈ [spawnMin, spawnMin × urgentMaxFactor]

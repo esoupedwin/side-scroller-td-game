@@ -1,5 +1,5 @@
 import {
-  DEFAULT_MAP, saveMapToStorage, loadMapWithOverride, type MapDefinition,
+  DEFAULT_MAP, saveMapToStorage, loadMapWithOverride, MapStorageQuotaError, type MapDefinition,
   buildWorlds, loadMapRegistry, registerMapInWorld, moveMapInWorld, resolveMapById,
 } from './maps';
 import { DECOR_FRONT_Z, type DecorData } from './Decor';
@@ -20,6 +20,15 @@ loadTribeTowerTemplates();
 const TOWER_W  = GameConfig.towers.width;
 const TOWER_H  = GameConfig.towers.height;
 const GROUND_Y = GameConfig.groundY;
+
+/**
+ * Per-image budget for embedded skin data URLs. Every skin is stored inline in
+ * the map JSON, and the whole map set has to fit in one ~5 MB localStorage
+ * entry — an untouched 4000 px background PNG alone blows that, and the save
+ * then fails wholesale. Images above this are re-encoded on import (see
+ * compressSkinDataUrl).
+ */
+const SKIN_BUDGET_BYTES = 700 * 1024;
 const WORLD_H  = GameConfig.canvas.height;
 
 
@@ -256,7 +265,7 @@ class MapBuilder {
       const img = this.getSkinImage(m.backgroundSkin2);
       if (img.complete && img.naturalWidth > 0) {
         const yOff = this.sh(m.backgroundSkin2Y ?? 0);
-        ctx.drawImage(img, wx0, wy0 + yOff, ww, this.sh(GROUND_Y));
+        ctx.drawImage(img, wx0, wy0 + yOff, ww, this.sh(m.backgroundSkin2H ?? this.groundTopY));
       }
     }
 
@@ -265,7 +274,7 @@ class MapBuilder {
       const img = this.getSkinImage(m.backgroundSkin);
       if (img.complete && img.naturalWidth > 0) {
         const yOff = this.sh(m.backgroundSkinY ?? 0);
-        ctx.drawImage(img, wx0, wy0 + yOff, ww, this.sh(GROUND_Y));
+        ctx.drawImage(img, wx0, wy0 + yOff, ww, this.sh(m.backgroundSkinH ?? this.groundTopY));
       }
     } else {
       ctx.fillStyle = '#2d2d44';
@@ -695,6 +704,38 @@ class MapBuilder {
 
   // ── Skin helpers ──────────────────────────────────────────────────────────
 
+  /**
+   * Re-encode an oversized skin data URL so the map still fits in localStorage.
+   * Walks down a width ladder, then a WebP quality ladder, and returns the first
+   * result inside SKIN_BUDGET_BYTES (or the smallest it managed). Images already
+   * within budget are returned untouched, so existing small art is never
+   * re-compressed.
+   */
+  private async compressSkinDataUrl(dataUrl: string): Promise<string> {
+    if (dataUrl.length <= SKIN_BUDGET_BYTES) return dataUrl;
+
+    const img = new Image();
+    img.src   = dataUrl;
+    try { await img.decode(); } catch { return dataUrl; }   // undecodable — keep original
+
+    let best = dataUrl;
+    for (const maxW of [4096, 3072, 2048, 1536]) {
+      const scale = Math.min(1, maxW / img.naturalWidth);
+      const c     = document.createElement('canvas');
+      c.width     = Math.max(1, Math.round(img.naturalWidth  * scale));
+      c.height    = Math.max(1, Math.round(img.naturalHeight * scale));
+      const ctx   = c.getContext('2d');
+      if (!ctx) return best;
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      for (const q of [0.92, 0.85, 0.75]) {
+        const out = c.toDataURL('image/webp', q);
+        if (out.length < best.length) best = out;
+        if (out.length <= SKIN_BUDGET_BYTES) return out;
+      }
+    }
+    return best;
+  }
+
   private getSkinImage(url: string): HTMLImageElement {
     if (!this.skinImages.has(url)) {
       const img = new Image();
@@ -743,16 +784,29 @@ class MapBuilder {
     this.syncSkinPreview('preview-decor-skin', 'btn-clear-decor-skin', skin, 'input-decor-skin');
   }
 
+  /** Show how much storage an embedded skin costs — the map set must fit in ~5 MB. */
+  private syncSkinSize(elId: string, dataUrl: string | undefined) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.textContent = dataUrl ? `stored: ${(dataUrl.length / 1024).toFixed(0)} KB` : '';
+  }
+
   private syncBackgroundSkinPreview() {
     this.syncSkinPreview('preview-bg-skin', 'btn-clear-bg-skin', this.map.backgroundSkin, 'input-bg-skin');
     (document.getElementById('input-bg-skin-y') as HTMLInputElement).value =
       String(this.map.backgroundSkinY ?? 0);
+    (document.getElementById('input-bg-skin-h') as HTMLInputElement).value =
+      this.map.backgroundSkinH !== undefined ? String(this.map.backgroundSkinH) : '';
+    this.syncSkinSize('size-bg-skin', this.map.backgroundSkin);
   }
 
   private syncBackgroundSkin2Preview() {
     this.syncSkinPreview('preview-bg-skin2', 'btn-clear-bg-skin2', this.map.backgroundSkin2, 'input-bg-skin2');
     (document.getElementById('input-bg-skin2-y') as HTMLInputElement).value =
       String(this.map.backgroundSkin2Y ?? 0);
+    (document.getElementById('input-bg-skin2-h') as HTMLInputElement).value =
+      this.map.backgroundSkin2H !== undefined ? String(this.map.backgroundSkin2H) : '';
+    this.syncSkinSize('size-bg-skin2', this.map.backgroundSkin2);
   }
 
   private syncGroundSkinPreview() {
@@ -785,7 +839,7 @@ class MapBuilder {
       if (!file) return;
       this.pushUndo();
       const reader = new FileReader();
-      reader.onload = () => { setSkin(reader.result as string); this.syncCoinSkinsPreview(); };
+      reader.onload = async () => { setSkin(await this.compressSkinDataUrl(reader.result as string)); this.syncCoinSkinsPreview(); };
       reader.readAsDataURL(file);
     });
     document.getElementById(clearId)!.addEventListener('click', () => {
@@ -1606,8 +1660,8 @@ class MapBuilder {
       if (!file) return;
       this.pushUndo();
       const reader = new FileReader();
-      reader.onload = () => {
-        this.map.backgroundSkin = reader.result as string;
+      reader.onload = async () => {
+        this.map.backgroundSkin = await this.compressSkinDataUrl(reader.result as string);
         this.syncBackgroundSkinPreview();
       };
       reader.readAsDataURL(file);
@@ -1623,6 +1677,11 @@ class MapBuilder {
       if (isNaN(val) || val === 0) delete this.map.backgroundSkinY;
       else                         this.map.backgroundSkinY = val;
     });
+    document.getElementById('input-bg-skin-h')!.addEventListener('input', () => {
+      const val = parseInt((document.getElementById('input-bg-skin-h') as HTMLInputElement).value, 10);
+      if (isNaN(val) || val <= 0) delete this.map.backgroundSkinH;
+      else                        this.map.backgroundSkinH = val;
+    });
 
     // Far background skin picker
     document.getElementById('input-bg-skin2')!.addEventListener('change', e => {
@@ -1630,8 +1689,8 @@ class MapBuilder {
       if (!file) return;
       this.pushUndo();
       const reader = new FileReader();
-      reader.onload = () => {
-        this.map.backgroundSkin2 = reader.result as string;
+      reader.onload = async () => {
+        this.map.backgroundSkin2 = await this.compressSkinDataUrl(reader.result as string);
         this.syncBackgroundSkin2Preview();
       };
       reader.readAsDataURL(file);
@@ -1647,11 +1706,28 @@ class MapBuilder {
       if (isNaN(val) || val === 0) delete this.map.backgroundSkin2Y;
       else                         this.map.backgroundSkin2Y = val;
     });
+    document.getElementById('input-bg-skin2-h')!.addEventListener('input', () => {
+      const val = parseInt((document.getElementById('input-bg-skin2-h') as HTMLInputElement).value, 10);
+      if (isNaN(val) || val <= 0) delete this.map.backgroundSkin2H;
+      else                        this.map.backgroundSkin2H = val;
+    });
 
     document.getElementById('btn-save-to-game')!.addEventListener('click', () => {
-      saveMapToStorage(this.map);
-      const btn = document.getElementById('btn-save-to-game') as HTMLButtonElement;
-      const orig = btn.textContent!;
+      const btn  = document.getElementById('btn-save-to-game') as HTMLButtonElement;
+      const orig = btn.dataset.label ?? btn.textContent!;
+      btn.dataset.label = orig;
+      try {
+        saveMapToStorage(this.map);
+      } catch (e) {
+        // A quota failure saves NOTHING, so never let it look like success.
+        btn.textContent = '✗ Too large';
+        setTimeout(() => { btn.textContent = orig; }, 2500);
+        const hint = e instanceof MapStorageQuotaError
+          ? ` Re-pick the background / ground PNGs — images over ${SKIN_BUDGET_BYTES / 1024 | 0} KB are compressed on import.`
+          : '';
+        alert(`Save to Game failed — nothing was saved. ${(e as Error).message}${hint}`);
+        return;
+      }
       btn.textContent = '✓ Saved!';
       btn.disabled    = true;
       setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1500);
@@ -1732,8 +1808,8 @@ class MapBuilder {
       if (!file) return;
       this.pushUndo();
       const reader = new FileReader();
-      reader.onload = () => {
-        this.map.platforms[this.selected!].skin = reader.result as string;
+      reader.onload = async () => {
+        this.map.platforms[this.selected!].skin = await this.compressSkinDataUrl(reader.result as string);
         this.syncPlatformSkinPreview();
       };
       reader.readAsDataURL(file);
@@ -1762,8 +1838,8 @@ class MapBuilder {
       if (!file) return;
       this.pushUndo();
       const reader = new FileReader();
-      reader.onload = () => {
-        this.map.blocks[this.selected!].skin = reader.result as string;
+      reader.onload = async () => {
+        this.map.blocks[this.selected!].skin = await this.compressSkinDataUrl(reader.result as string);
         this.syncBlockSkinPreview();
       };
       reader.readAsDataURL(file);
@@ -1781,8 +1857,8 @@ class MapBuilder {
       if (!file) return;
       this.pushUndo();
       const reader = new FileReader();
-      reader.onload = () => {
-        this.map.groundSkin = reader.result as string;
+      reader.onload = async () => {
+        this.map.groundSkin = await this.compressSkinDataUrl(reader.result as string);
         this.syncGroundSkinPreview();
       };
       reader.readAsDataURL(file);
@@ -1839,9 +1915,9 @@ class MapBuilder {
       if (!file) return;
       this.pushUndo();
       const reader = new FileReader();
-      reader.onload = () => {
+      reader.onload = async () => {
         const d = (this.map.decor ?? [])[this.selected!];
-        if (d) { d.skin = reader.result as string; this.syncDecorSkinPreview(); }
+        if (d) { d.skin = await this.compressSkinDataUrl(reader.result as string); this.syncDecorSkinPreview(); }
       };
       reader.readAsDataURL(file);
     });
@@ -1881,8 +1957,8 @@ class MapBuilder {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => {
-        pendingDecorSkin = reader.result as string;
+      reader.onload = async () => {
+        pendingDecorSkin = await this.compressSkinDataUrl(reader.result as string);
         decorPreview.src = pendingDecorSkin;
         decorPreview.style.display = 'block';
         decorHint.textContent = file.name;

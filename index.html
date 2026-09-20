@@ -798,6 +798,10 @@
         font-family: 'Segoe UI', system-ui, sans-serif;
         display: flex; flex-direction: column; gap: 14px;
       }
+      /* Title row — the selected-count badge sits beside the heading. */
+      .lo-head {
+        display: flex; align-items: center; justify-content: center; gap: 14px;
+      }
       .lo-title {
         margin: 0; text-align: center;
         font-size: 26px; font-weight: 800; letter-spacing: 0.06em;
@@ -862,11 +866,13 @@
       }
       .lo-footer {
         display: flex; align-items: center; justify-content: center; gap: 18px;
-        margin-top: 4px;
+        margin-top: 10px;
       }
       #loadout-count {
-        font-size: 16px; font-weight: 700; color: #cfe2ff;
-        min-width: 120px; text-align: center;
+        font-size: 14px; font-weight: 700; color: #cfe2ff;
+        padding: 4px 12px; border-radius: 999px;
+        background: rgba(120, 160, 200, 0.16);
+        white-space: nowrap;
       }
       /* ── Tribe power-up picker (squad screen) ───────────────────────────── */
       #tribe-pu-picker {
@@ -897,7 +903,7 @@
       #loadout-start-btn {
         background: linear-gradient(135deg, #1f6feb, #0d47a1);
         color: #fff; border: none; border-radius: 8px;
-        padding: 13px 44px; font-size: 17px; font-weight: 800;
+        padding: 18px 76px; font-size: 22px; font-weight: 800;
         letter-spacing: 0.04em;
         cursor: pointer; transition: filter 0.12s ease, opacity 0.15s;
       }
@@ -952,25 +958,15 @@
         opacity: 0;
         pointer-events: none;
       }
-      #splash-title {
-        font-size: 96px;
-        font-weight: 900;
-        letter-spacing: 0.18em;
-        color: #e0e0e0;
-        text-shadow:
-          0 0 40px rgba(0, 180, 216, 0.55),
-          0 0 10px rgba(0, 180, 216, 0.3);
-        user-select: none;
-      }
-      #splash-subtitle {
-        font-size: 16px;
-        font-weight: 600;
-        letter-spacing: 0.32em;
-        text-transform: uppercase;
-        color: #00b4d8;
-        margin-top: 4px;
-        margin-bottom: 84px;
-        user-select: none;
+      /* Splash artwork — already carries the wordmark, so it replaces the
+         text logo. Always 60% of the viewport width, so it tracks the window
+         at every size; the gap below scales with it to keep the prompt clear. */
+      #splash-art {
+        width: 60vw;
+        height: auto;
+        object-fit: contain;
+        margin-bottom: 5vh;
+        user-select: none; -webkit-user-drag: none;
       }
       #splash-prompt {
         font-size: 22px;
@@ -1212,8 +1208,7 @@
   <body>
     <!-- ── Splash screen — revealed when the loading screen fades ── -->
     <div id="splash-screen">
-      <div id="splash-title">COIN</div>
-      <div id="splash-subtitle">Tower Defence</div>
+      <img id="splash-art" src="/ui/splash_screen.png" alt="COIN — real-time strategy tower defence" />
       <div id="splash-prompt">Press <span class="splash-key">Enter</span> to Start</div>
     </div>
 
@@ -1335,6 +1330,10 @@
             <span class="dev-item-label">MS</span>
             <span class="dev-item-value" id="perf-ms" style="min-width:36px;">—</span>
           </div>
+          <div class="dev-item" style="gap:6px;" title="Sprite-atlas texture memory (GPU copy; atlas bitmaps are released after upload)">
+            <span class="dev-item-label">TEX</span>
+            <span class="dev-item-value" id="perf-tex" style="min-width:48px;">—</span>
+          </div>
           <div class="dev-item" id="perf-mem-row" style="gap:6px; display:none;">
             <span class="dev-item-label" id="perf-mem-label">MEM</span>
             <span class="dev-item-value" id="perf-mem" style="min-width:48px;">—</span>
@@ -1402,7 +1401,10 @@
     <!-- ── Loadout selection (shown before each map starts) ── -->
     <div id="loadout-screen" style="display:none;">
       <div class="lo-card">
-        <h2 class="lo-title">Choose Your Squad</h2>
+        <div class="lo-head">
+          <h2 class="lo-title">Choose Your Squad</h2>
+          <span id="loadout-count"></span>
+        </div>
         <p class="lo-sub" id="loadout-sub"></p>
         <div id="loadout-grid"></div>
         <!-- Tribe power-up picker: one ability per match, options built by main.ts -->
@@ -1411,7 +1413,6 @@
           <div id="tribe-pu-options"></div>
         </div>
         <div class="lo-footer">
-          <span id="loadout-count"></span>
           <button id="loadout-start-btn">▶ Start</button>
         </div>
       </div>

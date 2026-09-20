@@ -52,8 +52,10 @@ export interface MapDefinition {
   groundSkinTileH?:  number;  // tile height in world px (default: image natural height)
   backgroundSkin?:    string;  // data URL; replaces the procedural parallax mountain layer
   backgroundSkinY?:   number;  // screen-space Y offset of the parallax image (default 0 = top of sky)
+  backgroundSkinH?:   number;  // rendered height in px of the parallax image (default: ground surface Y)
   backgroundSkin2?:   string;  // data URL; second parallax layer rendered behind backgroundSkin (slower scroll)
   backgroundSkin2Y?:  number;  // screen-space Y offset of the far parallax image (default 0)
+  backgroundSkin2H?:  number;  // rendered height in px of the far parallax image (default: ground surface Y)
   durationSec?:      number;  // match countdown in seconds (default: GAME_DURATION_SEC from gameConfig)
   /**
    * Vertical camera pan limits in world px. The camera's visible window is
@@ -230,11 +232,35 @@ function loadStoredMaps(): Record<string, MapDefinition> {
   catch { return {}; }
 }
 
-/** Persist a map by id so the game picks it up on next load. */
+/** Thrown by {@link saveMapToStorage} when the map set no longer fits in localStorage. */
+export class MapStorageQuotaError extends Error {
+  constructor(public readonly bytes: number) {
+    super(`Map data is ${(bytes / 1048576).toFixed(1)} MB — too large for browser storage (~5 MB limit).`);
+    this.name = 'MapStorageQuotaError';
+  }
+}
+
+/**
+ * Persist a map by id so the game picks it up on next load.
+ *
+ * Throws {@link MapStorageQuotaError} when the serialised map set exceeds the
+ * browser localStorage quota (~5 MB) — almost always an oversized embedded
+ * background/ground PNG. The write is all-or-nothing, so a quota failure means
+ * NOTHING was saved: the builder would keep showing the in-memory image while
+ * the game still loads the unmodified map. Callers must surface the error.
+ */
 export function saveMapToStorage(map: MapDefinition): void {
   const all = loadStoredMaps();
   all[map.id] = map;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+  const json = JSON.stringify(all);
+  try {
+    localStorage.setItem(STORAGE_KEY, json);
+  } catch (e) {
+    if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.code === 22)) {
+      throw new MapStorageQuotaError(json.length);
+    }
+    throw e;
+  }
 }
 
 /**

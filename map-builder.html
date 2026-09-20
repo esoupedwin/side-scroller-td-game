@@ -875,7 +875,13 @@
               <input type="number" id="input-bg-skin-y" value="0" style="width:80px;" title="Screen-space Y offset in pixels (positive = lower)" />
               <span class="hint">px</span>
             </div>
+            <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:4px;">
+              <label>Height:</label>
+              <input type="number" id="input-bg-skin-h" style="width:80px;" placeholder="auto" min="1" title="Rendered height in pixels (blank = stretch to the ground surface)" />
+              <span class="hint">px</span>
+            </div>
             <span class="hint" style="width:100%; margin-top:2px;">Replaces the procedural mountain layer</span>
+            <span class="hint" id="size-bg-skin" style="width:100%;"></span>
             <div style="width:100%; height:1px; background:var(--border); margin:8px 0;"></div>
             <span class="skin-label">Far Background PNG</span>
             <input type="file" id="input-bg-skin2" accept="image/*" />
@@ -886,7 +892,13 @@
               <input type="number" id="input-bg-skin2-y" value="0" style="width:80px;" title="Screen-space Y offset in pixels (positive = lower)" />
               <span class="hint">px</span>
             </div>
+            <div style="width:100%; display:flex; gap:8px; align-items:center; margin-top:4px;">
+              <label>Height:</label>
+              <input type="number" id="input-bg-skin2-h" style="width:80px;" placeholder="auto" min="1" title="Rendered height in pixels (blank = stretch to the ground surface)" />
+              <span class="hint">px</span>
+            </div>
             <span class="hint" style="width:100%; margin-top:2px;">Rendered behind the parallax layer; scrolls slower</span>
+            <span class="hint" id="size-bg-skin2" style="width:100%;"></span>
           </div>
 
           <!-- Coin Skins (shown when Coin Skins is clicked) -->
