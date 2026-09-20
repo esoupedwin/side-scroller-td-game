@@ -1330,9 +1330,13 @@
             <span class="dev-item-label">MS</span>
             <span class="dev-item-value" id="perf-ms" style="min-width:36px;">—</span>
           </div>
-          <div class="dev-item" style="gap:6px;" title="Sprite-atlas texture memory (GPU copy; atlas bitmaps are released after upload)">
+          <div class="dev-item" style="gap:6px;" title="Sprite-atlas texture memory (RGBA, one copy)">
             <span class="dev-item-label">TEX</span>
             <span class="dev-item-value" id="perf-tex" style="min-width:48px;">—</span>
+          </div>
+          <div class="dev-item" style="gap:6px;" title="Every texture currently on the GPU (atlases + map skins + text), RGBA estimate">
+            <span class="dev-item-label">GPU</span>
+            <span class="dev-item-value" id="perf-gpu" style="min-width:48px;">—</span>
           </div>
           <div class="dev-item" id="perf-mem-row" style="gap:6px; display:none;">
             <span class="dev-item-label" id="perf-mem-label">MEM</span>

@@ -1,4 +1,5 @@
 ﻿import * as PIXI from 'pixi.js';
+import { loadFittedTexture } from './SkinTextures';
 import Matter from 'matter-js';
 import {
   GROUND_Y, PLAYER_COLOR, ENEMY_COLOR,
@@ -105,7 +106,7 @@ function segmentIntersectsAABB(
 }
 import type { Side } from './Tower';
 import type { Coin, CoinKind } from './Coin';
-import { COIN_PALETTE } from './Coin';
+import { COIN_PALETTE, COIN_SKIN_SIZE } from './Coin';
 import type { PlatformData } from './Platform';
 import type { BlockData } from './Block';
 
@@ -1863,13 +1864,13 @@ export class Character {
     // Match the on-ground coin's PNG skin when one is set. Loads async — the
     // procedural circles show until the texture resolves, then are replaced.
     if (this.coinCarrySkin) {
-      PIXI.Assets.load<PIXI.Texture>(this.coinCarrySkin)
+      loadFittedTexture(this.coinCarrySkin, COIN_SKIN_SIZE, COIN_SKIN_SIZE)
         .then(tex => {
           if (this.coinCarryGfx !== g) return;   // carry ended/changed before load resolved
           const sprite = new PIXI.Sprite(tex);
           sprite.anchor.set(0.5);
-          sprite.width = 22;   // match the on-ground coin skin size (no scale-down while held)
-          sprite.height = 22;
+          sprite.width = COIN_SKIN_SIZE;   // match the on-ground coin skin size (no scale-down while held)
+          sprite.height = COIN_SKIN_SIZE;
           g.addChild(sprite);  // child of g so removeCoinCarry() disposes it too
           g.clear();           // drop the procedural circles, keep the sprite child
         })

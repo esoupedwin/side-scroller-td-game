@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js';
+import { loadFittedTexture } from './SkinTextures';
 import Matter from 'matter-js';
 import { GROUND_Y, PLAYER_TOWER_X, ENEMY_TOWER_X, TOWER_WIDTH, COIN_VISUAL_SCALE } from './constants';
 
@@ -20,6 +21,9 @@ export const COIN_PALETTE: Record<CoinKind, readonly [number, number, number, nu
  * to every coin of that kind unless the map's own `coinSkins` provides an
  * override. The blue (jackpot) coin is reskinned as the purple coin art.
  */
+/** Drawn size of a coin skin, world px (on the ground and while carried). */
+export const COIN_SKIN_SIZE = 22;
+
 const DEFAULT_COIN_SKINS: Partial<Record<CoinKind, string>> = {
   gold:   '/sprites/coins/coin_gold.png',
   silver: '/sprites/coins/coin_silver.png',
@@ -122,13 +126,13 @@ export class Coin {
   /** Replace the procedural coin graphic with a custom PNG (map coinSkins).
    *  Loads async — the Graphics shows until the texture resolves, then is hidden. */
   private applySkin(skin: string) {
-    PIXI.Assets.load<PIXI.Texture>(skin)
+    loadFittedTexture(skin, COIN_SKIN_SIZE, COIN_SKIN_SIZE)
       .then(tex => {
         if (this.isDead) return;
         const sprite  = new PIXI.Sprite(tex);
         sprite.anchor.set(0.5);
-        sprite.width  = 22;   // ≈ the 10px-radius procedural coin, slightly padded
-        sprite.height = 22;
+        sprite.width  = COIN_SKIN_SIZE;   // ≈ the 10px-radius procedural coin, slightly padded
+        sprite.height = COIN_SKIN_SIZE;
         this.container.addChildAt(sprite, 0);
         this.gfx.visible = false;
       })

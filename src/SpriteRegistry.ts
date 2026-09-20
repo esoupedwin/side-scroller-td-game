@@ -234,7 +234,14 @@ const ATLAS_MAX_WIDTH       = 4096;   // shelf-pack row width
 const ATLAS_MAX_HEIGHT      = 4096;   // conservative WebGL max — fall back to the raw sheet beyond this
 const ATLAS_PAD             = 2;      // px gap between packed frames (sampler bleed guard)
 const ATLAS_SCALE_HEADROOM  = 1.25;   // keep ≥ 1.25 texels per rendered px before shrinking
-const RELEASE_BITMAP_AFTER_UPLOAD = true;   // keep only the GPU copy of each atlas (see AtlasResource)
+// GPU-only atlases: upload each atlas as soon as it's packed and close its
+// bitmap, so the GL texture is the only copy (VRAM on a hardware GPU). Off by
+// default: in a software-GL / automation Chrome the GL copy lives in system
+// memory too and the churn measured *worse*, and it can't be verified from
+// inside the page. Trial it on a real GPU with Chrome's task manager (GPU
+// memory column) before enabling; AtlasResource rebuilds evicted atlases from
+// their sheets when it's on.
+const ATLAS_GPU_ONLY = false;
 
 /** Largest scale (≤ 1) a frame of height `fh` needs so it still renders with
  *  ATLAS_SCALE_HEADROOM texels per device pixel at the current resolution. */
@@ -310,18 +317,33 @@ async function loadSheetBitmap(path: string): Promise<ImageBitmap> {
 }
 
 /**
- * Atlas texture resource that keeps only the GPU copy. The decoded bitmap is
- * closed as soon as it has been uploaded (halving the footprint — Chrome holds
- * ImageBitmaps in the GPU process alongside the GL texture); if the GL texture
- * is ever needed again without a bitmap (WebGL context restore, or PIXI's
- * texture GC reclaimed it after TEXTURE_GC_IDLE_SEC), the atlas is rebuilt
- * from the source sheet via `rebuild` and re-uploaded. While that runs PIXI
- * binds a blank texture, so the affected frames are invisible for a few
- * frames — rare by construction.
+ * Atlas texture resource. With ATLAS_GPU_ONLY off it behaves like a plain
+ * owned ImageBitmapResource (bitmap kept; PIXI re-uploads from it after a
+ * texture-GC eviction or context restore). With it on, the bitmap is closed as
+ * soon as it has been uploaded, and if the GL texture is ever needed again
+ * (context restore, texture GC after TEXTURE_GC_IDLE_SEC) the atlas is rebuilt
+ * from the source sheet via `rebuild` and re-uploaded — PIXI binds a blank
+ * texture meanwhile, so those frames are invisible for a few frames.
  */
 // 0×0 stand-in for a released bitmap (ImageBitmapResource.EMPTY is private).
 const RELEASED_SOURCE = document.createElement('canvas');
 RELEASED_SOURCE.width = RELEASED_SOURCE.height = 0;
+
+/** Lifetime counters for the dev perf panel (TEX row tooltip). */
+const atlasStats = { uploads: 0, releases: 0, rebuilds: 0 };
+export function spriteAtlasStats(): Readonly<typeof atlasStats> { return atlasStats; }
+
+// Renderer used (only with ATLAS_GPU_ONLY) to push each freshly packed atlas
+// to the GPU right away; Game registers it once.
+let spriteRenderer: PIXI.Renderer | null = null;
+export function setSpriteRenderer(renderer: PIXI.IRenderer | null): void {
+  spriteRenderer = renderer && 'texture' in renderer ? (renderer as PIXI.Renderer) : null;
+}
+function eagerUpload(base: PIXI.BaseTexture): void {
+  if (!ATLAS_GPU_ONLY || !spriteRenderer || spriteRenderer.context.isLost) return;
+  spriteRenderer.texture.bind(base);
+  spriteRenderer.texture.unbind(base);
+}
 
 class AtlasResource extends PIXI.ImageBitmapResource {
   private rebuilding: Promise<void> | null = null;
@@ -336,15 +358,18 @@ class AtlasResource extends PIXI.ImageBitmapResource {
       return false;   // blank until update() bumps dirtyId with the rebuilt bitmap
     }
     const ok = super.upload(renderer, baseTexture, glTexture);
-    if (ok && RELEASE_BITMAP_AFTER_UPLOAD) {
+    if (ok) atlasStats.uploads++;
+    if (ok && ATLAS_GPU_ONLY) {
       this.source.close();
       this.source = RELEASED_SOURCE;
+      atlasStats.releases++;
     }
     return ok;
   }
 
   private startRebuild(): void {
     if (this.rebuilding) return;
+    atlasStats.rebuilds++;
     this.rebuilding = this.rebuild()
       .then(bitmap => {
         if (this.destroyed) { bitmap.close(); return; }
@@ -376,6 +401,7 @@ async function packFrames(
     scaleMode: PIXI.SCALE_MODES.NEAREST,
     mipmap:    PIXI.MIPMAP_MODES.OFF,
   });
+  eagerUpload(base);   // no-op unless ATLAS_GPU_ONLY
 
   // `orig` keeps the pre-existing inset cell size so spriteScale tuning holds;
   // `trim` places the box inside it; `frame` is where the (scaled) pixels live.
@@ -574,8 +600,8 @@ export function getSpriteSet(tribe: Tribe, type: string): LoadedSpriteSet | null
   return cache.get(key) ?? null;
 }
 
-/** Approximate bytes of texture memory held by resident sprite sets (RGBA;
- *  the GPU copy — atlas bitmaps are released after upload). Dev perf panel. */
+/** Approximate bytes of atlas texture memory held by resident sprite sets
+ *  (RGBA, one copy). Dev perf panel. */
 export function spriteTextureBytes(): number {
   let bytes = 0;
   const counted = new Set<PIXI.BaseTexture>();

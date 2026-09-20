@@ -18,7 +18,12 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
   },
-  server: { port: 3000 },
+  server: {
+    port: 3000,
+    // Playwright MCP drops screenshots/logs here while driving the game; they
+    // must not count as project changes or the page reloads mid-verification.
+    watch: { ignored: ['**/.playwright-mcp/**'] },
+  },
   build: {
     // es2022 so the top-level `await preloadAllSprites()` in main.ts survives the
     // build — the default 'es2020' target rejects top-level await and fails the build.

@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js';
+import { loadFittedTexture } from './SkinTextures';
 import {
   GAME_HEIGHT, GROUND_Y,
   TOWER_WIDTH, TOWER_ATTACK_RANGE, DEFEND_PURSUIT_RANGE,
@@ -48,7 +49,12 @@ export function buildGround(stage: PIXI.Container, worldWidth: number, groundSki
   container.addChild(g);
 
   if (groundSkin) {
-    PIXI.Assets.load<PIXI.Texture>(groundSkin)
+    // Tiled: fit to one tile only when both tile dimensions are explicit — an
+    // unspecified axis tiles at the image's natural size, which must not change.
+    const loaded = groundSkinTileW !== undefined && groundSkinTileH !== undefined
+      ? loadFittedTexture(groundSkin, groundSkinTileW, groundSkinTileH)
+      : PIXI.Assets.load<PIXI.Texture>(groundSkin);
+    loaded
       .then(tex => {
         const ts = new PIXI.TilingSprite(tex, worldWidth, stripH);
         ts.x = 0;
@@ -215,7 +221,7 @@ export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
   // procedural graphic hides once it loads (async — graphic shows meanwhile,
   // and stays if the asset is missing/corrupt).
   const skinUrl = coinBox.skin ?? DEFAULT_COIN_BOX_SKIN;
-  PIXI.Assets.load<PIXI.Texture>(skinUrl)
+  loadFittedTexture(skinUrl, w, h)
     .then(tex => {
       const sprite  = new PIXI.Sprite(tex);
       sprite.x      = x - w / 2;

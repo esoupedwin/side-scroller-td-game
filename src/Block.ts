@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js';
+import { loadFittedTexture } from './SkinTextures';
 import type { PlatformData } from './Platform';
 
 /** Optional ping-pong animation between (data.x, data.y) and (anim.endX, anim.endY). */
@@ -45,7 +46,7 @@ export class Block {
     this.gfx         = this.draw();
 
     if (data.skin) {
-      PIXI.Assets.load<PIXI.Texture>(data.skin)
+      loadFittedTexture(data.skin, this.data.width, this.data.height)
         .then(tex => {
           this.gfx.visible = false;
           const sprite     = new PIXI.Sprite(tex);

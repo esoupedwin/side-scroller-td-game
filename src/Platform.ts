@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js';
+import { loadFittedTexture } from './SkinTextures';
 
 /** Optional ping-pong animation between (data.x, data.y) and (anim.endX, anim.endY). */
 export interface PlatformAnim {
@@ -71,7 +72,16 @@ export class Platform {
 
     if (data.skin) {
       const { skinTileW, skinTileH } = this.data;
-      PIXI.Assets.load<PIXI.Texture>(data.skin)
+      // Fit to the drawn size — for a tiled skin that's one tile, and only
+      // when both tile dimensions are explicit (otherwise the image's natural
+      // size IS the tile size and must not change).
+      const tiled  = skinTileW !== undefined || skinTileH !== undefined;
+      const loaded = tiled
+        ? (skinTileW !== undefined && skinTileH !== undefined
+            ? loadFittedTexture(data.skin, skinTileW, skinTileH)
+            : PIXI.Assets.load<PIXI.Texture>(data.skin))
+        : loadFittedTexture(data.skin, this.data.width, this.data.height);
+      loaded
         .then(tex => {
           this.gfx.visible = false;
           let layer: PIXI.Sprite | PIXI.TilingSprite;

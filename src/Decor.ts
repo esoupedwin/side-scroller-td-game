@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js';
+import { loadFittedTexture } from './SkinTextures';
 
 /**
  * Sentinel z-index that puts a decor object IN FRONT of characters. Decor whose
@@ -46,7 +47,7 @@ export class Decor {
     if (data.skin) {
       // Same skin-load path as Platform: load the data URL into a Sprite sized
       // to the decor's box, hiding the placeholder once it arrives.
-      PIXI.Assets.load<PIXI.Texture>(data.skin)
+      loadFittedTexture(data.skin, this.data.width, this.data.height)
         .then(tex => {
           this.gfx.visible = false;
           const sprite     = new PIXI.Sprite(tex);

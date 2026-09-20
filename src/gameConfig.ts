@@ -8,11 +8,11 @@ const GAME_DURATION_S = 300;   // seconds — total match length
 
 export const GameConfig = {
   canvas:    { width: VIEWPORT_W, height: H, durationSec: GAME_DURATION_S },
-  // Seconds a base texture may go undrawn before PIXI releases its GPU copy.
-  // Sprite atlases keep no CPU bitmap (SpriteRegistry.AtlasResource), so a
-  // reclaimed atlas is rebuilt from its sheet on the next draw — a decode plus
-  // a few blank frames — hence a longer window than the old 1-frame default.
-  textureGcIdleSec: 120,
+  // Seconds a base texture may go undrawn before PIXI releases its GPU copy
+  // (re-uploaded from the retained atlas bitmap on the next draw; PIXI's own
+  // default is 1 hour). Raise it if SpriteRegistry.ATLAS_GPU_ONLY is enabled —
+  // then an eviction means rebuilding the atlas from its sheet.
+  textureGcIdleSec: 30,
   worldWidth: W,
   groundY:   H - 80,
   colors:  { player: 0x00b4d8, enemy: 0xe63946 },
@@ -231,7 +231,7 @@ export const GameConfig = {
       grenadier: {
         id:          'grenadier' as const,
         attackStyle: 'grenade' as const, icon: '💣', uiColor: '#6b7a2a',
-        hp:          110, speed: 65, attackRange: 280, attackPower: 55,
+        hp:          80, speed: 65, attackRange: 280, attackPower: 55,
         fireRate:    2, cost: 90, critical: 0.08, knockback: 0,
       },
       rocketeer: {

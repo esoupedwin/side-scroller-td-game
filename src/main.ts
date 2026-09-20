@@ -9,7 +9,7 @@ import {
 } from './constants';
 import { getOwnedCards, loadLoadout, saveLoadout } from './CardCollection';
 import { rankLabel, xpProgress } from './CharacterHUD';
-import { ensureSpriteSets, unloadSpriteSetsExcept, spriteTextureBytes, type SpriteSetKey } from './SpriteRegistry';
+import { ensureSpriteSets, unloadSpriteSetsExcept, spriteTextureBytes, spriteAtlasStats, type SpriteSetKey } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
 import { WORLDS, ALL_MAPS, loadMapWithOverride, mapCoords } from './maps';
 import { TRIBES, TRIBE_ROSTERS, type Tribe, getPlayerTribe, setPlayerTribe } from './Tribes';
@@ -802,6 +802,7 @@ refreshMuteUi();
   const memEl    = document.getElementById('perf-mem')!;
   const memRow   = document.getElementById('perf-mem-row')!;
   const texEl    = document.getElementById('perf-tex')!;
+  const gpuEl    = document.getElementById('perf-gpu')!;
 
   const hasMem = 'memory' in performance;
   if (hasMem) { memRow.style.display = ''; }
@@ -825,6 +826,9 @@ refreshMuteUi();
     fpsEl.textContent = (1000 / avgMs).toFixed(0);
     msEl.textContent  = avgMs.toFixed(1) + ' ms';
     texEl.textContent = (spriteTextureBytes() / 1_048_576).toFixed(0) + ' MB';
+    const st = spriteAtlasStats();
+    texEl.title = `atlas uploads ${st.uploads} · bitmaps released ${st.releases} · rebuilds ${st.rebuilds}`;
+    gpuEl.textContent = (game.gpuTextureBytes() / 1_048_576).toFixed(0) + ' MB';
     if (hasMem) {
       // performance.memory is a non-standard Chrome API
       const mem = (performance as unknown as { memory: { usedJSHeapSize: number } }).memory;

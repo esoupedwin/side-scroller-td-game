@@ -13,6 +13,7 @@ import { Physics } from './Physics';
 import { buildBackground, buildGround, buildTowerRangeMarkers, buildCoinBox, buildParallaxMountains } from './Background';
 import { DEFAULT_MAP, loadMapWithOverride, type MapDefinition } from './maps';
 import { getTowerTemplate } from './TribeTowerTemplates';
+import { loadFittedTexture, unloadSkinTextures } from './SkinTextures';
 import { Tower } from './Tower';
 import { Character, RANK_NAMES, type CharacterConfig, type FireRequest, type UpdateContext } from './Character';
 import { Projectile } from './Projectile';
@@ -27,7 +28,7 @@ import { Platform } from './Platform';
 import { Block } from './Block';
 import { Decor, DECOR_FRONT_Z } from './Decor';
 import { pickName } from './names';
-import { getSpriteSet, isSpriteSetReady, loadSpriteSet } from './SpriteRegistry';
+import { getSpriteSet, isSpriteSetReady, loadSpriteSet, setSpriteRenderer } from './SpriteRegistry';
 import { tribeForSide, TRIBE_ROSTERS, getPlayerTribe, getEnemyTribe, setPlayerTribe, setEnemyTribe, type Tribe } from './Tribes';
 import { getRenderScale } from './resolution';
 import type { PlatformData } from './Platform';
@@ -427,6 +428,7 @@ export class Game {
     if ('textureGC' in renderer) {
       (renderer as PIXI.Renderer).textureGC.maxIdle = TEXTURE_GC_IDLE_SEC * 60;   // measured in frames
     }
+    setSpriteRenderer(renderer);   // sprite atlases upload to the GPU as they're packed
 
     // Seed tribes from the initial map's defaults so build() reads the
     // correct tribe for each side. Mirrors the same logic in reset().
@@ -630,7 +632,7 @@ export class Game {
     // Far layer (behind everything) — optional image, no procedural fallback.
     this.parallaxGfx2 = new PIXI.Container();
     if (m.backgroundSkin2) {
-      PIXI.Assets.load<PIXI.Texture>(m.backgroundSkin2)
+      loadFittedTexture(m.backgroundSkin2, parallaxWide2, m.backgroundSkin2H ?? this.mapGroundY, false)
         .then(tex => {
           const sprite = new PIXI.Sprite(tex);
           sprite.y      = m.backgroundSkin2Y ?? 0;
@@ -645,7 +647,7 @@ export class Game {
     // Near layer — image skin or procedural mountains.
     this.parallaxGfx = new PIXI.Container();
     if (m.backgroundSkin) {
-      PIXI.Assets.load<PIXI.Texture>(m.backgroundSkin)
+      loadFittedTexture(m.backgroundSkin, parallaxWide, m.backgroundSkinH ?? this.mapGroundY, false)
         .then(tex => {
           const sprite = new PIXI.Sprite(tex);
           sprite.y      = m.backgroundSkinY ?? 0;
@@ -2559,6 +2561,16 @@ export class Game {
     this.onGameOver(winner, reason);
   }
 
+  /** Bytes of every base texture currently holding a GL texture (sprite
+   *  atlases, map skins, text) — RGBA estimate for the dev perf panel. */
+  gpuTextureBytes(): number {
+    const renderer = this.app.renderer;
+    if (!('texture' in renderer)) return 0;
+    let bytes = 0;
+    for (const t of (renderer as PIXI.Renderer).texture.managedTextures) bytes += t.realWidth * t.realHeight * 4;
+    return bytes;
+  }
+
   /** Every skin URL the current map + tribe tower templates can load — the
    *  per-map slice of the Assets cache. Shared defaults (coin PNGs, coin-box
    *  skin, power-up art) are deliberately absent so they're never evicted. */
@@ -2662,7 +2674,7 @@ export class Game {
     // these textures was destroyed above.
     this.mapAssetUrls = this.collectMapAssetUrls();
     const staleUrls = [...prevAssetUrls].filter(u => !this.mapAssetUrls.has(u));
-    if (staleUrls.length > 0) void PIXI.Assets.unload(staleUrls).catch(() => {});
+    if (staleUrls.length > 0) void unloadSkinTextures(staleUrls);
     this.resetSpawnTimerFirst('enemy');
     if (this.cpuVsCpu) this.resetSpawnTimerFirst('player');
     this.resetCoinDropTimer();

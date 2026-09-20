@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js';
+import { loadFittedTexture } from './SkinTextures';
 import {
   TOWER_WIDTH, TOWER_HEIGHT, TOWER_HP,
   TOWER_ATTACK_RANGE, TOWER_ATTACK_POWER, TOWER_FIRE_RATE,
@@ -88,7 +89,7 @@ export class Tower {
       // faces west into the battlefield. Anchoring at top-centre keeps the
       // sprite centred on the tower's x regardless of scale sign.
       const flip = side === 'enemy';
-      PIXI.Assets.load<PIXI.Texture>(skinUrl)
+      loadFittedTexture(skinUrl, sw, sh)
         .then(tex => {
           this.body.visible = false;
           const sprite = new PIXI.Sprite(tex);
