@@ -1169,6 +1169,13 @@
             <input type="file" id="input-load-all-map-file" accept=".json,.coinmap.json" style="display:none;" />
           </div>
         </div>
+        <div style="border-top:1px solid var(--border); padding-top:10px; margin-top:4px;">
+          <div class="json-label">Ship to Production <span style="font-size:15px;color:var(--muted-fg);font-style:italic;font-weight:400;margin-left:8px;">&mdash; bakes browser-only edits into the committed defaults</span></div>
+          <div class="json-row" style="margin-top:6px;">
+            <button id="btn-bake-defaults" class="primary">Bake defaultMapData.json</button>
+            <span class="hint">save it over <code>src/defaultMapData.json</code>, then commit</span>
+          </div>
+        </div>
       </div>
     </div>
 

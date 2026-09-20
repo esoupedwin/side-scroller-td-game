@@ -1764,6 +1764,9 @@ class MapBuilder {
     });
 
     document.getElementById('btn-save-all-to-file')!.addEventListener('click', () => this.exportAllToFile());
+    document.getElementById('btn-bake-defaults')!.addEventListener('click', () => {
+      this.exportAllToFile('defaultMapData.json');
+    });
     document.getElementById('btn-load-all-from-file')!.addEventListener('click', () => {
       (document.getElementById('input-load-all-map-file') as HTMLInputElement).click();
     });
@@ -2837,7 +2840,14 @@ class MapBuilder {
     reader.readAsText(file);
   }
 
-  private exportAllToFile(): void {
+  /**
+   * Write every campaign map + tribe tower templates as one package.
+   * The shape is exactly `src/defaultMapData.json`, so passing that filename
+   * produces a drop-in replacement for the committed defaults — that is how a
+   * localStorage-only edit (a background, a layout) becomes what ships to
+   * production instead of living in one browser.
+   */
+  private exportAllToFile(filename?: string): void {
     // Use the live in-memory map for whichever campaign map is currently loaded
     // so unsaved edits are captured without requiring "Save to Game" first.
     const allMaps = buildWorlds().flatMap(w => [...w.maps]).map(m =>
@@ -2855,7 +2865,7 @@ class MapBuilder {
     const a    = document.createElement('a');
     a.href     = url;
     const dt = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
-    a.download = `mapbuilder-coins-all-${dt}.json`;
+    a.download = filename ?? `mapbuilder-coins-all-${dt}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
