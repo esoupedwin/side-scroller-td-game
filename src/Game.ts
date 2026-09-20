@@ -2553,6 +2553,12 @@ export class Game {
 
   private end(winner: 'player' | 'enemy', reason: 'tower' | 'timeout') {
     this.isOver = true;
+    // Push one final HP sync before tick() starts early-exiting at `isOver`:
+    // the killing blow lands after this tick already ran its notify pass, so
+    // without this the top HUD freezes on the pre-fatal value and a tower that
+    // just fell still reads e.g. "14" next to the Defeat banner.
+    this.notifyEnemyTowerHp();
+    this.notifyPlayerTowerHp();
     // Leave the ticker attached: tick() early-exits at `if (this.isOver)` so
     // game logic doesn't run, but camera pan + sprite playback + culling all
     // need to keep ticking so the player can move the map around after the

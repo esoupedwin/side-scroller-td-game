@@ -697,7 +697,8 @@
 
       /* ── Game over screen ───────────────────────────────────────────────────── */
       #game-over { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
-      #game-over h1 { font-size: 48px; font-weight: 900; text-shadow: 0 0 20px currentColor; }
+      /* 86px = the old 48px + 80%. Shared by the Victory and Defeat banners. */
+      #game-over h1 { font-size: 86px; font-weight: 900; text-shadow: 0 0 20px currentColor; }
       #game-over p  { font-size: 18px; margin-top: 8px; color: #ccc; }
       #game-over-stats {
         margin: 20px auto 4px;

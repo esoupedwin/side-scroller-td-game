@@ -131,7 +131,11 @@ export class Tower {
   private drawBar() {
     const color  = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     const ratio  = Math.max(0, this.hp / TOWER_HP);
-    if (Math.abs(ratio - this.lastDrawnTowerRatio) < 0.005) return;
+    // Coalesce sub-0.5% changes, but never skip the frame that reaches zero:
+    // hp clamps at 0, so a killing blow landing on a sliver (4 -> 0 of 1000)
+    // moves the ratio by less than the threshold and would leave a destroyed
+    // tower reading "4 / 1000" for the rest of the match.
+    if (this.hp > 0 && Math.abs(ratio - this.lastDrawnTowerRatio) < 0.005) return;
     this.lastDrawnTowerRatio = ratio;
     const barX   = this.x - Tower.BAR_W / 2;
     const barY   = this.baseY - TOWER_HEIGHT - 262;
