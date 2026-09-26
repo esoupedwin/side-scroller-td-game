@@ -20,6 +20,12 @@
       html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
       body { background: #1a1a2e; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; height: 100dvh; overflow: hidden; gap: 4px; }
       #game-container { position: relative; -webkit-touch-callout: none; user-select: none; }
+      /* HUD zoom — 1 on desktop; main.ts raises it on touch devices (GameConfig.mobile.hudScale).
+         `zoom` scales each element's own lengths (size, padding, font and its top/right offsets),
+         so corner-anchored widgets grow in place and the centred top bar stays centred. */
+      :root { --hud-scale: 1; }
+      #top-hud, #coin-counter, #tribe-pu-btn, #cmd-open-btn, #mute-indicator, #fullscreen-btn,
+      #ui-overlay, #game-over { zoom: var(--hud-scale); }
 
       /* ── Developer panel ────────────────────────────────────────────────────── */
       /* Anchored to the viewport bottom (not the body flex flow) so the game's

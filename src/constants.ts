@@ -1,4 +1,5 @@
 import { GameConfig, type AttackStyle, type CharTypeName, type TribePowerUpId } from './gameConfig';
+import { isTouchDevice } from './mobile';
 import type { CharacterConfig } from './Character';
 import type { Tribe } from './Tribes';
 
@@ -45,7 +46,11 @@ export const CAMERA_TOWER_BOTTOM_GAP = 210;
 // In-world rendering zoom. Applied to the `world` PIXI container so all game
 // objects, backgrounds, and characters scale uniformly. Ground stays anchored
 // at its current screen position (see Game.build()).
-export const GAME_ZOOM = 1.5;
+// Touch devices get a closer camera (GameConfig.mobile.worldZoomMult) — the
+// logical frame is shown at ~0.4× on a phone and reads small otherwise.
+export const GAME_ZOOM = 1.5 * (isTouchDevice ? GameConfig.mobile.worldZoomMult : 1);
+// DOM HUD zoom on touch devices (1 elsewhere); main.ts publishes it as --hud-scale.
+export const MOBILE_HUD_SCALE = isTouchDevice ? GameConfig.mobile.hudScale : 1;
 export const TEXTURE_GC_IDLE_SEC = GameConfig.textureGcIdleSec;
 export const GAME_WIDTH       = GameConfig.worldWidth; // scrollable world width (2246 px)
 export const GAME_HEIGHT      = canvas.height;

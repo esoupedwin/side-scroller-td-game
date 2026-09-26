@@ -2,7 +2,7 @@ import { Game, type CpuStrategyInfo } from './Game';
 import type { PowerUpType } from './PowerUp';
 import {
   charCost, charDisplayName, charIcon, ALL_CHAR_TYPES,
-  VIEWPORT_WIDTH, VIEWPORT_HEIGHT, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS, CHEAT_TOWER_DAMAGE,
+  VIEWPORT_WIDTH, VIEWPORT_HEIGHT, MOBILE_HUD_SCALE, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS, CHEAT_TOWER_DAMAGE,
   CHEAT_CLOCK_SKIP_SEC,
   TRIBE_POWER_UPS, TRIBE_PU_IDS, TRIBE_PU_PLAYER_DEFAULT,
   type CharTypeName, type TribePowerUpId,
@@ -173,6 +173,11 @@ fitGameToWindow();
 // Shown only where it can do something: a touch device with the Fullscreen
 // API (Android Chrome), not already launched from the home screen. iPhone
 // has no API at all — it gets the Add-to-Home-Screen hint on the splash.
+// Touch devices: zoom the DOM HUD (index.html applies `zoom: var(--hud-scale)`
+// to the top bar, coin counter, spawn cards and corner buttons).
+document.documentElement.style.setProperty('--hud-scale', String(MOBILE_HUD_SCALE));
+document.body.classList.toggle('is-touch', isTouchDevice);
+
 const fullscreenBtn = document.getElementById('fullscreen-btn')!;
 if (isTouchDevice && canFullscreen && !isStandalone) {
   fullscreenBtn.classList.add('is-shown');

@@ -474,6 +474,14 @@ export const GameConfig = {
       level_up:         ['/audio/level_up.wav',           '/audio/level_up.mp3',          '/audio/level_up.ogg'],
     },
   },
+  // ── Mobile (touch devices) ────────────────────────────────────────────────
+  // Phones show the 1920×1000 logical frame at ~0.4×, so everything reads small.
+  // worldZoomMult scales the in-world camera zoom (GAME_ZOOM) on touch devices;
+  // hudScale zooms the DOM HUD (top bar, coin counter, spawn cards, buttons).
+  mobile: {
+    worldZoomMult: 1.188,   // 1.10 × 1.08
+    hudScale:      1.177,   // 1.10 × 1.07
+  },
 } as const;
 
 // ── Derived character types ──────────────────────────────────────────────────
