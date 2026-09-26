@@ -12,6 +12,7 @@ import { rankLabel, xpProgress } from './CharacterHUD';
 import { ensureSpriteSets, unloadSpriteSetsExcept, spriteTextureBytes, spriteAtlasStats, type SpriteSetKey } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
 import { WORLDS, ALL_MAPS, loadMapWithOverride, mapCoords } from './maps';
+import { isTouchDevice, isIOS, isStandalone, canFullscreen, isFullscreen, enterFullscreen, exitFullscreen, onFullscreenChange } from './mobile';
 import { TRIBES, TRIBE_ROSTERS, type Tribe, getPlayerTribe, setPlayerTribe } from './Tribes';
 import { RESOLUTIONS, getResolutionHeight, setResolutionHeight } from './resolution';
 import { loadTemplates as loadTribeTowerTemplates } from './TribeTowerTemplates';
@@ -122,11 +123,61 @@ container.insertBefore(canvas, container.firstChild);
 // container, so they stay fixed to the viewport and are unaffected by this scale.
 container.style.transformOrigin = 'center center';   // invariant — set once
 function fitGameToWindow() {
-  const scale = Math.min(window.innerWidth / VIEWPORT_WIDTH, window.innerHeight / VIEWPORT_HEIGHT);
+  // On phones innerHeight can include the strip under a collapsing URL bar;
+  // visualViewport is what is actually on screen. Desktop keeps innerWidth /
+  // innerHeight so a pinch-zoomed window does not shrink the game.
+  const vv = isTouchDevice ? window.visualViewport : null;
+  const w  = vv?.width  ?? window.innerWidth;
+  const h  = vv?.height ?? window.innerHeight;
+  const scale = Math.min(w / VIEWPORT_WIDTH, h / VIEWPORT_HEIGHT);
   container.style.transform = `scale(${scale})`;
+  fitFixedPanels(w, h);
 }
+
+// The squad picker, pause menu and command modal are position:fixed siblings
+// of #game-container, so they miss its scale-to-fit. On a phone the squad card
+// is taller than the screen and Start sits below the fold. Shrink each panel
+// (never enlarge) so the whole card is on screen; the cards' own max-height +
+// overflow scroll stays as the fallback when a panel is *not* being shrunk.
+// A ResizeObserver refits when a hidden panel is shown or its content changes.
+const fixedPanels = Array.from(document.querySelectorAll<HTMLElement>('.lo-card, .pm-card, .cmd-card'));
+for (const el of fixedPanels) el.style.transformOrigin = 'center center';
+function fitFixedPanels(w = window.innerWidth, h = window.innerHeight) {
+  for (const el of fixedPanels) {
+    if (el.offsetParent === null) continue;               // hidden — nothing to measure
+    const naturalH = el.scrollHeight;                     // content height, ignoring the max-height clamp
+    const naturalW = el.offsetWidth;
+    const scale = Math.min(1, (h * 0.94) / naturalH, (w * 0.96) / naturalW);
+    if (scale < 1) {
+      el.style.maxHeight = 'none';                        // let it lay out at full height, then shrink it visually
+      el.style.transform = `scale(${scale})`;
+    } else {
+      el.style.maxHeight = '';
+      el.style.transform = '';
+    }
+  }
+}
+const panelObserver = new ResizeObserver(() => fitFixedPanels(
+  (isTouchDevice ? window.visualViewport?.width  : undefined) ?? window.innerWidth,
+  (isTouchDevice ? window.visualViewport?.height : undefined) ?? window.innerHeight,
+));
+for (const el of fixedPanels) panelObserver.observe(el);
 window.addEventListener('resize', fitGameToWindow);
+window.visualViewport?.addEventListener('resize', fitGameToWindow);
+screen.orientation?.addEventListener('change', fitGameToWindow);
+onFullscreenChange(fitGameToWindow);
 fitGameToWindow();
+
+// ── Mobile: fullscreen button + one-shot fullscreen on first tap ──────────
+// Shown only where it can do something: a touch device with the Fullscreen
+// API (Android Chrome), not already launched from the home screen. iPhone
+// has no API at all — it gets the Add-to-Home-Screen hint on the splash.
+const fullscreenBtn = document.getElementById('fullscreen-btn')!;
+if (isTouchDevice && canFullscreen && !isStandalone) {
+  fullscreenBtn.classList.add('is-shown');
+  fullscreenBtn.addEventListener('click', () => { void (isFullscreen() ? exitFullscreen() : enterFullscreen()); });
+  onFullscreenChange(() => { fullscreenBtn.textContent = isFullscreen() ? '⤢' : '⛶'; });
+}
 
 let gameOver = false;
 
@@ -497,6 +548,13 @@ if (CHEAT_SKIP_INTRO_SCREENS) {
   };
   window.addEventListener('keydown', (e) => { if (e.key === 'Enter') dismissSplash(); });
   document.getElementById('splash-enter')!.addEventListener('click', dismissSplash);
+  if (isTouchDevice) {
+    // No keyboard: the whole splash is the start control. Request fullscreen
+    // from this same gesture — it is the one moment we are guaranteed one.
+    document.getElementById('splash-prompt')!.textContent = 'Tap to start';
+    splashScreen.addEventListener('click', () => { if (canFullscreen && !isStandalone) void enterFullscreen(); dismissSplash(); });
+    if (isIOS && !isStandalone) document.getElementById('splash-ios-hint')!.style.display = 'block';
+  }
 }
 
 // Developer bar (#dev-panel) is hidden by default; P toggles its visibility.

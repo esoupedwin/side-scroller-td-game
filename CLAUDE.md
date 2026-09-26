@@ -43,6 +43,7 @@ Source files import only from `constants.ts`, never directly from `gameConfig.ts
 | `src/names.ts` | `pickName()` — random character display names |
 | `src/SpriteRegistry.ts` | Sprite sheet definitions, per-match loader, atlas repack, per-type frame cache |
 | `src/SkinTextures.ts` | `loadFittedTexture` — map/stock skin PNGs shrunk to their rendered size at load; `unloadSkinTextures` for map switches |
+| `src/mobile.ts` | Touch-device / iOS / standalone detection, `enterFullscreen` (Fullscreen API + landscape lock; absent on iPhone, which gets an Add-to-Home-Screen hint instead) |
 | `public/sprites/<type>/` | Sprite sheet PNGs; presence is optional — missing files fall back to Graphics |
 | `map-builder.html` | Map builder entry point (served at `/map-builder.html`) |
 

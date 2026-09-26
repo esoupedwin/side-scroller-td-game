@@ -2,15 +2,24 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- Home-screen launch (the only chrome-less mode on iOS) + install metadata for Android -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="COIN" />
+    <link rel="apple-touch-icon" href="/ui/apple-touch-icon.png" />
     <title>Tower Defence</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" />
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', 'Segoe UI', sans-serif; font-weight: 900; }
-      body { background: #1a1a2e; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; gap: 4px; }
-      #game-container { position: relative; }
+      html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+      body { background: #1a1a2e; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; height: 100dvh; overflow: hidden; gap: 4px; }
+      #game-container { position: relative; -webkit-touch-callout: none; user-select: none; }
 
       /* ── Developer panel ────────────────────────────────────────────────────── */
       /* Anchored to the viewport bottom (not the body flex flow) so the game's
@@ -396,6 +405,38 @@
         font-family: 'Courier New', monospace;
       }
       #mute-indicator.is-muted .mute-hint { color: rgba(255,138,147,0.7); }
+      #fullscreen-btn {
+        position: absolute;
+        top: 38px; right: 66px;
+        z-index: 25;
+        display: none;             /* shown by main.ts on touch devices that support fullscreen */
+        align-items: center;
+        background: rgba(10,10,24,0.6);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 6px;
+        padding: 2px 8px;
+        color: #ccc;
+        font-size: 15px;
+        line-height: 1.2;
+        cursor: pointer;
+      }
+      #fullscreen-btn.is-shown { display: flex; }
+
+      /* Portrait phones: the 1920×1000 logical frame is unreadable at 390 px
+         wide, so ask for a rotate instead of rendering a postage stamp. Coarse
+         pointer + no hover keeps narrow desktop windows out of it. */
+      #rotate-overlay {
+        display: none;
+        position: fixed; inset: 0; z-index: 9995;
+        background: #1a1a2e; color: #cfe2ff;
+        flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+        text-align: center; font-size: 22px; letter-spacing: 0.06em;
+      }
+      #rotate-overlay .rotate-icon { font-size: 64px; animation: rotate-hint 1.6s ease-in-out infinite; }
+      @keyframes rotate-hint { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-90deg); } }
+      @media (orientation: portrait) and (pointer: coarse) and (hover: none) {
+        #rotate-overlay { display: flex; }
+      }
 
       /* ── Commands button (bottom-right, opens #cmd-modal) ─────────────── */
       /* Replaces the old top-left CharacterHUD strip. Stays visible at all
@@ -1223,6 +1264,14 @@
     <div id="splash-screen">
       <img id="splash-art" src="/ui/splash_screen.png" alt="COIN — real-time strategy tower defence" />
       <div id="splash-prompt">Press <button type="button" id="splash-enter" class="splash-key">Enter</button> to Start</div>
+      <div id="splash-ios-hint" style="display:none; margin-top:28px; font-size:15px; font-weight:400; color:#8aa0b6; letter-spacing:0.02em; max-width:80vw; text-align:center;">
+        For full screen on iPhone: tap <b>Share</b> &rarr; <b>Add to Home Screen</b>, then open COIN from there.
+      </div>
+    </div>
+
+    <div id="rotate-overlay">
+      <div class="rotate-icon">📱</div>
+      <div>Rotate your phone to landscape</div>
     </div>
 
     <div id="loading-screen">
@@ -1268,6 +1317,7 @@
         <span id="mute-icon">🔇</span>
         <span class="mute-hint">M</span>
       </div>
+      <button type="button" id="fullscreen-btn" title="Full screen">⛶</button>
 
       <!-- Spawn buttons are generated from the active tribe's roster
            (gameConfig character blocks) by rebuildSpawnButtons() in main.ts —
