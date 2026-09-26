@@ -8,6 +8,7 @@ import {
   type CharTypeName, type TribePowerUpId,
 } from './constants';
 import { getOwnedCards, loadLoadout, saveLoadout } from './CardCollection';
+import { charStatSheet, statScale, type StatScale } from './CharStats';
 import { rankLabel, xpProgress } from './CharacterHUD';
 import { ensureSpriteSets, unloadSpriteSetsExcept, spriteTextureBytes, spriteAtlasStats, type SpriteSetKey } from './SpriteRegistry';
 import { initAudio, toggleMute, isMuted } from './AudioManager';
@@ -338,11 +339,84 @@ function refreshLoadoutFooter() {
   loadoutStartBtn.disabled   = loadout.size === 0;
 }
 
+// ── Character stat sheet ───────────────────────────────────────────────────
+// A floating panel beside the hovered squad card. Hover shows it (desktop);
+// the ⓘ badge taps it open and PINS it (touch, where there is no hover). All
+// numbers are derived from the unit's gameConfig block — see CharStats.ts.
+const loadoutStats = document.getElementById('lo-stats')!;
+// Card whose sheet is pinned open by a badge tap; null when following hover.
+let pinnedStatsCard: HTMLElement | null = null;
+// Per-stat maxima over the tribe roster on screen — rebuilt with the grid so
+// every bar reads as "share of the best card here".
+let loadoutStatScale: StatScale = { hp: 1, dps: 1, range: 1, speed: 1 };
+
+const escHtml = (t: string) => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
+
+function renderStatSheet(tribe: Tribe, type: string) {
+  const sheet = charStatSheet(tribe, type, loadoutStatScale);
+  const bars = sheet.bars.map(b => `
+    <div class="ls-bar-row">
+      <div class="ls-bar-top"><span>${escHtml(b.label)}</span><b>${escHtml(b.text)}</b></div>
+      <div class="ls-bar-track">
+        <div class="ls-bar-fill" style="width:${Math.round(Math.min(1, Math.max(0.02, b.frac)) * 100)}%;background:${b.color}"></div>
+      </div>
+    </div>`).join('');
+  const rows = sheet.rows.map(r =>
+    `<div class="ls-row"><span>${escHtml(r.label)}</span><b>${escHtml(r.value)}</b></div>`).join('');
+  const traits = sheet.traits.length
+    ? `<div class="ls-traits">${sheet.traits.map(t => `<span class="ls-trait">${escHtml(t)}</span>`).join('')}</div>`
+    : '';
+  loadoutStats.innerHTML = `
+    <div class="ls-head">
+      <span class="ls-icon">${escHtml(sheet.icon)}</span>
+      <span class="ls-name" style="color:${sheet.color}">${escHtml(sheet.name)}</span>
+      <span class="ls-cost">🪙 ${sheet.cost}</span>
+    </div>
+    <div class="ls-role">${escHtml(sheet.role)}</div>
+    ${bars}
+    <div class="ls-rows">${rows}</div>
+    ${traits}`;
+}
+
+/** Park the sheet outside the squad dialog (right side, flipping left when the
+ *  window is too narrow) and align it vertically with the card it describes, so
+ *  it never covers the cards the player is comparing. Falls back to overlaying
+ *  the dialog only when neither side has room. */
+function positionStatSheet(card: HTMLElement) {
+  const c = card.getBoundingClientRect();
+  const d = loadoutScreen.querySelector('.lo-card')!.getBoundingClientRect();
+  const p = loadoutStats.getBoundingClientRect();
+  const gap = 12;
+  let left = d.right + gap;
+  if (left + p.width > window.innerWidth - 8) left = d.left - gap - p.width;
+  left = Math.max(8, Math.min(left, window.innerWidth - p.width - 8));
+  let top = c.top + c.height / 2 - p.height / 2;
+  top = Math.max(8, Math.min(top, window.innerHeight - p.height - 8));
+  loadoutStats.style.left = `${Math.round(left)}px`;
+  loadoutStats.style.top  = `${Math.round(top)}px`;
+}
+
+function showStatSheet(tribe: Tribe, type: string, card: HTMLElement) {
+  renderStatSheet(tribe, type);
+  loadoutStats.style.display = 'block';
+  positionStatSheet(card);   // must run after display so the panel has a size
+}
+
+function hideStatSheet() {
+  loadoutStats.style.display = 'none';
+  loadoutStats.classList.remove('pinned');
+  pinnedStatsCard?.classList.remove('stats-open');
+  pinnedStatsCard = null;
+}
+
 function buildLoadoutGrid() {
   const tribe = loadoutTribe;
   loadoutSub.textContent = `${TRIBES[tribe].displayName} — choose up to ${LOADOUT_MAX_CARDS} character cards`;
   loadoutGrid.innerHTML  = '';
-  for (const t of getOwnedCards(tribe)) {
+  hideStatSheet();
+  const owned = getOwnedCards(tribe);
+  loadoutStatScale = statScale(tribe, owned);
+  for (const t of owned) {
     const card = document.createElement('button');
     card.className = 'loadout-card';
     card.dataset.type = t;
@@ -357,7 +431,31 @@ function buildLoadoutGrid() {
     const cost = document.createElement('span');
     cost.className = 'lo-cost';
     cost.textContent = `🪙 ${charCost(tribe, t)}`;
-    card.append(name, check, cost);
+    const info = document.createElement('span');
+    info.className = 'lo-info';
+    info.textContent = 'i';
+    info.title = `${charDisplayName(tribe, t)} stats`;
+    card.append(name, check, cost, info);
+
+    // Hover follows the pointer unless a badge tap has pinned another card.
+    card.addEventListener('mouseenter', () => {
+      if (pinnedStatsCard) return;
+      showStatSheet(tribe, t, card);
+    });
+    card.addEventListener('mouseleave', () => {
+      if (!pinnedStatsCard) hideStatSheet();
+    });
+    // Badge tap: pin/unpin. Stops the click so it never toggles the selection.
+    info.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const wasPinned = pinnedStatsCard === card;
+      hideStatSheet();
+      if (wasPinned) return;
+      pinnedStatsCard = card;
+      card.classList.add('stats-open');
+      loadoutStats.classList.add('pinned');
+      showStatSheet(tribe, t, card);
+    });
 
     // Card art is optional — types without a PNG keep the cream fallback tile.
     const art = new Image();
@@ -383,6 +481,17 @@ function buildLoadoutGrid() {
   }
   refreshLoadoutFooter();
 }
+
+// Clicking anywhere else on the squad screen releases a pinned sheet (the badge
+// itself stops propagation, so its own toggle never reaches this listener).
+loadoutScreen.addEventListener('click', ev => {
+  const card = (ev.target as HTMLElement).closest('.loadout-card') as HTMLElement | null;
+  if (pinnedStatsCard) hideStatSheet();
+  // The pointer is still resting on the card that was just clicked, so its
+  // mouseenter won't fire again — restore the hover sheet directly.
+  if (card?.dataset.type) showStatSheet(loadoutTribe, card.dataset.type, card);
+});
+window.addEventListener('resize', () => { if (pinnedStatsCard) positionStatSheet(pinnedStatsCard); });
 
 // ── Match-start countdown (3-2-1 → GO!) ────────────────────────────────────
 // Runs after the loadout Start button: the fresh match sits paused while the
@@ -501,6 +610,7 @@ loadoutStartBtn.addEventListener('click', async () => {
   refreshLoadoutFooter();
   if (gen !== loadoutGen) return;   // screen re-opened while loading — that flow owns the start
   loadoutOpen = false;
+  hideStatSheet();
   loadoutScreen.style.display = 'none';
   // Fresh match on the queued map (or a clean restart of the current one).
   // game.reset() also clears the pause we set when the screen opened, and —

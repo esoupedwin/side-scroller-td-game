@@ -906,6 +906,86 @@
         font-size: 14px; font-weight: 800;
         white-space: nowrap;
       }
+      /* Info badge on each card — opens the stat sheet (hover on desktop,
+         tap to pin on touch). Sits opposite the selected-check. */
+      .loadout-card .lo-info {
+        position: absolute; top: 6px; left: 6px;
+        width: 22px; height: 22px; line-height: 21px;
+        background: rgba(12, 18, 28, 0.78); color: #cfe2ff;
+        border: 1px solid rgba(180, 210, 255, 0.55);
+        border-radius: 50%;
+        font-size: 13px; font-weight: 800; font-style: italic; text-align: center;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+        transition: background 0.12s, color 0.12s, transform 0.12s;
+      }
+      .loadout-card .lo-info:hover,
+      .loadout-card.stats-open .lo-info {
+        background: #1f6feb; color: #fff; transform: scale(1.12);
+      }
+
+      /* ── Character stat sheet (squad screen) ─────────────────────────────── */
+      #lo-stats {
+        position: fixed;
+        display: none;
+        z-index: 270;
+        width: 252px;
+        box-sizing: border-box;
+        padding: 12px 14px 13px;
+        background: rgba(14, 19, 28, 0.97);
+        border: 1px solid rgba(140, 180, 220, 0.4);
+        border-radius: 10px;
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.65);
+        color: #e6edf5;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        pointer-events: none;   /* hover panel must never eat the card's mouseleave */
+      }
+      #lo-stats.pinned { pointer-events: auto; }
+      .ls-head { display: flex; align-items: baseline; gap: 7px; }
+      .ls-icon { font-size: 16px; }
+      .ls-name {
+        font-size: 15px; font-weight: 800; text-transform: capitalize;
+        flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .ls-cost { font-size: 13px; font-weight: 800; color: #ffd166; white-space: nowrap; }
+      .ls-role {
+        margin: 1px 0 9px;
+        font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase;
+        color: #8aa0b6;
+      }
+      .ls-bar-row { margin-bottom: 7px; }
+      .ls-bar-top {
+        display: flex; justify-content: space-between;
+        font-size: 11.5px; color: #c4ccd6; margin-bottom: 3px;
+      }
+      .ls-bar-top b { color: #e6edf5; font-weight: 700; }
+      .ls-bar-track {
+        height: 6px; border-radius: 3px;
+        background: rgba(255, 255, 255, 0.09);
+        overflow: hidden;
+      }
+      .ls-bar-fill { height: 100%; border-radius: 3px; }
+      .ls-rows {
+        margin-top: 9px; padding-top: 8px;
+        border-top: 1px solid rgba(140, 180, 220, 0.18);
+        display: flex; flex-direction: column; gap: 3px;
+      }
+      .ls-row {
+        display: flex; justify-content: space-between;
+        font-size: 12px; color: #a9b6c4;
+      }
+      .ls-row b { color: #e6edf5; font-weight: 700; }
+      .ls-traits { margin-top: 9px; display: flex; flex-wrap: wrap; gap: 5px; }
+      .ls-trait {
+        font-size: 10.5px; font-weight: 600;
+        padding: 3px 7px; border-radius: 999px;
+        background: rgba(127, 212, 255, 0.12);
+        border: 1px solid rgba(127, 212, 255, 0.3);
+        color: #cfe2ff;
+      }
+      .lo-hint {
+        margin: -4px 0 0; text-align: center;
+        font-size: 12px; color: #6d7f92;
+      }
       .lo-footer {
         display: flex; align-items: center; justify-content: center; gap: 18px;
         margin-top: 10px;
@@ -1474,6 +1554,7 @@
         </div>
         <p class="lo-sub" id="loadout-sub"></p>
         <div id="loadout-grid"></div>
+        <p class="lo-hint">Hover (or tap <i>i</i> on) a card to see its stats.</p>
         <!-- Tribe power-up picker: one ability per match, options built by main.ts -->
         <div id="tribe-pu-picker">
           <span class="tp-label">Tribe Power:</span>
@@ -1484,6 +1565,9 @@
         </div>
       </div>
     </div>
+
+    <!-- Character stat sheet — floated beside the hovered squad card by main.ts -->
+    <div id="lo-stats"></div>
 
     <div id="pause-menu" style="display:none;">
       <div class="pm-card">
