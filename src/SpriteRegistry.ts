@@ -1,7 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { TRIBE_ROSTERS, type Tribe } from './Tribes';
 import { charConfig, charSpriteFolder, GAME_ZOOM, SPRITE_ATLAS_HEADROOM, SPRITE_ATLAS_GPU_ONLY, SPRITE_ATLAS_LOWMEM_SCALE } from './constants';
-import { getRenderScale } from './resolution';
+import { getTextureScale } from './resolution';
 
 // Each character renders as two stacked PIXI.AnimatedSprite layers that
 // animate independently:
@@ -235,18 +235,17 @@ const ATLAS_MAX_HEIGHT      = 4096;   // conservative WebGL max — fall back to
 const ATLAS_PAD             = 2;      // px gap between packed frames (sampler bleed guard)
 const ATLAS_SCALE_HEADROOM  = SPRITE_ATLAS_HEADROOM;   // texels per rendered px kept before shrinking (1.25 desktop; GameConfig.mobile.atlasHeadroom on touch)
 // GPU-only atlases: upload each atlas as soon as it's packed and close its
-// bitmap, so the GL texture is the only copy (VRAM on a hardware GPU). Off on
-// desktop: in a software-GL / automation Chrome the GL copy lives in system
-// memory too and the churn measured *worse*. On touch devices it is on
-// (GameConfig.mobile.gpuOnlyAtlases) together with a long texture-GC idle,
-// so the single GPU copy simply stays resident; AtlasResource rebuilds an
-// evicted atlas from its sheet if one is ever needed again.
+// bitmap, so the GL texture is the only copy (VRAM on a hardware GPU; GPU-
+// process memory under software GL — still one copy instead of two). Paired
+// with a long texture-GC idle (GameConfig.textureGcIdleSec) so the copy simply
+// stays resident for the match; AtlasResource rebuilds an evicted atlas from
+// its sheet if one is ever needed again (context loss, a very long idle).
 const ATLAS_GPU_ONLY = SPRITE_ATLAS_GPU_ONLY;
 
 /** Largest scale (≤ 1) a frame of height `fh` needs so it still renders with
  *  ATLAS_SCALE_HEADROOM texels per device pixel at the current resolution. */
 function atlasScaleFor(tribe: Tribe, type: string, animDef: SpriteLayerAnimDef, fh: number): number {
-  const renderedPx = charConfig(tribe, type).height * animDef.spriteScale * GAME_ZOOM * getRenderScale();
+  const renderedPx = charConfig(tribe, type).height * animDef.spriteScale * GAME_ZOOM * getTextureScale();
   // SPRITE_ATLAS_LOWMEM_SCALE (< 1 only on ≤ 4 GB touch devices) trades a little
   // sharpness for a proportionally smaller resident set.
   return Math.min(1, (renderedPx * ATLAS_SCALE_HEADROOM * SPRITE_ATLAS_LOWMEM_SCALE) / fh);
@@ -535,6 +534,7 @@ export function loadSpriteSet(tribe: Tribe, type: string): Promise<LoadedSpriteS
     let legsLoaded = false;
 
     for (const [animName, animDef] of Object.entries(def.body) as [BodyAnimName, SpriteLayerAnimDef][]) {
+      if (LAZY_BODY_ANIMS.has(animName)) continue;   // loaded on first use — see requestLazyBodyAnims
       const anim = await loadLayerAnim(tribe, type, 'body', animName, animDef);
       if (anim && anim.frames.length > 0) { body[animName] = anim.frames; bodyLoaded = true; }
       if (anim?.base) bases.push(anim.base);
@@ -579,6 +579,54 @@ export function loadSpriteSet(tribe: Tribe, type: string): Promise<LoadedSpriteS
 
 /** True once a set has been resolved either way (frames cached, or known to
  *  have no art → Graphics). False while unrequested or still loading. */
+// ── Lazy body animations ─────────────────────────────────────────────────────
+// `carry` and `throw` are a third of all atlas bytes (measured 138 of 402 MB)
+// yet only play once a unit has picked up a coin; attackers never show them.
+// The eager per-set load skips them and Character asks for them when a coin
+// is picked up (and, as a safety net, whenever it has to fall back because
+// one is missing). The BODY_ANIM_FALLBACK chain (carry → walk, throw → carry
+// → walk) covers the ~200 ms until the atlas is packed, then Character
+// re-switches to the real frames on its next tick.
+const LAZY_BODY_ANIMS: ReadonlySet<BodyAnimName> = new Set<BodyAnimName>(['carry', 'throw']);
+const lazyInflight = new Set<string>();
+
+/** Whether `anim` is one of the on-demand body animations. */
+export function isLazyBodyAnim(anim: BodyAnimName): boolean { return LAZY_BODY_ANIMS.has(anim); }
+
+/**
+ * Start loading the lazy body anims of a set that is already resident. No-op
+ * for anims already loaded or in flight, and for sets that aren't cached (a
+ * Graphics-rendered type, or a set evicted by unloadSpriteSetsExcept). Frames
+ * are spliced into the live LoadedSpriteSet object, which every Character of
+ * that type already holds, so nothing needs re-plumbing.
+ */
+export function requestLazyBodyAnims(tribe: Tribe, type: string): void {
+  const key = cacheKey(tribe, type);
+  const set = cache.get(key);
+  const def = SPRITE_DEFS[tribe]?.[type];
+  if (!set || !def) return;
+  for (const anim of LAZY_BODY_ANIMS) {
+    const animDef = def.body[anim];
+    const tag = `${key}/${anim}`;
+    if (!animDef || set.body[anim] || lazyInflight.has(tag)) continue;
+    lazyInflight.add(tag);
+    void loadLayerAnim(tribe, type, 'body', anim, animDef)
+      .then(loaded => {
+        if (!loaded) return;
+        if (cache.get(key) !== set) {
+          // Set was unloaded while this was in flight — don't resurrect it.
+          for (const t of loaded.frames) t.destroy(false);
+          loaded.base?.destroy();
+          void PIXI.Assets.unload(animDef.path).catch(() => {});
+          return;
+        }
+        if (loaded.frames.length > 0) set.body[anim] = loaded.frames;
+        if (loaded.base) (atlasBases.get(key) ?? atlasBases.set(key, []).get(key)!).push(loaded.base);
+      })
+      .finally(() => lazyInflight.delete(tag));
+  }
+}
+
 export function isSpriteSetReady(tribe: Tribe, type: string): boolean {
   return cache.has(cacheKey(tribe, type));
 }

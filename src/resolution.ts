@@ -64,3 +64,16 @@ export function getRenderScale(): number {
   const fromSetting = getResolutionHeight() / VIEWPORT_HEIGHT;
   return isTouchDevice ? Math.min(fromSetting, displayScale()) : fromSetting;
 }
+
+/**
+ * Scale to size *textures* by (sprite atlases, fitted skins): device pixels
+ * per logical px, never more than the display can show. Differs from
+ * getRenderScale() on desktop, where the resolution setting may supersample
+ * above the monitor: a sprite drawn into that oversized backing store still
+ * lands on the same device pixels, so texels beyond the display are memory
+ * with no picture in it (the 1440p default on a 1080p monitor doubled atlas
+ * bytes for nothing; 2160p tripled them).
+ */
+export function getTextureScale(): number {
+  return Math.min(getRenderScale(), displayScale());
+}

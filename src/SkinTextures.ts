@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import { GAME_ZOOM } from './constants';
-import { getRenderScale } from './resolution';
+import { getTextureScale } from './resolution';
 
 /**
  * Skin textures fitted to their rendered size.
@@ -31,7 +31,7 @@ export function loadFittedTexture(
   const cached = fitted.get(url);
   if (cached) return cached;
 
-  const deviceScale = (worldSpace ? GAME_ZOOM : 1) * getRenderScale() * SKIN_FIT_HEADROOM;
+  const deviceScale = (worldSpace ? GAME_ZOOM : 1) * getTextureScale() * SKIN_FIT_HEADROOM;
   const targetW = Math.ceil(logicalW * deviceScale);
   const targetH = Math.ceil(logicalH * deviceScale);
 

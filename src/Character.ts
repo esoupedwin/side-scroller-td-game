@@ -28,6 +28,7 @@ import {
   type LoadedSpriteSet, type BodyAnimName, type LegsAnimName,
   getBodyAnimFps, getBodySpriteScale, getBodyFeetAnchorY,
   getLegsAnimFps, getLegsSpriteScale, getLegsFeetAnchorY,
+  requestLazyBodyAnims, isLazyBodyAnim,
 } from './SpriteRegistry';
 import { type Tribe, tribeForSide } from './Tribes';
 import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow, spawnShotgunBlast, spawnSpeedStreak, spawnAfterImage, spawnBlockFlash, spawnAggroWave, type AfterImagePart } from './Vfx';
@@ -355,6 +356,10 @@ export class Character {
   // changed this frame.
   private lastAppliedFacingDir: 0 | 1 | -1 = 0;
   private currentBodyAnim:  BodyAnimName | null = null;
+  /** Anim whose frames are actually on the body sprite — differs from
+   *  currentBodyAnim while a lazy anim (carry/throw) is still loading and
+   *  a fallback is showing; tickAnimSprite re-switches once it arrives. */
+  private bodyAnimResolved: BodyAnimName | null = null;
   private currentLegsAnim:  LegsAnimName | null = null;
   private coinPickupCooldown = 0;
   private coinThrowTimer     = -1;  // countdown before throw; -1 = not winding up
@@ -724,7 +729,10 @@ export class Character {
     sprite.animationSpeed = getBodyAnimFps(this.tribe, this.config.id, picked) / 60;
     this.bodyBaseScale    = this.animScaleFor('body', picked, frames[0].height);
     sprite.play();
-    this.currentBodyAnim = name;
+    this.currentBodyAnim  = name;
+    this.bodyAnimResolved = picked;
+    // Fell back because a lazy anim isn't resident yet — get it loading.
+    if (picked !== name && isLazyBodyAnim(name)) requestLazyBodyAnims(this.tribe, this.config.id);
   }
 
   private switchLegsAnimation(name: LegsAnimName) {
@@ -756,7 +764,11 @@ export class Character {
     // Previously the order was reversed and the new base-scale was visible only
     // on the *next* tick.
     this.selectAnimations();
-    const bodyChanged = this.selBody !== this.currentBodyAnim;
+    // A lazy anim (carry/throw) that finished loading since we fell back
+    // counts as a change too, so the real frames replace the stand-in.
+    const lazyArrived = this.currentBodyAnim !== null && this.currentBodyAnim !== this.bodyAnimResolved
+      && !!this.spriteSet?.body[this.currentBodyAnim];
+    const bodyChanged = this.selBody !== this.currentBodyAnim || lazyArrived;
     const legsChanged = this.selLegs !== this.currentLegsAnim;
     if (bodyChanged) this.switchBodyAnimation(this.selBody);
     if (legsChanged) this.switchLegsAnimation(this.selLegs);
@@ -1850,6 +1862,7 @@ export class Character {
   // â”€â”€ Coin carry visual â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private showCoinCarry() {
+    if (this.spriteSet) requestLazyBodyAnims(this.tribe, this.config.id);   // carry/throw load on first pickup
     if (this.coinCarryGfx) return;
     const [outer, mid,, hi] = COIN_PALETTE[this.coinCarryKind];
     const g = new PIXI.Graphics();

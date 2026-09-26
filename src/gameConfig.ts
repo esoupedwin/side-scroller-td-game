@@ -8,11 +8,14 @@ const GAME_DURATION_S = 300;   // seconds — total match length
 
 export const GameConfig = {
   canvas:    { width: VIEWPORT_W, height: H, durationSec: GAME_DURATION_S },
-  // Seconds a base texture may go undrawn before PIXI releases its GPU copy
-  // (re-uploaded from the retained atlas bitmap on the next draw; PIXI's own
-  // default is 1 hour). Raise it if SpriteRegistry.ATLAS_GPU_ONLY is enabled —
-  // then an eviction means rebuilding the atlas from its sheet.
-  textureGcIdleSec: 30,
+  // Sprite atlases keep a single copy — the GL texture. Each atlas bitmap is
+  // closed right after its upload (SpriteRegistry.ATLAS_GPU_ONLY), which
+  // halves resident sprite memory on every device. An evicted atlas has to be
+  // rebuilt from its sheet (a ~37 MB decode), so the texture GC idle window is
+  // long: within a match nothing is evicted, and match switches unload sets
+  // explicitly anyway. PIXI's own default idle is 1 hour.
+  spriteAtlasGpuOnly: true,
+  textureGcIdleSec:   600,
   worldWidth: W,
   groundY:   H - 80,
   colors:  { player: 0x00b4d8, enemy: 0xe63946 },
@@ -486,8 +489,6 @@ export const GameConfig = {
     // pixels, so it can carry far smaller atlases without visible loss.
     atlasHeadroom:       1.0,   // texels per device px kept before shrinking (desktop: 1.25)
     lowMemoryAtlasScale: 0.8,   // extra atlas shrink when navigator.deviceMemory ≤ 4 GB
-    gpuOnlyAtlases:      true,  // close each atlas bitmap after its GPU upload — one copy, not two
-    textureGcIdleSec:    600,   // with GPU-only atlases an eviction means a sheet decode: keep them
   },
 } as const;
 
