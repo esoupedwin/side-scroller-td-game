@@ -11,7 +11,7 @@ import { getOwnedCards, loadLoadout, saveLoadout } from './CardCollection';
 import { charStatSheet, statScale, type StatScale } from './CharStats';
 import { rankLabel, xpProgress } from './CharacterHUD';
 import { ensureSpriteSets, unloadSpriteSetsExcept, spriteTextureBytes, spriteAtlasStats, type SpriteSetKey } from './SpriteRegistry';
-import { initAudio, toggleMute, isMuted } from './AudioManager';
+import { toggleMute, isMuted } from './AudioManager';
 import { WORLDS, ALL_MAPS, loadMapWithOverride, mapCoords } from './maps';
 import { isTouchDevice, isIOS, isStandalone, canFullscreen, isFullscreen, enterFullscreen, exitFullscreen, onFullscreenChange } from './mobile';
 import { TRIBES, TRIBE_ROSTERS, type Tribe, getPlayerTribe, setPlayerTribe } from './Tribes';
@@ -29,7 +29,6 @@ loadTribeTowerTemplates(); // sync localStorage read — must run before `new Ga
 // is evicted on map switch. The dev fast-start skips the squad screen and its
 // match starts spawning immediately, so it needs every roster up front.
 if (CHEAT_SKIP_INTRO_SCREENS) await ensureSpriteSets(allRosterKeys());
-initAudio(); // fire-and-forget — loads in background, never delays game start
 
 // Fade out and remove the loading screen once startup assets are ready
 loadingScreen.classList.add('fade-out');
@@ -87,6 +86,8 @@ function rebuildSpawnButtons() {
       btn.classList.add('has-card');
       btn.style.backgroundImage = `url('${art.src}')`;
     };
+    // Thumbnails can wait behind the splash hero and the first map's skins.
+    (art as HTMLImageElement & { fetchPriority?: string }).fetchPriority = 'low';
     art.src = `/cards/buy/card_buy_${t}.png`;
 
     btn.addEventListener('click', () => game.spawnPlayer(t as CharTypeName));
@@ -468,6 +469,8 @@ function buildLoadoutGrid() {
       card.classList.add('has-art');
       card.style.backgroundImage = `url('${art.src}')`;
     };
+    // Thumbnails can wait behind the splash hero and the first map's skins.
+    (art as HTMLImageElement & { fetchPriority?: string }).fetchPriority = 'low';
     art.src = `/cards/buy/card_buy_${t}.png`;
 
     card.addEventListener('click', () => {

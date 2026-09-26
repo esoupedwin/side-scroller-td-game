@@ -14,7 +14,11 @@
     <title>Tower Defence</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" />
+    <!-- Non-blocking: a cross-origin stylesheet would otherwise hold first paint hostage to
+         Google's latency (measured ~150 ms RTT on mobile). Text renders in the fallback face
+         until Outfit arrives (display=swap). -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" /></noscript>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', 'Segoe UI', sans-serif; font-weight: 900; }
       html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
@@ -1348,7 +1352,7 @@
   <body>
     <!-- ── Splash screen — revealed when the loading screen fades ── -->
     <div id="splash-screen">
-      <img id="splash-art" src="/ui/splash_screen.png" alt="COIN — real-time strategy tower defence" />
+      <img id="splash-art" src="/ui/splash_screen.webp" alt="COIN — real-time strategy tower defence" fetchpriority="high" decoding="async" />
       <div id="splash-prompt">Press <button type="button" id="splash-enter" class="splash-key">Enter</button> to Start</div>
       <div id="splash-ios-hint" style="display:none; margin-top:28px; font-size:15px; font-weight:400; color:#8aa0b6; letter-spacing:0.02em; max-width:80vw; text-align:center;">
         For full screen on iPhone: tap <b>Share</b> &rarr; <b>Add to Home Screen</b>, then open COIN from there.

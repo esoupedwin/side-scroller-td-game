@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "bake:maps": "node scripts/extract-map-skins.mjs"
   },
   "dependencies": {
     "howler": "^2.2.4",

@@ -27,9 +27,6 @@ let masterVolume: number = muted ? 0 : SFX_VOLUME;
 let viewportLeft  = 0;
 let viewportRight = Infinity;
 
-/** Maximum numbered variants probed per sound ID (e.g. sword_slash-01 … sword_slash-09). */
-const MAX_VARIANTS = 9;
-
 /**
  * Call once per tick from Game.ts after the camera position is resolved.
  * Both values are in world-space pixels (before GAME_ZOOM).
@@ -50,87 +47,41 @@ function spatialMult(worldX: number): number {
 }
 
 /**
- * Probe a URL with a HEAD request.
- * Returns the URL if it exists (HTTP 2xx), otherwise null.
- * Used to confirm a variant file exists before handing it to Howler,
- * so Howler never receives a path that 404s.
+ * One Howl per listed file. Every entry in GameConfig.audio.sounds is a real
+ * file (variants of the same sound are separate entries), so nothing is probed
+ * and nothing 404s.
  */
-async function probe(url: string): Promise<string | null> {
-  try {
-    const r = await fetch(url, { method: 'HEAD' });
-    return r.ok ? url : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Given the base source list for a sound and a variant index (1-based),
- * probe each format extension in order and return the first URL that exists.
- * Returns null if no format variant file is found for that index.
- */
-async function findVariantSrc(baseSrcs: readonly string[], n: number): Promise<string | null> {
-  const suffix = n.toString().padStart(2, '0');
-  for (const src of baseSrcs) {
-    const dot    = src.lastIndexOf('.');
-    const varSrc = `${src.slice(0, dot)}-${suffix}${src.slice(dot)}`;
-    const found  = await probe(varSrc);
-    if (found) return found;
-  }
-  return null;
-}
-
-/**
- * Create a Howl for a single confirmed source path and add it to the pool on load.
- * Because the src is already confirmed to exist, Howler will never 404.
- */
-function loadVariant(id: AudioSpriteId, srcs: string[]): void {
+function loadVariant(id: AudioSpriteId, src: string): void {
   const h = new Howl({
-    src:     srcs,
+    src:     [src],
     volume:  masterVolume,
     preload: true,
     onload: () => {
       const pool = instances.get(id) ?? [];
       pool.push(h);
       instances.set(id, pool);
-      console.log(`[audio] "${id}" variant loaded (${pool.length} in pool)`);
     },
     onloaderror: (_sid, err) => {
-      console.warn(`[audio] "${id}" failed to load:`, err);
+      console.warn(`[audio] "${id}" failed to load ${src}:`, err);
     },
   });
 }
 
 /**
- * Load the base file for a sound, then probe for numbered variants (-01, -02, …)
- * sequentially. Stops at the first missing slot (assumes sequential numbering).
- * All sounds run in parallel; variants within each sound are probed in order.
+ * Load every sound. Idempotent. Deliberately NOT called at startup: the game
+ * starts muted, so the ~8 MB of WAV download + decode waits for the first
+ * unmute (see setMuted). On a phone that is the difference between the splash
+ * appearing after the JS or after the audio — measured 190 requests / 13 MB
+ * before first paint with the old eager probe-and-preload.
+ * playSoundAt() silently skips sounds that haven't loaded yet.
  */
-async function loadSoundWithVariants(id: AudioSpriteId, srcs: readonly string[]): Promise<void> {
-  // Base file — pass the full format list so Howler picks the best supported format.
-  // The base file is expected to exist; if all formats 404 the warning fires once.
-  loadVariant(id, srcs as string[]);
-
-  // Numbered variants: discover via HEAD, then load a single confirmed path.
-  for (let i = 1; i <= MAX_VARIANTS; i++) {
-    const src = await findVariantSrc(srcs, i);
-    if (!src) break;          // no file for this slot → no more variants
-    loadVariant(id, [src]);   // single confirmed path, Howler won't 404
-  }
-}
-
-/**
- * Kick off loading for all sounds and their numbered variants, then return immediately.
- * Audio loads in the background; playSoundAt() silently skips sounds not yet ready.
- * Call once from main.ts after preloadAllSprites().
- */
+let audioLoadStarted = false;
 export function initAudio(): void {
-  const entries = Object.entries(SFX_SOUNDS) as [AudioSpriteId, readonly string[]][];
-  void Promise.all(
-    entries
-      .filter(([, srcs]) => srcs.length > 0)
-      .map(([id, srcs]) => loadSoundWithVariants(id, srcs)),
-  );
+  if (audioLoadStarted) return;
+  audioLoadStarted = true;
+  for (const [id, srcs] of Object.entries(SFX_SOUNDS) as [AudioSpriteId, readonly string[]][]) {
+    for (const src of srcs) loadVariant(id, src);
+  }
 }
 
 /**
@@ -168,6 +119,7 @@ export function setSfxVolume(v: number): void {
 export function isMuted(): boolean { return muted; }
 
 export function setMuted(next: boolean): void {
+  if (!next) initAudio();   // first unmute pays for the audio load, not startup
   if (next === muted) return;
   muted = next;
   if (muted) {

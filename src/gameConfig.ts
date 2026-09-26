@@ -463,18 +463,19 @@ export const GameConfig = {
     // WAV and FLAC work in all browsers; OGG works everywhere except Safari.
     // An empty array disables that sound gracefully — no file required until you have it.
     sounds: {
-      // List every format you might have — Howler picks the first file that actually exists.
-      // Keep the format your file is in as the first entry for fastest loading.
-      sword_slash:      ['/audio/sword_slash.ogg',       '/audio/sword_slash.mp3',      '/audio/sword_slash.wav'],
-      punch:            ['/audio/punch.wav',              '/audio/punch.mp3',             '/audio/punch.ogg'],
-      arrow_fire:       ['/audio/arrow_fire.wav',         '/audio/arrow_fire.mp3',        '/audio/arrow_fire.ogg'],
-      gun_fire:         ['/audio/gun_fire.wav',           '/audio/gun_fire.mp3',          '/audio/gun_fire.ogg'],
-      sniper_shot:      ['/audio/sniper_shot.wav',        '/audio/sniper_shot.mp3',       '/audio/sniper_shot.ogg'],
-      rocket_launch:    ['/audio/rocket_launch.mp3',      '/audio/rocket_launch.wav',     '/audio/rocket_launch.ogg'],
-      grenade_throw:    ['/audio/grenade_throw.wav',      '/audio/grenade_throw.mp3',     '/audio/grenade_throw.ogg'],
-      rocket_explosion: ['/audio/rocket_explosion.wav',   '/audio/rocket_explosion.mp3',  '/audio/rocket_explosion.ogg'],
-      grenade_explosion:['/audio/grenade_explosion.wav',  '/audio/grenade_explosion.mp3', '/audio/grenade_explosion.ogg'],
-      level_up:         ['/audio/level_up.wav',           '/audio/level_up.mp3',          '/audio/level_up.ogg'],
+      // Each entry is one file that exists under public/audio; several entries
+      // are random variants of the same sound. Listed explicitly on purpose —
+      // discovering variants by probing URLs cost ~190 requests at startup.
+      sword_slash:      ['/audio/sword_slash-01.ogg', '/audio/sword_slash-02.wav', '/audio/sword_slash-03.wav'],
+      punch:            ['/audio/punch.wav'],
+      arrow_fire:       ['/audio/arrow_fire.wav'],
+      gun_fire:         ['/audio/gun_fire.wav'],
+      sniper_shot:      ['/audio/sniper_shot.wav'],
+      rocket_launch:    ['/audio/rocket_launch.mp3'],
+      grenade_throw:    ['/audio/grenade_throw.wav'],
+      rocket_explosion: ['/audio/rocket_explosion.wav'],
+      grenade_explosion:['/audio/grenade_explosion.wav'],
+      level_up:         ['/audio/level_up.mp3'],
     },
   },
   // ── Mobile (touch devices) ────────────────────────────────────────────────

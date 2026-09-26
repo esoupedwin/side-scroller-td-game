@@ -788,7 +788,9 @@ class MapBuilder {
   private syncSkinSize(elId: string, dataUrl: string | undefined) {
     const el = document.getElementById(elId);
     if (!el) return;
-    el.textContent = dataUrl ? `stored: ${(dataUrl.length / 1024).toFixed(0)} KB` : '';
+    el.textContent = !dataUrl ? ''
+      : dataUrl.startsWith('data:') ? `stored: ${(dataUrl.length / 1024).toFixed(0)} KB`
+      : `file: ${dataUrl}`;   // baked skins live under public/maps/skins (scripts/extract-map-skins.mjs)
   }
 
   private syncBackgroundSkinPreview() {
