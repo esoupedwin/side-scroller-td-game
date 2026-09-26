@@ -978,6 +978,8 @@
         user-select: none;
         animation: splash-pulse 1.6s ease-in-out infinite;
       }
+      /* The key cap is a real button — clicking it starts the game just like
+         pressing Enter. Inherits the prompt's type so it reads as one line. */
       #splash-prompt .splash-key {
         display: inline-block;
         padding: 2px 14px;
@@ -985,7 +987,17 @@
         border: 2px solid rgba(207, 226, 255, 0.55);
         border-radius: 8px;
         background: rgba(255, 255, 255, 0.06);
+        font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s, transform 0.1s;
       }
+      #splash-prompt .splash-key:hover,
+      #splash-prompt .splash-key:focus-visible {
+        background: rgba(255, 255, 255, 0.18);
+        border-color: #cfe2ff;
+        outline: none;
+      }
+      #splash-prompt .splash-key:active { transform: translateY(1px); }
       @keyframes splash-pulse {
         0%, 100% { opacity: 1; }
         50%      { opacity: 0.35; }
@@ -1210,7 +1222,7 @@
     <!-- ── Splash screen — revealed when the loading screen fades ── -->
     <div id="splash-screen">
       <img id="splash-art" src="/ui/splash_screen.png" alt="COIN — real-time strategy tower defence" />
-      <div id="splash-prompt">Press <span class="splash-key">Enter</span> to Start</div>
+      <div id="splash-prompt">Press <button type="button" id="splash-enter" class="splash-key">Enter</button> to Start</div>
     </div>
 
     <div id="loading-screen">

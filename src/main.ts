@@ -485,13 +485,18 @@ if (CHEAT_SKIP_INTRO_SCREENS) {
   uiOverlay.style.visibility = 'hidden';
   hudEl.style.visibility     = 'hidden';
 
-  window.addEventListener('keydown', (e) => {
-    if (!splashOpen || e.key !== 'Enter') return;
+  // Enter key or a click on the on-screen key cap — both hand off to squad
+  // selection. Guarded by splashOpen so a focused button's Enter (keydown +
+  // synthesized click) can't dismiss twice.
+  const dismissSplash = () => {
+    if (!splashOpen) return;
     splashOpen = false;
     splashScreen.classList.add('fade-out');
     splashScreen.addEventListener('transitionend', () => splashScreen.remove(), { once: true });
     openLoadoutScreen();
-  });
+  };
+  window.addEventListener('keydown', (e) => { if (e.key === 'Enter') dismissSplash(); });
+  document.getElementById('splash-enter')!.addEventListener('click', dismissSplash);
 }
 
 // Developer bar (#dev-panel) is hidden by default; P toggles its visibility.
