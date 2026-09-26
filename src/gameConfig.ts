@@ -356,15 +356,15 @@ export const GameConfig = {
     coinValue:          30,
     killReward:         2,
     towerKillReward:    15,
-    dropIntervalMinMs:  4_000,
-    dropIntervalMaxMs:  15_000,
+    dropIntervalMinMs:  3_640,
+    dropIntervalMaxMs:  13_640,
     coinLifetimeSec:    30,
     silverCoinValue:         15,     // silver is worth less than gold (20)
-    silverDropIntervalMinMs: 5_000, // drops 50% more often than gold (min)
-    silverDropIntervalMaxMs: 10_000,// drops 50% more often than gold (max)
+    silverDropIntervalMinMs: 4_550, // drops 50% more often than gold (min)
+    silverDropIntervalMaxMs: 9_090,// drops 50% more often than gold (max)
     blueCoinValue:           200,    // rare jackpot — worth ~6.7× a gold coin
-    blueDropIntervalMinMs:   60_000, // super rare: one every 1–2.5 minutes
-    blueDropIntervalMaxMs:   150_000,
+    blueDropIntervalMinMs:   54_550, // super rare: one every ~0.9–2.3 minutes
+    blueDropIntervalMaxMs:   136_360,
     lowBalanceThreshold:  25,   // below this balance, passive income rate doubles
     lowBalanceIncomeMult:  3,   // multiplier applied when balance is below threshold
     coinGravity:        520,    // px/s² — physics for airborne coins
