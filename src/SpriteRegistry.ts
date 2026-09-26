@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import { TRIBE_ROSTERS, type Tribe } from './Tribes';
-import { charConfig, charSpriteFolder, GAME_ZOOM } from './constants';
+import { charConfig, charSpriteFolder, GAME_ZOOM, SPRITE_ATLAS_HEADROOM, SPRITE_ATLAS_GPU_ONLY, SPRITE_ATLAS_LOWMEM_SCALE } from './constants';
 import { getRenderScale } from './resolution';
 
 // Each character renders as two stacked PIXI.AnimatedSprite layers that
@@ -233,21 +233,23 @@ const REPACK_SHEETS         = true;
 const ATLAS_MAX_WIDTH       = 4096;   // shelf-pack row width
 const ATLAS_MAX_HEIGHT      = 4096;   // conservative WebGL max — fall back to the raw sheet beyond this
 const ATLAS_PAD             = 2;      // px gap between packed frames (sampler bleed guard)
-const ATLAS_SCALE_HEADROOM  = 1.25;   // keep ≥ 1.25 texels per rendered px before shrinking
+const ATLAS_SCALE_HEADROOM  = SPRITE_ATLAS_HEADROOM;   // texels per rendered px kept before shrinking (1.25 desktop; GameConfig.mobile.atlasHeadroom on touch)
 // GPU-only atlases: upload each atlas as soon as it's packed and close its
-// bitmap, so the GL texture is the only copy (VRAM on a hardware GPU). Off by
-// default: in a software-GL / automation Chrome the GL copy lives in system
-// memory too and the churn measured *worse*, and it can't be verified from
-// inside the page. Trial it on a real GPU with Chrome's task manager (GPU
-// memory column) before enabling; AtlasResource rebuilds evicted atlases from
-// their sheets when it's on.
-const ATLAS_GPU_ONLY = false;
+// bitmap, so the GL texture is the only copy (VRAM on a hardware GPU). Off on
+// desktop: in a software-GL / automation Chrome the GL copy lives in system
+// memory too and the churn measured *worse*. On touch devices it is on
+// (GameConfig.mobile.gpuOnlyAtlases) together with a long texture-GC idle,
+// so the single GPU copy simply stays resident; AtlasResource rebuilds an
+// evicted atlas from its sheet if one is ever needed again.
+const ATLAS_GPU_ONLY = SPRITE_ATLAS_GPU_ONLY;
 
 /** Largest scale (≤ 1) a frame of height `fh` needs so it still renders with
  *  ATLAS_SCALE_HEADROOM texels per device pixel at the current resolution. */
 function atlasScaleFor(tribe: Tribe, type: string, animDef: SpriteLayerAnimDef, fh: number): number {
   const renderedPx = charConfig(tribe, type).height * animDef.spriteScale * GAME_ZOOM * getRenderScale();
-  return Math.min(1, (renderedPx * ATLAS_SCALE_HEADROOM) / fh);
+  // SPRITE_ATLAS_LOWMEM_SCALE (< 1 only on ≤ 4 GB touch devices) trades a little
+  // sharpness for a proportionally smaller resident set.
+  return Math.min(1, (renderedPx * ATLAS_SCALE_HEADROOM * SPRITE_ATLAS_LOWMEM_SCALE) / fh);
 }
 
 interface PackedAtlas {
@@ -290,7 +292,13 @@ async function drawAtlas(
   const canvas = document.createElement('canvas');
   canvas.width  = layout.width;
   canvas.height = layout.height;
-  const ctx = canvas.getContext('2d');
+  // CPU canvas, deliberately. The sheet arrives as a software bitmap (decoded
+  // in PIXI's worker); drawing it into an *accelerated* canvas uploads the
+  // whole 37 MB sheet through a GPU transfer buffer, and Chrome keeps those
+  // shared-memory chunks pooled at their high-water mark — measured at
+  // ~600 MB of never-returned mapped memory after one match start. A software
+  // blit costs a few ms per sheet and leaves nothing behind.
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('[sprites] 2d context unavailable');
   ctx.imageSmoothingEnabled = scale < 1;
   ctx.imageSmoothingQuality = 'high';
@@ -434,7 +442,32 @@ interface LoadedLayerAnim {
  * source sheet is unloaded before returning; otherwise it stays in the Assets
  * cache and the frames reference it directly.
  */
-async function loadLayerAnim(
+// A match start asks for every sheet of every loadout type at once — ~40
+// sheets, each ~37 MB once decoded. Unthrottled, that is a ~1.4 GB transient
+// (enough to get the tab killed on a 4 GB phone) and it is what inflated the
+// GPU transfer pool above. Decode + pack a few at a time instead; the sheets
+// still stream in well under the squad screen's "Loading…" moment.
+const SHEET_LOAD_CONCURRENCY = 3;
+let sheetSlotsInUse = 0;
+const sheetWaiters: (() => void)[] = [];
+async function withSheetSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (sheetSlotsInUse >= SHEET_LOAD_CONCURRENCY) await new Promise<void>(r => sheetWaiters.push(r));
+  sheetSlotsInUse++;
+  try { return await fn(); }
+  finally { sheetSlotsInUse--; sheetWaiters.shift()?.(); }
+}
+
+function loadLayerAnim(
+  tribeId: Tribe,
+  type:    string,
+  layer:   'body' | 'legs',
+  animName: string,
+  animDef: SpriteLayerAnimDef,
+): Promise<LoadedLayerAnim | null> {
+  return withSheetSlot(() => loadLayerAnimNow(tribeId, type, layer, animName, animDef));
+}
+
+async function loadLayerAnimNow(
   tribeId: Tribe,
   type:    string,
   layer:   'body' | 'legs',

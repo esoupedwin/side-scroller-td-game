@@ -481,6 +481,13 @@ export const GameConfig = {
   mobile: {
     worldZoomMult: 1.188,   // 1.10 × 1.08
     hudScale:      1.177,   // 1.10 × 1.07
+    // Memory. Sprite atlases dominate the footprint (≈450–560 MB resident at
+    // the desktop defaults), and a phone shows the whole frame in ~1/3 the
+    // pixels, so it can carry far smaller atlases without visible loss.
+    atlasHeadroom:       1.0,   // texels per device px kept before shrinking (desktop: 1.25)
+    lowMemoryAtlasScale: 0.8,   // extra atlas shrink when navigator.deviceMemory ≤ 4 GB
+    gpuOnlyAtlases:      true,  // close each atlas bitmap after its GPU upload — one copy, not two
+    textureGcIdleSec:    600,   // with GPU-only atlases an eviction means a sheet decode: keep them
   },
 } as const;
 

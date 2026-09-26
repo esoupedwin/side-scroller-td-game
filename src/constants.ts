@@ -51,7 +51,15 @@ export const CAMERA_TOWER_BOTTOM_GAP = 210;
 export const GAME_ZOOM = 1.5 * (isTouchDevice ? GameConfig.mobile.worldZoomMult : 1);
 // DOM HUD zoom on touch devices (1 elsewhere); main.ts publishes it as --hud-scale.
 export const MOBILE_HUD_SCALE = isTouchDevice ? GameConfig.mobile.hudScale : 1;
-export const TEXTURE_GC_IDLE_SEC = GameConfig.textureGcIdleSec;
+export const TEXTURE_GC_IDLE_SEC = isTouchDevice ? GameConfig.mobile.textureGcIdleSec : GameConfig.textureGcIdleSec;
+// Sprite-atlas memory policy (see GameConfig.mobile). Desktop keeps the original
+// 1.25 headroom and retains atlas bitmaps; touch devices trade a little
+// oversampling nobody can see on a phone for a much smaller resident set.
+export const SPRITE_ATLAS_HEADROOM = isTouchDevice ? GameConfig.mobile.atlasHeadroom : 1.25;
+export const SPRITE_ATLAS_GPU_ONLY = isTouchDevice && GameConfig.mobile.gpuOnlyAtlases;
+const deviceMemoryGB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+export const SPRITE_ATLAS_LOWMEM_SCALE =
+  isTouchDevice && deviceMemoryGB !== undefined && deviceMemoryGB <= 4 ? GameConfig.mobile.lowMemoryAtlasScale : 1;
 export const GAME_WIDTH       = GameConfig.worldWidth; // scrollable world width (2246 px)
 export const GAME_HEIGHT      = canvas.height;
 export const GAME_DURATION_SEC = canvas.durationSec;

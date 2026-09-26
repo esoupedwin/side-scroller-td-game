@@ -1,4 +1,5 @@
-import { VIEWPORT_HEIGHT } from './constants';
+import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from './constants';
+import { isTouchDevice } from './mobile';
 
 /**
  * Render-resolution setting. The logical viewport is fixed (VIEWPORT_HEIGHT
@@ -35,8 +36,31 @@ export function setResolutionHeight(height: number): void {
   try { localStorage.setItem(STORAGE_KEY, String(height)); } catch { /* ignore */ }
 }
 
-/** PIXI renderer resolution (backing-store px per logical px): selected
- *  vertical resolution ÷ the logical viewport height. */
+/**
+ * Device pixels per logical px that the screen can actually show: the
+ * scale-to-fit factor for the logical frame on this screen, times the DPR.
+ * Uses `screen` (not the window) so a URL bar or a portrait moment at load
+ * does not bake a too-small value in; landscape is assumed since the game
+ * refuses to run in portrait.
+ */
+function displayScale(): number {
+  const long  = Math.max(screen.width, screen.height);
+  const short = Math.min(screen.width, screen.height);
+  return (window.devicePixelRatio || 1) * Math.min(long / VIEWPORT_WIDTH, short / VIEWPORT_HEIGHT);
+}
+
+/**
+ * PIXI renderer resolution (backing-store px per logical px): selected
+ * vertical resolution ÷ the logical viewport height.
+ *
+ * Touch devices are capped at displayScale(): a phone shows the frame at
+ * ~0.4× in CSS px, so a 1440p backing store is mostly discarded on the way
+ * to the screen — yet this value also sizes every sprite atlas and fitted
+ * skin (SpriteRegistry.atlasScaleFor, SkinTextures), so the waste is paid
+ * in memory, not just fill rate. Desktop is left alone: there the setting
+ * doubles as supersampling and the player chose it.
+ */
 export function getRenderScale(): number {
-  return getResolutionHeight() / VIEWPORT_HEIGHT;
+  const fromSetting = getResolutionHeight() / VIEWPORT_HEIGHT;
+  return isTouchDevice ? Math.min(fromSetting, displayScale()) : fromSetting;
 }
