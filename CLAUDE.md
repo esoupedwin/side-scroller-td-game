@@ -473,7 +473,8 @@ Every AI improvement is a flag so the harness can ablate it: `'improved'` = ever
 - `reactionReserve` — economy spend-down keeps the cheapest unit's cost back so the reactive buy has something to spend.
 - `smartRetreat` — ranged units retreat at `retreatHpFracRanged` (0.3) instead of 0.15; nobody *starts* a retreat from inside the enemy tower's range (it would die on the walk home — commit instead).
 - `blueCoinPriority` — a blue coin on the field forces `wantedCollectors ≥ 1` (except all-in).
-- `counterComp` — `spawnCpu` multiplies each candidate's stance score by `1 + counterWeight × (meleeShare × (reach−1) + rangedShare × (tanky−1))` from the opponent's live non-collecting mix, and by `max(0.4, 1 − sameTypePenalty × alive-of-type)`.
+- `counterComp` — `spawnCpu` multiplies each candidate's stance score by `1 + counterWeight × (meleeShare × (reach−1) + rangedShare × (tanky−1))` from the opponent's live non-collecting mix.
+- `typeDiversity` — and by `max(0.4, 1 − sameTypePenalty × alive-of-type)` (split from `counterComp` so each can be measured alone).
 When adding a feature: append to `CPU_FEATURES`, gate the code on the flag, and run the harness with B = `improved-no-<flag>` to get its individual contribution; if it doesn't earn its place, add it to `CPU_EXPERIMENTAL` rather than deleting the code.
 
 ### Tempo (`gameConfig.cpu.tempo`, per-side `CpuProfile`)

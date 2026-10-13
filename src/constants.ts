@@ -20,14 +20,16 @@ export const CPU_FEATURES = [
   'reactionReserve',  // economy spend-down keeps one cheap unit's cost back so a reactive buy can land
   'smartRetreat',     // ranged units retreat earlier; nobody starts a retreat from inside enemy tower range
   'blueCoinPriority', // a blue coin on the field always drafts one collector (not during all-in)
-  'counterComp',      // buy order weighs the opponent's live mix and penalises stacking one type
+  'counterComp',      // buy order weighs the opponent's live mix (range vs melee-heavy, durability vs ranged-heavy)
+  'typeDiversity',    // buy order penalises stacking one type (× (1 − sameTypePenalty × alive-of-type))
 ] as const;
 export type CpuFeature = typeof CPU_FEATURES[number];
 // Flags that measured no gain in self-play (10-match ablations, 2026-10-13):
-// rushFinisher 4/10 vs without (+74 margin); counterComp 5/10 (−142 margin).
-// Kept out of 'improved' but available as 'improved-plus-<flag>' for re-testing
-// after a rework — delete from this list to promote one.
-export const CPU_EXPERIMENTAL: readonly CpuFeature[] = ['rushFinisher', 'counterComp'];
+// rushFinisher 4/10 vs without (+74 margin); counterComp+typeDiversity as one
+// flag 5/10 (−142 margin) — since split so each can be tested alone. Kept out
+// of 'improved' but available as 'improved-plus-<flag>' for re-testing after
+// a rework — delete from this list to promote one.
+export const CPU_EXPERIMENTAL: readonly CpuFeature[] = ['rushFinisher', 'counterComp', 'typeDiversity'];
 export type CpuProfile =
   | 'legacy' | 'improved' | `improved-no-${CpuFeature}` | `improved-plus-${CpuFeature}`;
 const CPU_STANDARD = CPU_FEATURES.filter(f => !CPU_EXPERIMENTAL.includes(f));

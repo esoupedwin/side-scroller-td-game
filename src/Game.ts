@@ -1323,7 +1323,8 @@ export class Game {
     // counterComp: weigh each candidate by the opponent's live mix — standoff
     // range against a melee-heavy field, durability against a ranged-heavy
     // one — and discourage stacking one type however well it scores.
-    const counter = this.cpuFeatures[self].has('counterComp');
+    const counter   = this.cpuFeatures[self].has('counterComp');
+    const diversity = this.cpuFeatures[self].has('typeDiversity');
     let meleeShare = 0, rangedShare = 0;
     const ownCount = new Map<string, number>();
     if (counter) {
@@ -1336,11 +1337,11 @@ export class Game {
         else if (s === 'arrow' || s === 'bullet') rangedShare++;
       }
       if (n > 0) { meleeShare /= n; rangedShare /= n; }
-      for (const c of selfChars) ownCount.set(c.config.id, (ownCount.get(c.config.id) ?? 0) + 1);
     }
-    const shape = (type: string, p: UnitProfile): number => !counter ? 1 :
-      (1 + CPU_VAL_COUNTER_WEIGHT * (meleeShare * (p.reach - 1) + rangedShare * (p.tanky - 1)))
-      * Math.max(0.4, 1 - CPU_VAL_SAME_TYPE_PENALTY * (ownCount.get(type) ?? 0));
+    if (diversity) for (const c of selfChars) ownCount.set(c.config.id, (ownCount.get(c.config.id) ?? 0) + 1);
+    const shape = (type: string, p: UnitProfile): number =>
+      (counter   ? 1 + CPU_VAL_COUNTER_WEIGHT * (meleeShare * (p.reach - 1) + rangedShare * (p.tanky - 1)) : 1)
+      * (diversity ? Math.max(0.4, 1 - CPU_VAL_SAME_TYPE_PENALTY * (ownCount.get(type) ?? 0)) : 1);
 
     const order: { type: CharacterConfig['id']; cost: number; score: number }[] = [];
     for (const type of TRIBE_ROSTERS[cpuTribe]) {
