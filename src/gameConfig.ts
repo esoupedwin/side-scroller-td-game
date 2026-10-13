@@ -323,6 +323,19 @@ export const GameConfig = {
     // Game.checkReactiveSpawn). The 'legacy' profile switches them off so the
     // dev-panel self-play harness can A/B old against new.
     defaultProfile: 'improved' as const,   // CpuProfile applied to both CPU sides at start
+    // ── Wave staging ('stageWave' feature) ───────────────────────────────────
+    // The tower shoots the nearest unit at 40 dmg/s, so attackers that trickle
+    // in die one at a time. In a push the melee first gather at a line just
+    // outside the enemy tower's range and are released together.
+    wave: {
+      stageOffset:   60,   // px outside enemy tower range where the wave assembles (the harass safeX line sits at +40)
+      tankLead:      35,   // px the tankiest units stage ahead of the rest so they take the tower's first shots
+      tankThreshold: 1.6,  // unitProfile.tanky at/above which a unit leads (knight ≈ 2.0, viking ≈ 2.1, heavy ≈ 1.6; warrior ≈ 1.5)
+      minUnits:      3,    // arrivals that release the wave (or every staged unit, if fewer exist)
+      maxHoldSec:    8,    // the first arrival waits at most this long before the wave goes anyway
+      arriveTol:     70,   // px short of the line that still counts as arrived
+    },
+
     // ── Stance hysteresis ('improved' profile) ───────────────────────────────
     // Leaving a stance takes a smaller |score| than entering it, and a switch
     // holds for minDwellSec. Without this the score oscillated through the

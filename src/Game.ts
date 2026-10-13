@@ -65,6 +65,7 @@ import {
   CPU_STANCE_PUSH_ENTER, CPU_STANCE_PUSH_EXIT, CPU_STANCE_DEFEND_ENTER, CPU_STANCE_DEFEND_EXIT,
   CPU_STANCE_MIN_DWELL_SEC, CPU_STANCE_SCORE_TAU_SEC, CPU_RETREAT_HP_FRAC_RANGED, CPU_VAL_COUNTER_WEIGHT, CPU_VAL_SAME_TYPE_PENALTY,
   TOWER_ATTACK_RANGE, cpuProfileFeatures, type CpuFeature,
+  WAVE_STAGE_OFFSET, WAVE_TANK_LEAD, WAVE_TANK_THRESHOLD, WAVE_MIN_UNITS, WAVE_MAX_HOLD_SEC,
   TRIBE_PU_COOLDOWN_SEC, TRIBE_PU_DURATION_SEC, TRIBE_PU_SPEED_MULT, TRIBE_PU_HEAL_PER_SEC,
   TRIBE_PU_PLAGUE_DAMAGE, TRIBE_PU_PLAGUE_TICKS, TRIBE_PU_PLAGUE_INTERVAL, TRIBE_PU_AGGRESSION_MULT,
   TRIBE_PU_PLAYER_DEFAULT, TRIBE_PU_IDS, TRIBE_POWER_UPS, type TribePowerUpId,
@@ -92,6 +93,10 @@ function withSpawnBoosts(cfg: CharacterConfig): CharacterConfig {
 
 const PARALLAX_FACTOR     = 0.15; // near background scrolls at 15 % of world camera speed
 const PARALLAX_FACTOR_FAR = 0.05; // far background scrolls at 5 % — feels more distant
+
+/** Close-combat styles — the units that form walls and waves (never type names). */
+const isMeleeStyle = (c: Character): boolean =>
+  c.config.attackStyle === 'melee' || c.config.attackStyle === 'blast';
 
 /** Attribute-derived CPU valuation of a unit type — see Game.unitProfile(). */
 interface UnitProfile {
@@ -348,6 +353,13 @@ export class Game {
   // EMA of the stance score per side (null until the first assessment).
   private scoreEma:      Record<'player' | 'enemy', number | null> = { player: null, enemy: null };
   private scoreTotalEma: Record<'player' | 'enemy', number | null> = { player: null, enemy: null };
+  // Wave staging state per side (see tickWaveStaging): units already released
+  // this push (they charge straight in) and when the current wave's first
+  // unit reached the line.
+  private readonly wave = {
+    player: { released: new Set<Character>(), holdSince: null as number | null },
+    enemy:  { released: new Set<Character>(), holdSince: null as number | null },
+  };
   // Dev: simulation steps per clock tick (>1 = fixed 60 Hz steps, used by the
   // self-play harness to run whole matches in seconds). While fast-forwarding
   // the clock is a Worker interval, not the rAF ticker: Chrome throttles rAF
@@ -2615,6 +2627,7 @@ export class Game {
     const feat = this.cpuFeatures[self];
     const charge: 'rush' | 'attacking' = feat.has('rushFinisher') ? 'rush' : 'attacking';
     if (allIn) {
+      this.tickWaveStaging(self, selfChars, false, 0, isMeleeStyle);
       for (const c of selfChars) {
         c.fetchX = null;   // abandon power-up fetches — tower damage only
         if (c.behavior === 'collecting') continue;  // collect AI recalls these
@@ -2637,8 +2650,7 @@ export class Game {
     // form the defensive wall / charge in pushes; snap-fire ranged styles
     // harass from safety. AoE (grenade/rocket) keeps its current behavior in
     // pushes and harasses on defence, same as before.
-    const isMelee = (c: Character) =>
-      c.config.attackStyle === 'melee' || c.config.attackStyle === 'blast';
+    const isMelee = isMeleeStyle;
     const isRangedUnit = (c: Character) =>
       c.config.attackStyle === 'arrow' || c.config.attackStyle === 'bullet';
 
@@ -2720,6 +2732,58 @@ export class Game {
         }
       }
     }
+
+    this.tickWaveStaging(self, selfChars, stance === 'push' && !finisher && feat.has('stageWave'), oppTowerFrontX, isMelee);
+  }
+
+  // ── Wave staging ('stageWave') ──────────────────────────────────────────────
+  // The tower shoots the nearest unit at 40 dmg/s, so attackers that trickle in
+  // one at a time die one at a time. In a push, melee attackers first gather at
+  // a line WAVE_STAGE_OFFSET outside the enemy tower's range (the ranged line
+  // already holds nearby at the harass safeX) and are released together once
+  // WAVE_MIN_UNITS have arrived or the first arrival has waited
+  // WAVE_MAX_HOLD_SEC. The tankiest units stage WAVE_TANK_LEAD ahead so they
+  // take the tower's first shots. Released units charge straight in for the
+  // rest of the push; newly spawned ones form the next wave. Not used when the
+  // enemy tower is critical (just finish it), in the finisher, or in all-in.
+  private tickWaveStaging(
+    self: 'player' | 'enemy', selfChars: Character[], active: boolean,
+    oppTowerFrontX: number, isMelee: (c: Character) => boolean,
+  ) {
+    const w        = this.wave[self];
+    const oppTower = self === 'enemy' ? this.playerTower : this.enemyTower;
+    if (!active || oppTower.hp / TOWER_HP < 0.28) {
+      if (w.released.size > 0 || w.holdSince !== null) { w.released.clear(); w.holdSince = null; }
+      for (const c of selfChars) c.stageX = null;
+      return;
+    }
+    for (const c of w.released) if (c.isDead) w.released.delete(c);
+
+    const dir   = self === 'player' ? 1 : -1;
+    const lineX = oppTowerFrontX - dir * (TOWER_ATTACK_RANGE + WAVE_STAGE_OFFSET);
+    const tribe = tribeForSide(self);
+    let staged = 0, arrived = 0;
+    for (const c of selfChars) {
+      const staging = c.behavior === 'attacking' && isMelee(c) && !w.released.has(c) && !this.retreatingUnits.has(c);
+      if (!staging) { c.stageX = null; continue; }
+      if (c.stageX === null) {
+        const lead = Game.unitProfile(tribe, c.config.id).tanky >= WAVE_TANK_THRESHOLD ? WAVE_TANK_LEAD : 0;
+        c.stageX      = lineX + dir * lead;
+        c.stageFloorY = oppTower.baseY;
+      }
+      staged++;
+      if (c.isAtStage) arrived++;
+    }
+    if (staged === 0 || arrived === 0) { w.holdSince = null; return; }
+    const now = this.elapsedSeconds;
+    if (w.holdSince === null) w.holdSince = now;
+    const release = arrived >= Math.min(WAVE_MIN_UNITS, staged) || now - w.holdSince >= WAVE_MAX_HOLD_SEC;
+    if (!release) return;
+    for (const c of selfChars) {
+      if (c.stageX !== null && c.isAtStage) { c.stageX = null; w.released.add(c); }
+    }
+    w.holdSince = null;
+    if (self === 'enemy') this.cpuStrategyInfo.decision = `🌊 Wave released — ${arrived} unit${arrived === 1 ? '' : 's'}`;
   }
 
   private fireProjectile(req: FireRequest) {
@@ -2849,6 +2913,7 @@ export class Game {
     this.stanceSince           = { player: 0, enemy: 0 };
     this.scoreEma              = { player: null, enemy: null };
     this.scoreTotalEma         = { player: null, enemy: null };
+    for (const w of [this.wave.player, this.wave.enemy]) { w.released.clear(); w.holdSince = null; }
     this.puFetchers.clear();
     // Tribe power-ups: fresh cooldowns; the CPU picks its ability for the new
     // match (uniform random — all four are situationally strong). The player's

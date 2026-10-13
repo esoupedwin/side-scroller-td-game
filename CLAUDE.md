@@ -475,6 +475,7 @@ Every AI improvement is a flag so the harness can ablate it: `'improved'` = ever
 - `blueCoinPriority` — a blue coin on the field forces `wantedCollectors ≥ 1` (except all-in).
 - `counterComp` — `spawnCpu` multiplies each candidate's stance score by `1 + counterWeight × (meleeShare × (reach−1) + rangedShare × (tanky−1))` from the opponent's live non-collecting mix.
 - `typeDiversity` — and by `max(0.4, 1 − sameTypePenalty × alive-of-type)` (split from `counterComp` so each can be measured alone).
+- `stageWave` (`gameConfig.cpu.wave`, `Game.tickWaveStaging`) — in a push (not finisher / all-in / enemy tower critical) melee attackers get a transient `stageX` waypoint (`Character.updateStaging`, same override pattern as `fetchX`) at `TOWER_ATTACK_RANGE + stageOffset` outside the enemy tower and hold there, tanks (`unitProfile.tanky ≥ tankThreshold`) `tankLead` px ahead; the wave is released together when `minUnits` have arrived (`isAtStage`) or the first arrival has waited `maxHoldSec`. Released units (`Game.wave[side].released`) charge straight in for the rest of that push; new spawns form the next wave. Staging is dropped the moment a unit's behavior is no longer `'attacking'`.
 When adding a feature: append to `CPU_FEATURES`, gate the code on the flag, and run the harness with B = `improved-no-<flag>` to get its individual contribution; if it doesn't earn its place, add it to `CPU_EXPERIMENTAL` rather than deleting the code.
 
 ### Tempo (`gameConfig.cpu.tempo`, per-side `CpuProfile`)

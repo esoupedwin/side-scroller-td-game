@@ -22,6 +22,7 @@ export const CPU_FEATURES = [
   'blueCoinPriority', // a blue coin on the field always drafts one collector (not during all-in)
   'counterComp',      // buy order weighs the opponent's live mix (range vs melee-heavy, durability vs ranged-heavy)
   'typeDiversity',    // buy order penalises stacking one type (× (1 − sameTypePenalty × alive-of-type))
+  'stageWave',        // push melee gather outside enemy tower range and charge together, tanks first (Game.tickWaveStaging)
 ] as const;
 export type CpuFeature = typeof CPU_FEATURES[number];
 // Flags that measured no gain in self-play (10-match ablations, 2026-10-13):
@@ -152,6 +153,12 @@ export const CPU_STANCE_DEFEND_ENTER   = cpu.stance.defendEnter;
 export const CPU_STANCE_DEFEND_EXIT    = cpu.stance.defendExit;
 export const CPU_STANCE_MIN_DWELL_SEC  = cpu.stance.minDwellSec;
 export const CPU_STANCE_SCORE_TAU_SEC  = cpu.stance.scoreTauSec;
+export const WAVE_STAGE_OFFSET   = cpu.wave.stageOffset;
+export const WAVE_TANK_LEAD      = cpu.wave.tankLead;
+export const WAVE_TANK_THRESHOLD = cpu.wave.tankThreshold;
+export const WAVE_MIN_UNITS      = cpu.wave.minUnits;
+export const WAVE_MAX_HOLD_SEC   = cpu.wave.maxHoldSec;
+export const WAVE_ARRIVE_TOL     = cpu.wave.arriveTol;
 export const CPU_VAL_RANGE_DIVISOR    = cpu.valuation.rangeReachDivisor;
 export const CPU_VAL_HP_DIVISOR       = cpu.valuation.hpTankyDivisor;
 export const CPU_VAL_SPLASH_PUSH_MULT = cpu.valuation.splashPushMult;

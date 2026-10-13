@@ -12,6 +12,7 @@ import {
   CHAR_LOW_HEALTH_RATIO, CHAR_LOW_HEALTH_BLINK_COLOR, CHAR_LOW_HEALTH_BLINK_HZ, CHAR_POISON_COLOR,
   ATTACK_KNOCKBACK_VY,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, SIEGE_MARGIN, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
+  WAVE_ARRIVE_TOL,
   HARASS_RALLY_OFFSET, HARASS_GROUP_DIST, HARASS_RALLY_TOLERANCE,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST, COIN_THROW_MAX_Y_GAP,
   COIN_PICK_DIST_OFFSET,
@@ -445,6 +446,18 @@ export class Character {
   // without touching `behavior` itself, so the unit resumes its role after.
   fetchX: number | null = null;
   fetchFloorY = 0;
+  /** Transient CPU wave-staging waypoint (Game.tickWaveStaging): path there and
+   *  HOLD, firing opportunistically, until Game clears it to release the wave.
+   *  Like fetchX it overrides the behavior branch without touching `behavior`. */
+  stageX: number | null = null;
+  stageFloorY = 0;
+
+  /** Staged and at (or pushed past) the staging line, within WAVE_ARRIVE_TOL. */
+  get isAtStage(): boolean {
+    if (this.stageX === null) return false;
+    const dir = this.side === 'player' ? 1 : -1;
+    return dir * (this.x - this.stageX) >= -WAVE_ARRIVE_TOL;
+  }
   private coinCarryGfx: PIXI.Graphics | null = null;
   private lastDrawnHpRatio  = -1;
   private lastLocoMoveSpeed = -1;
@@ -2171,6 +2184,8 @@ export class Character {
         // disappears. The behavior itself is untouched, so the unit resumes
         // its role the moment the fetch ends.
         this.updateFetching(ctx);
+      } else if (this.stageX !== null) {
+        this.updateStaging(ctx);
       } else if (this._behavior === 'collecting') {
         this.updateCollecting(ctx);
       } else if (this._behavior === 'harass') {
@@ -2730,6 +2745,29 @@ export class Character {
 
     this.state = 'marching';
     this.requestPath(this.fetchX, this.fetchFloorY, navGraph, dt);
+    this.followPath(dt, ctx.platforms);
+  }
+
+  /** March to the wave staging line and hold there (firing at anything in
+   *  range) until Game clears `stageX`. Never walks back to the line — a unit
+   *  the enemy pushed past it is already committed. */
+  private updateStaging(ctx: UpdateContext) {
+    const { dt, enemies, blocks, navGraph, onFire } = ctx;
+    if (this.stageX === null) return;
+
+    if (!this.isAirborne) {
+      const nearest = this.nearestEnemy(enemies, this.config.attackRange, blocks);
+      if (nearest) this.attackEnemy(nearest, onFire);
+    }
+    if (this.isAirborne) return;
+
+    if (this.isAtStage) {
+      this.clearPath();
+      if (this.state !== 'fighting') this.state = 'marching';   // standing still → idle anim via motion timers
+      return;
+    }
+    this.state = 'marching';
+    this.requestPath(this.stageX, this.stageFloorY, navGraph, dt);
     this.followPath(dt, ctx.platforms);
   }
 
