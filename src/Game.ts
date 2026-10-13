@@ -63,7 +63,7 @@ import {
   CPU_DEFAULT_PROFILE, CPU_SPEND_DOWN_GAP_MS, CPU_REACTIVE_THREAT_DELTA,
   CPU_REACTIVE_MIN_GAP_MS, CPU_REACTIVE_BASELINE_TAU, type CpuProfile,
   CPU_STANCE_PUSH_ENTER, CPU_STANCE_PUSH_EXIT, CPU_STANCE_DEFEND_ENTER, CPU_STANCE_DEFEND_EXIT,
-  CPU_STANCE_MIN_DWELL_SEC, CPU_RETREAT_HP_FRAC_RANGED, CPU_VAL_COUNTER_WEIGHT, CPU_VAL_SAME_TYPE_PENALTY,
+  CPU_STANCE_MIN_DWELL_SEC, CPU_STANCE_SCORE_TAU_SEC, CPU_RETREAT_HP_FRAC_RANGED, CPU_VAL_COUNTER_WEIGHT, CPU_VAL_SAME_TYPE_PENALTY,
   TOWER_ATTACK_RANGE, cpuProfileFeatures, type CpuFeature,
   TRIBE_PU_COOLDOWN_SEC, TRIBE_PU_DURATION_SEC, TRIBE_PU_SPEED_MULT, TRIBE_PU_HEAL_PER_SEC,
   TRIBE_PU_PLAGUE_DAMAGE, TRIBE_PU_PLAGUE_TICKS, TRIBE_PU_PLAGUE_INTERVAL, TRIBE_PU_AGGRESSION_MULT,
@@ -345,6 +345,9 @@ export class Game {
   private oppThreatBaseline = { player: 0, enemy: 0 };
   // Match time (s) at which each side last changed stance — the hysteresis dwell.
   private stanceSince       = { player: 0, enemy: 0 };
+  // EMA of the stance score per side (null until the first assessment).
+  private scoreEma:      Record<'player' | 'enemy', number | null> = { player: null, enemy: null };
+  private scoreTotalEma: Record<'player' | 'enemy', number | null> = { player: null, enemy: null };
   // Dev: simulation steps per clock tick (>1 = fixed 60 Hz steps, used by the
   // self-play harness to run whole matches in seconds). While fast-forwarding
   // the clock is a Worker interval, not the rAF ticker: Chrome throttles rAF
@@ -1164,6 +1167,14 @@ export class Game {
     const towerAdv  = (selfTower.hp / TOWER_HP) - (oppTower.hp / TOWER_HP);
     const coinAdv   = Math.min(1, Math.max(-1, (selfCoins - oppCoins) / 120));
     const score     = unitAdv * 1.5 + towerAdv * 2.5 + coinAdv * 0.5;
+    // Same score with own collectors at FULL weight. The ×0.5 discount above
+    // is right for deciding to push (collectors aren't on the front line) but
+    // wrong for deciding to defend: defending RECALLS them, so a defend
+    // threshold that counts them at half strength feeds back on itself —
+    // draft two collectors → score drops → defend → recall → score recovers →
+    // economy → draft again, one switch per dwell window. stableStance judges
+    // the defend thresholds on this total instead.
+    const scoreTotal = (threat(selfChars, self, 1.0) - oppStr) * 1.5 + towerAdv * 2.5 + coinAdv * 0.5;
 
     // Store intermediate values for the dev panel — only from the canonical CPU (enemy) perspective
     if (self === 'enemy') {
@@ -1202,15 +1213,25 @@ export class Game {
     else if (selfTower.hp / TOWER_HP < 0.28) stance = 'defend';
     else if (oppTower.hp / TOWER_HP < 0.28)  stance = 'push';
     else if (this.cpuFeatures[self].has('stableStance')) {
+      // Smooth the score first (this runs every 0.5 s): spawns, deaths and
+      // collector drafts swing the raw score by ±0.75 within a few seconds,
+      // which the dwell alone only slowed to one switch per window.
+      const k    = 1 - Math.exp(-0.5 / CPU_STANCE_SCORE_TAU_SEC);
+      const ema0 = this.scoreEma[self];
+      const s  = ema0 === null ? score      : ema0 + (score - ema0) * k;            // front-line score → push thresholds
+      const emaT0 = this.scoreTotalEma[self];
+      const sT = emaT0 === null ? scoreTotal : emaT0 + (scoreTotal - emaT0) * k;   // total score → defend thresholds
+      this.scoreEma[self]      = s;
+      this.scoreTotalEma[self] = sT;
       // Hysteresis relative to the current stance (see gameConfig.cpu.stance):
       // a stance is left at a smaller |score| than it was entered at, and no
       // non-critical switch happens inside the dwell window.
       if (prev === 'push') {
-        stance = score < CPU_STANCE_DEFEND_ENTER ? 'defend' : score < CPU_STANCE_PUSH_EXIT ? 'economy' : 'push';
+        stance = sT < CPU_STANCE_DEFEND_ENTER ? 'defend' : s < CPU_STANCE_PUSH_EXIT ? 'economy' : 'push';
       } else if (prev === 'defend') {
-        stance = score > CPU_STANCE_PUSH_ENTER ? 'push' : score > CPU_STANCE_DEFEND_EXIT ? 'economy' : 'defend';
+        stance = s > CPU_STANCE_PUSH_ENTER ? 'push' : sT > CPU_STANCE_DEFEND_EXIT ? 'economy' : 'defend';
       } else {
-        stance = score > CPU_STANCE_PUSH_ENTER ? 'push' : score < CPU_STANCE_DEFEND_ENTER ? 'defend' : 'economy';
+        stance = s > CPU_STANCE_PUSH_ENTER ? 'push' : sT < CPU_STANCE_DEFEND_ENTER ? 'defend' : 'economy';
       }
       if (stance !== prev && now - this.stanceSince[self] < CPU_STANCE_MIN_DWELL_SEC) stance = prev;
     }
@@ -2825,6 +2846,8 @@ export class Game {
     this.oppThreat             = { player: 0, enemy: 0 };
     this.oppThreatBaseline     = { player: 0, enemy: 0 };
     this.stanceSince           = { player: 0, enemy: 0 };
+    this.scoreEma              = { player: null, enemy: null };
+    this.scoreTotalEma         = { player: null, enemy: null };
     this.puFetchers.clear();
     // Tribe power-ups: fresh cooldowns; the CPU picks its ability for the new
     // match (uniform random — all four are situationally strong). The player's

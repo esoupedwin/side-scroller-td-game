@@ -149,6 +149,7 @@ export const CPU_STANCE_PUSH_EXIT      = cpu.stance.pushExit;
 export const CPU_STANCE_DEFEND_ENTER   = cpu.stance.defendEnter;
 export const CPU_STANCE_DEFEND_EXIT    = cpu.stance.defendExit;
 export const CPU_STANCE_MIN_DWELL_SEC  = cpu.stance.minDwellSec;
+export const CPU_STANCE_SCORE_TAU_SEC  = cpu.stance.scoreTauSec;
 export const CPU_VAL_RANGE_DIVISOR    = cpu.valuation.rangeReachDivisor;
 export const CPU_VAL_HP_DIVISOR       = cpu.valuation.hpTankyDivisor;
 export const CPU_VAL_SPLASH_PUSH_MULT = cpu.valuation.splashPushMult;

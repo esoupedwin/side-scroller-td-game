@@ -337,6 +337,7 @@ export const GameConfig = {
       defendEnter: -0.7,
       defendExit:  -0.4,
       minDwellSec:  3,
+      scoreTauSec:  3,     // the raw score is smoothed with this EMA time constant before thresholding — without it the dwell alone just slowed a ±0.75 swing to one switch every 3 s
     },
     tempo: {
       spendDownGapMs:      700,   // delay before a follow-up buy while still affordable (push/defend/all-in: anything; economy: only the top-ranked pick)
