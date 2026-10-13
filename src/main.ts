@@ -1193,24 +1193,33 @@ const selfPlay = {
   const aSel     = document.getElementById('selfplay-a')      as HTMLSelectElement;
   const bSel     = document.getElementById('selfplay-b')      as HTMLSelectElement;
   const countSel = document.getElementById('selfplay-count')  as HTMLSelectElement;
+  const mapsSel  = document.getElementById('selfplay-maps')   as HTMLSelectElement;
   const resultEl = document.getElementById('selfplay-result') as HTMLPreElement;
   fillProfileSelect(aSel, 'improved');
   fillProfileSelect(bSel, 'legacy');
   let profileA: CpuProfile = 'improved';
   let profileB: CpuProfile = 'legacy';
+  // Map rotation: every map config is played twice in a row (A on each side),
+  // and 'all maps + swapped tribes' also plays each map with the tribes
+  // exchanged — every map ships kattgard left / lapinor right, so without the
+  // swap one profile would always meet the same tribe from the same side.
+  type MatchMap = ReturnType<typeof loadMapWithOverride>;
+  let configs: MatchMap[] = [];
+  let originalMap: MatchMap | null = null;
   let prevCpuVsCpu = false;
   let prevProfiles: Record<'player' | 'enemy', CpuProfile> = { player: 'improved', enemy: 'improved' };
 
   const aSideFor = (i: number): 'player' | 'enemy' => (i % 2 === 0 ? 'enemy' : 'player');
 
   const startMatch = () => {
-    const i = selfPlay.results.length;
-    const a = aSideFor(i);
+    const i   = selfPlay.results.length;
+    const a   = aSideFor(i);
+    const cfg = configs[Math.floor(i / 2) % configs.length];
     game.setCpuProfile(a, profileA);
     game.setCpuProfile(a === 'enemy' ? 'player' : 'enemy', profileB);
     btn.textContent = `Self-play ${i + 1}/${selfPlay.total}`;
-    resultEl.textContent = `running match ${i + 1}/${selfPlay.total} (A = ${a})…`;
-    restartCurrentGame();
+    resultEl.textContent = `running match ${i + 1}/${selfPlay.total} (A = ${a}, ${cfg.name}, ${cfg.playerTowerTribe ?? 'kattgard'} vs ${cfg.enemyTowerTribe ?? 'lapinor'})…`;
+    restartCurrentGame(cfg);
   };
 
   const finish = () => {
@@ -1223,6 +1232,13 @@ const selfPlay = {
       game.setCpuVsCpu(prevCpuVsCpu);
       refreshCpuVsCpuUi();
     }
+    // Rotation may have left a different map / tribe order loaded — put the
+    // human player's map back and resync their spawn bar to its tribe.
+    if (originalMap && configs.length > 1) {
+      restartCurrentGame(originalMap);
+      syncSpawnButtonVisibility();
+      refreshCostLabels();
+    }
 
     const r = selfPlay.results;
     const n = r.length;
@@ -1233,7 +1249,7 @@ const selfPlay = {
     const avgMargin = n ? r.reduce((a, x) => a + x.margin, 0) / n : 0;
     const pct = (k: number, d: number) => d ? `${Math.round(100 * k / d)}%` : '—';
     resultEl.textContent =
-      `self-play ${n} matches · ${CHEAT_SELF_PLAY_SPEED}×\n` +
+      `self-play ${n} matches · ${CHEAT_SELF_PLAY_SPEED}× · ${configs.length} map config${configs.length === 1 ? '' : 's'}\n` +
       `A ${profileA}  vs  B ${profileB}\n` +
       `A wins  ${aWins.length}/${n} (${pct(aWins.length, n)})\n` +
       `  as enemy  ${asEnemy.filter(x => x.winner === 'enemy').length}/${asEnemy.length}` +
@@ -1262,6 +1278,12 @@ const selfPlay = {
     selfPlay.results = [];
     profileA = aSel.value as CpuProfile;
     profileB = bSel.value as CpuProfile;
+    const current = ALL_MAPS.find(m => m.id === game.currentMapId) ?? ALL_MAPS[0];
+    originalMap = loadMapWithOverride(current);
+    const base: MatchMap[] = mapsSel.value === 'this' ? [originalMap] : ALL_MAPS.map(m => loadMapWithOverride(m));
+    configs = mapsSel.value === 'all-swapped'
+      ? base.flatMap(m => [m, { ...m, playerTowerTribe: m.enemyTowerTribe ?? 'lapinor', enemyTowerTribe: m.playerTowerTribe ?? 'kattgard' }])
+      : base;
     prevCpuVsCpu = game.isCpuVsCpu();
     prevProfiles = { player: game.getCpuProfile('player'), enemy: game.getCpuProfile('enemy') };
     if (!prevCpuVsCpu) {
