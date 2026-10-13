@@ -299,6 +299,83 @@ class HitSpark implements VfxEffect {
   }
 }
 
+// ── DeathBurst ──────────────────────────────────────────────────────────────
+// The Mega Man death: the body vanishes on the killing blow and the character
+// bursts into a ring of pellets that fly straight out and keep going. Two
+// concentric rings as in Mega Man 3 onward — an outer ring at full speed and a
+// half-speed inner ring offset by half a step, which reads as a sphere blowing
+// apart rather than a flat circle. Deliberately unphysical: no gravity, no
+// drag, constant speed, and the pellets hold full brightness until they wink
+// out near the end of the burst.
+
+const DEATH_DUR        = 0.62;   // seconds — pellets travel this long, then vanish
+const DEATH_RAYS       = 8;      // pellets per ring (the classic 8 compass directions)
+const DEATH_SPD_OUTER  = 235;    // px/s — ~145 px of travel, about two body heights
+const DEATH_SPD_INNER  = 128;    // px/s — trails behind the outer ring
+const DEATH_R_OUTER    = 11;     // pellet radius (px) — about a quarter of a body height
+const DEATH_R_INNER    = 8;
+const DEATH_FADE_FROM  = 0.72;   // fraction of life before alpha starts dropping
+const DEATH_FLASH_DUR  = 0.09;   // the one-frame white pop where the body was
+const DEATH_FLASH_R    = 26;
+
+class DeathBurst implements VfxEffect {
+  container: PIXI.Container;
+  isDone   = false;
+  private g:     PIXI.Graphics;
+  private life = 0;
+  private tint:  number;
+
+  constructor(x: number, y: number, side: 'player' | 'enemy') {
+    this.tint = side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    this.container = new PIXI.Container();
+    this.container.x = x;
+    this.container.y = y;
+    this.g = new PIXI.Graphics();
+    this.container.addChild(this.g);
+  }
+
+  update(dt: number): void {
+    this.life += dt;
+    const t = this.life / DEATH_DUR;
+    if (t >= 1) { this.isDone = true; return; }
+
+    // Full brightness for most of the flight, then a quick wink-out — a long
+    // fade would read as smoke rather than as the retro pellet burst.
+    const alpha = t < DEATH_FADE_FROM ? 1 : 1 - (t - DEATH_FADE_FROM) / (1 - DEATH_FADE_FROM);
+    const dOuter = DEATH_SPD_OUTER * this.life;
+    const dInner = DEATH_SPD_INNER * this.life;
+
+    this.g.clear();
+
+    // White pop at the centre, covering the frame the body disappears on.
+    if (this.life < DEATH_FLASH_DUR) {
+      const ft = this.life / DEATH_FLASH_DUR;
+      this.g.beginFill(0xffffff, 1 - ft);
+      this.g.drawCircle(0, 0, DEATH_FLASH_R * (1 - ft * 0.5));
+      this.g.endFill();
+    }
+
+    // Each pellet: side-tinted disc with a white core, so a glance at the burst
+    // still says which side just lost a unit.
+    const step = (Math.PI * 2) / DEATH_RAYS;
+    for (let i = 0; i < DEATH_RAYS; i++) {
+      const aO = i * step;
+      const aI = aO + step * 0.5;   // inner ring sits between the outer spokes
+      this.drawPellet(Math.cos(aO) * dOuter, Math.sin(aO) * dOuter, DEATH_R_OUTER, alpha);
+      this.drawPellet(Math.cos(aI) * dInner, Math.sin(aI) * dInner, DEATH_R_INNER, alpha);
+    }
+  }
+
+  private drawPellet(x: number, y: number, r: number, alpha: number): void {
+    this.g.beginFill(this.tint, alpha);
+    this.g.drawCircle(x, y, r);
+    this.g.endFill();
+    this.g.beginFill(0xffffff, alpha);
+    this.g.drawCircle(x, y, r * 0.55);
+    this.g.endFill();
+  }
+}
+
 // ── MuzzleGlow ──────────────────────────────────────────────────────────────
 // Soft additively-blended orange disc at the gun tip — simulates the front of
 // the shooter being lit up by the flash. Drawn for gun-wielding units only
@@ -736,6 +813,12 @@ export function spawnExplosion(x: number, y: number, radius: number): void {
 
 export function spawnHitSpark(x: number, y: number): void {
   register(new HitSpark(x, y));
+}
+
+/** Mega Man-style death: a ring of pellets bursting out of where the body was.
+ *  Spawned at the character's torso as it is culled — the body is already gone. */
+export function spawnDeathBurst(x: number, y: number, side: 'player' | 'enemy'): void {
+  register(new DeathBurst(x, y, side));
 }
 
 /** Shield-block flash: vertical crescent facing `dir` (toward the attacker). */

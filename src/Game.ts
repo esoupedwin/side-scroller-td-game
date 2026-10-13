@@ -71,7 +71,7 @@ import {
   SHAKE_DECAY, SHAKE_MAX_OFFSET, SHAKE_GRENADE, SHAKE_ROCKET, SHAKE_FALLOFF_PX,
 } from './constants';
 import { playSoundAt, setViewport } from './AudioManager';
-import { initVfx, initAfterImageLayer, tickVfx, clearVfx, spawnHitSpark, spawnExplosion } from './Vfx';
+import { initVfx, initAfterImageLayer, tickVfx, clearVfx, spawnHitSpark, spawnExplosion, spawnDeathBurst } from './Vfx';
 
 function spawnBoost(): number {
   return Math.min(Math.floor(Math.random() * 11), Math.floor(Math.random() * 11));
@@ -2007,6 +2007,9 @@ export class Game {
       for (let ri = 0; ri < this.characters.length; ri++) {
         const c = this.characters[ri];
         if (c.isDead) {
+          // Mega Man death: the body is removed outright and the burst plays in
+          // its place, so the pellets have to be spawned before the container goes.
+          spawnDeathBurst(c.x, c.y - c.config.height * 0.5, c.side);
           this.unitLayer.removeChild(c.container);
           this.releaseCharId(c.id);
           const reward = c.killedBy === 'tower' ? TOWER_KILL_REWARD : KILL_REWARD;
