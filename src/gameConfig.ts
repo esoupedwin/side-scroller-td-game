@@ -445,6 +445,36 @@ export const GameConfig = {
     shakeFalloffPx: 650,   // off-screen distance over which blast shake fades to 0
   },
 
+  // ── Victory confetti ──────────────────────────────────────────────────────
+  // The full-screen fall on a player win (src/Confetti.ts). Speeds are px/s,
+  // spins rad/s; the canvas is the whole viewport, not the game world. The
+  // rain runs for as long as the victory screen is up — only the opening
+  // cannon volley is finite.
+  // Motion runs at 0.7× the original pace: a uniform time-scale, so velocities
+  // and spins are ×0.7, gravity ×0.7² (it acts through time twice), the
+  // per-second drag is re-based (0.86^0.7), and the seed rate is ×0.7 so the
+  // longer-lived pieces don't crowd the screen.
+  confetti: {
+    cannonCount:     110,   // pieces fired from each bottom corner on the opening volley
+    fallRate:        60,    // pieces per second raining in from above the top edge, indefinitely
+    fallPrefill:     130,   // pieces pre-seeded mid-screen so the rain starts already full
+    gravity:         402,   // downward acceleration
+    drag:            0.90,  // fraction of horizontal speed kept per second
+    cannonSpeedMin:  700,
+    cannonSpeedMax:  1225,
+    cannonSpreadDeg: 34,    // half-angle of the cone around each cannon's aim
+    cannonAimDeg:    62,    // cannon elevation above the horizontal, aimed inward
+    fallSpeedMin:    98,
+    fallSpeedMax:    252,
+    fallDriftMax:    63,    // |px/s| of sideways drift a falling piece starts with
+    sizeMin:         8,     // px — short edge of a piece
+    sizeMax:         17,
+    spinMin:         4.2,   // |rad/s| range; the sign is randomised per piece
+    spinMax:         9.8,
+    flutterMin:      3.5,   // |rad/s| range of the width-squash wobble
+    flutterMax:      7.7,
+  },
+
   promotions: {
     killAP:            1,     // achievement points per kill
     coinAP:            2,     // AP per successful coin deposit

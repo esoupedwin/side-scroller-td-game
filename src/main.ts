@@ -17,6 +17,7 @@ import { isTouchDevice, isIOS, isStandalone, canFullscreen, isFullscreen, enterF
 import { TRIBES, TRIBE_ROSTERS, type Tribe, getPlayerTribe, setPlayerTribe } from './Tribes';
 import { RESOLUTIONS, getResolutionHeight, setResolutionHeight } from './resolution';
 import { loadTemplates as loadTribeTowerTemplates } from './TribeTowerTemplates';
+import { startConfetti, stopConfetti } from './Confetti';
 
 const loadingScreen = document.getElementById('loading-screen')!;
 
@@ -298,6 +299,7 @@ window.setInterval(refreshTribePUBtn, 100);
 // restart the current map.
 function restartCurrentGame(mapDef?: ReturnType<typeof loadMapWithOverride>) {
   gameOver = false;
+  stopConfetti();
   gameOverEl.style.display    = 'none';
   pauseOverlay.style.display  = 'none';
   uiOverlay.style.visibility  = 'visible';
@@ -575,6 +577,7 @@ let loadoutGen = 0;
 
 function openLoadoutScreen(mapDef?: MatchMapDef) {
   cancelStartCountdown();   // e.g. tribe/map change while a countdown is running
+  stopConfetti();           // victory burst still running behind a tribe/map change
   loadoutGen++;
 
   // Dev fast-start (gameConfig.cheats.skipIntroScreens): no selection screen,
@@ -1391,6 +1394,7 @@ function handleGameOver(winner: 'player' | 'enemy', reason: 'tower' | 'timeout')
     : '—';
 
   if (winner === 'player') {
+    startConfetti();
     goTitle.textContent = '🏆 Victory!';
     goTitle.style.color = '#00b4d8';
     goSub.textContent   = reason === 'timeout'

@@ -218,6 +218,27 @@ export const SHAKE_GRENADE     = vfx.shakeGrenade;
 export const SHAKE_ROCKET      = vfx.shakeRocket;
 export const SHAKE_FALLOFF_PX  = vfx.shakeFalloffPx;
 
+// ── Victory confetti ─────────────────────────────────────────────────────────
+const cfti = GameConfig.confetti;
+export const CONFETTI_CANNON_COUNT   = cfti.cannonCount;
+export const CONFETTI_FALL_RATE      = cfti.fallRate;
+export const CONFETTI_FALL_PREFILL   = cfti.fallPrefill;
+export const CONFETTI_GRAVITY        = cfti.gravity;
+export const CONFETTI_DRAG           = cfti.drag;
+export const CONFETTI_CANNON_SPD_MIN = cfti.cannonSpeedMin;
+export const CONFETTI_CANNON_SPD_MAX = cfti.cannonSpeedMax;
+export const CONFETTI_CANNON_SPREAD  = cfti.cannonSpreadDeg;
+export const CONFETTI_CANNON_AIM     = cfti.cannonAimDeg;
+export const CONFETTI_FALL_SPD_MIN   = cfti.fallSpeedMin;
+export const CONFETTI_FALL_SPD_MAX   = cfti.fallSpeedMax;
+export const CONFETTI_FALL_DRIFT_MAX = cfti.fallDriftMax;
+export const CONFETTI_SIZE_MIN       = cfti.sizeMin;
+export const CONFETTI_SIZE_MAX       = cfti.sizeMax;
+export const CONFETTI_SPIN_MIN       = cfti.spinMin;
+export const CONFETTI_SPIN_MAX       = cfti.spinMax;
+export const CONFETTI_FLUTTER_MIN    = cfti.flutterMin;
+export const CONFETTI_FLUTTER_MAX    = cfti.flutterMax;
+
 // ── Promotions ───────────────────────────────────────────────────────────────
 export const PROMO_KILL_AP     = promo.killAP;
 export const PROMO_COIN_AP     = promo.coinAP;

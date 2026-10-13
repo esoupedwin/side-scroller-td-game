@@ -747,9 +747,19 @@
       .spawn-btn:disabled  { opacity: 0.4; cursor: not-allowed; transform: none; }
 
       /* ── Game over screen ───────────────────────────────────────────────────── */
-      #game-over { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+      /* z-index 160 keeps the banner readable above the victory confetti
+         (#confetti-canvas, z-index 150 — created in src/Confetti.ts). */
+      #game-over { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 160; }
       /* 86px = the old 48px + 80%. Shared by the Victory and Defeat banners. */
-      #game-over h1 { font-size: 86px; font-weight: 900; text-shadow: 0 0 20px currentColor; }
+      /* The dark stroke keeps the word legible against the bright sky and the
+         victory confetti falling behind it; paint-order draws it UNDER the fill
+         so the glyphs keep their weight instead of being eaten into. */
+      #game-over h1 {
+        font-size: 86px; font-weight: 900;
+        -webkit-text-stroke: 7px #0c1222;
+        paint-order: stroke fill;
+        text-shadow: 0 0 20px currentColor, 0 4px 14px rgba(0, 0, 0, 0.75);
+      }
       #game-over p  { font-size: 18px; margin-top: 8px; color: #ccc; }
       #game-over-stats {
         margin: 20px auto 4px;
