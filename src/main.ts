@@ -4,6 +4,7 @@ import {
   charCost, charDisplayName, charIcon, ALL_CHAR_TYPES,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, MOBILE_HUD_SCALE, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS, CHEAT_TOWER_DAMAGE,
   CHEAT_CLOCK_SKIP_SEC,
+  CHEAT_CLOCK_SKIP_BIG_SEC,
   TRIBE_POWER_UPS, TRIBE_PU_IDS, TRIBE_PU_PLAYER_DEFAULT,
   type CharTypeName, type TribePowerUpId,
 } from './constants';
@@ -1263,6 +1264,9 @@ document.getElementById('dev-dmg-cpu-tower-btn')!.addEventListener('click', () =
 // ── Game Shark: skip the match clock ──────────────────────────────────────
 document.getElementById('dev-skip-clock-btn')!.addEventListener('click', () => {
   game.cheatSkipClock(CHEAT_CLOCK_SKIP_SEC);
+});
+document.getElementById('dev-skip-clock-big-btn')!.addEventListener('click', () => {
+  game.cheatSkipClock(CHEAT_CLOCK_SKIP_BIG_SEC);
 });
 
 // ── Game Shark: force the CPU to buy a specific unit type ─────────────────

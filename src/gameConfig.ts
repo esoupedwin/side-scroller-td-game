@@ -431,6 +431,7 @@ export const GameConfig = {
     cpuCoinGrant:    100,   // L key — coins added to CPU balance
     towerDamage:     50,    // dev-panel Game Shark buttons — flat damage per click to a tower
     clockSkipSec:    10,    // dev-panel Game Shark button — seconds removed from the match clock per click
+    clockSkipBigSec: 60,    // dev-panel Game Shark button — larger clock skip per click
     // Dev fast-start: skip the splash screen and character selection on game
     // load (and on tribe/map switches) and jump straight into the match with
     // EVERY owned character card loaded — no 7-card cap, no 3-2-1 countdown.

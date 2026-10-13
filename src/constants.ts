@@ -197,6 +197,7 @@ export const CHEAT_CPU_COIN_GRANT     = GameConfig.cheats.cpuCoinGrant;
 export const CHEAT_SKIP_INTRO_SCREENS = GameConfig.cheats.skipIntroScreens;
 export const CHEAT_TOWER_DAMAGE       = GameConfig.cheats.towerDamage;
 export const CHEAT_CLOCK_SKIP_SEC     = GameConfig.cheats.clockSkipSec;
+export const CHEAT_CLOCK_SKIP_BIG_SEC = GameConfig.cheats.clockSkipBigSec;
 
 // ── Power-ups ────────────────────────────────────────────────────────────────
 export const POWERUP_PICKUP_DIST    = pu.pickupDist;
