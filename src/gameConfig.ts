@@ -322,6 +322,21 @@ export const GameConfig = {
     // Game.checkReactiveSpawn). The 'legacy' profile switches them off so the
     // dev-panel self-play harness can A/B old against new.
     defaultProfile: 'improved' as const,   // CpuProfile applied to both CPU sides at start
+    // ── Stance hysteresis ('improved' profile) ───────────────────────────────
+    // Leaving a stance takes a smaller |score| than entering it, and a switch
+    // holds for minDwellSec. Without this the score oscillated through the
+    // own-collector discount in assessCpuStance: drafting two collectors
+    // dropped the score under the defend threshold, defend recalled them, the
+    // score recovered, economy drafted again — a ~300 ms loop in which no
+    // unit committed to anything. Critical-tower and endgame overrides bypass
+    // the dwell.
+    stance: {
+      pushEnter:    0.8,
+      pushExit:     0.5,
+      defendEnter: -0.7,
+      defendExit:  -0.4,
+      minDwellSec:  3,
+    },
     tempo: {
       spendDownGapMs:      700,   // delay before a follow-up buy while still affordable (push/defend/all-in: anything; economy: only the top-ranked pick)
       reactiveThreatDelta: 1.0,   // opponent field-threat rise (warrior-equivalents) above the relaxed baseline that triggers an immediate buy

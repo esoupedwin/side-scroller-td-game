@@ -62,6 +62,8 @@ import {
   CPU_RETREAT_HP_FRAC, CPU_RETREAT_RECOVER_FRAC, CPU_ENDGAME_SEC,
   CPU_DEFAULT_PROFILE, CPU_SPEND_DOWN_GAP_MS, CPU_REACTIVE_THREAT_DELTA,
   CPU_REACTIVE_MIN_GAP_MS, CPU_REACTIVE_BASELINE_TAU, type CpuProfile,
+  CPU_STANCE_PUSH_ENTER, CPU_STANCE_PUSH_EXIT, CPU_STANCE_DEFEND_ENTER, CPU_STANCE_DEFEND_EXIT,
+  CPU_STANCE_MIN_DWELL_SEC,
   TRIBE_PU_COOLDOWN_SEC, TRIBE_PU_DURATION_SEC, TRIBE_PU_SPEED_MULT, TRIBE_PU_HEAL_PER_SEC,
   TRIBE_PU_PLAGUE_DAMAGE, TRIBE_PU_PLAGUE_TICKS, TRIBE_PU_PLAGUE_INTERVAL, TRIBE_PU_AGGRESSION_MULT,
   TRIBE_PU_PLAYER_DEFAULT, TRIBE_PU_IDS, TRIBE_POWER_UPS, type TribePowerUpId,
@@ -337,6 +339,8 @@ export class Game {
   // instead of at the next timer tick.
   private oppThreat         = { player: 0, enemy: 0 };
   private oppThreatBaseline = { player: 0, enemy: 0 };
+  // Match time (s) at which each side last changed stance — the hysteresis dwell.
+  private stanceSince       = { player: 0, enemy: 0 };
   // Dev: simulation steps per clock tick (>1 = fixed 60 Hz steps, used by the
   // self-play harness to run whole matches in seconds). While fast-forwarding
   // the clock is a Worker interval, not the rAF ticker: Chrome throttles rAF
@@ -1181,6 +1185,8 @@ export class Game {
     if (self === 'enemy') this.cpuAllIn = allIn;
     else                  this.playerAllIn = allIn;
 
+    const prev = self === 'enemy' ? this.cpuStance : this.playerStance;
+    const now  = this.elapsedSeconds;
     let stance: 'push' | 'economy' | 'defend';
     if (endgame) {
       stance = allIn || oppTower.hp / TOWER_HP < 0.28 ? 'push' : 'defend';
@@ -1188,9 +1194,23 @@ export class Game {
     // Critical tower overrides
     else if (selfTower.hp / TOWER_HP < 0.28) stance = 'defend';
     else if (oppTower.hp / TOWER_HP < 0.28)  stance = 'push';
-    else if (score >  0.8)                   stance = 'push';
-    else if (score < -0.7)                   stance = 'defend';
-    else                                     stance = 'economy';
+    else if (this.cpuProfiles[self] === 'improved') {
+      // Hysteresis relative to the current stance (see gameConfig.cpu.stance):
+      // a stance is left at a smaller |score| than it was entered at, and no
+      // non-critical switch happens inside the dwell window.
+      if (prev === 'push') {
+        stance = score < CPU_STANCE_DEFEND_ENTER ? 'defend' : score < CPU_STANCE_PUSH_EXIT ? 'economy' : 'push';
+      } else if (prev === 'defend') {
+        stance = score > CPU_STANCE_PUSH_ENTER ? 'push' : score > CPU_STANCE_DEFEND_EXIT ? 'economy' : 'defend';
+      } else {
+        stance = score > CPU_STANCE_PUSH_ENTER ? 'push' : score < CPU_STANCE_DEFEND_ENTER ? 'defend' : 'economy';
+      }
+      if (stance !== prev && now - this.stanceSince[self] < CPU_STANCE_MIN_DWELL_SEC) stance = prev;
+    }
+    else if (score > CPU_STANCE_PUSH_ENTER)   stance = 'push';
+    else if (score < CPU_STANCE_DEFEND_ENTER) stance = 'defend';
+    else                                      stance = 'economy';
+    if (stance !== prev) this.stanceSince[self] = now;
 
     if (self === 'enemy') this.cpuStrategyInfo.stance = stance;
     return stance;
@@ -2753,6 +2773,7 @@ export class Game {
     this.playerAllIn           = false;
     this.oppThreat             = { player: 0, enemy: 0 };
     this.oppThreatBaseline     = { player: 0, enemy: 0 };
+    this.stanceSince           = { player: 0, enemy: 0 };
     this.puFetchers.clear();
     // Tribe power-ups: fresh cooldowns; the CPU picks its ability for the new
     // match (uniform random — all four are situationally strong). The player's

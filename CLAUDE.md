@@ -455,6 +455,7 @@ Three anomaly types (debounced at 2s per character):
 - Defend stance: melee/blast → `'defend'`, ranged → `'harass'`
 - Push stance: melee/blast → `'attacking'`, ranged → `'harass'`; **finisher**: when the opponent has ≤1 non-collecting units alive, the harass split is suspended and everyone attacks (harass deals no tower damage except for sieging long-range units)
 - `assessCpuStance` threat discounts collectors: opponent's ×0.15, own ×0.5 (recallable but currently off the front line)
+- **Stance hysteresis** (`gameConfig.cpu.stance`, `'improved'` profile only): a stance is entered at `pushEnter` 0.8 / `defendEnter` −0.7 but only left at `pushExit` 0.5 / `defendExit` −0.4, and no non-critical switch happens within `minDwellSec` (3 s) of the last one (`stanceSince`). Critical-tower and endgame overrides bypass the dwell. Without it the own-collector discount fed back into the stance: drafting two collectors dropped the score under −0.7 → defend → wanted collectors 0 → recall → score back up → economy → draft again, a ~300 ms loop visible in the decision log as `Collect → Defend wall → Economy attack → Collect`.
 
 ### Endgame (time-aware stance)
 The timeout winner is decided purely by tower HP (the enemy side loses ties), so inside the final `CPU_ENDGAME_SEC` (default 75 s) `assessCpuStance` ignores the mid-game score:
