@@ -60,6 +60,8 @@ import {
   CPU_URGENT_MAX_FACTOR, CPU_COMFORT_MIN_FACTOR,
   CPU_NEUTRAL_MIN_FACTOR, CPU_NEUTRAL_MAX_FACTOR,
   CPU_RETREAT_HP_FRAC, CPU_RETREAT_RECOVER_FRAC, CPU_ENDGAME_SEC,
+  CPU_DEFAULT_PROFILE, CPU_SPEND_DOWN_GAP_MS, CPU_REACTIVE_THREAT_DELTA,
+  CPU_REACTIVE_MIN_GAP_MS, CPU_REACTIVE_BASELINE_TAU, type CpuProfile,
   TRIBE_PU_COOLDOWN_SEC, TRIBE_PU_DURATION_SEC, TRIBE_PU_SPEED_MULT, TRIBE_PU_HEAL_PER_SEC,
   TRIBE_PU_PLAGUE_DAMAGE, TRIBE_PU_PLAGUE_TICKS, TRIBE_PU_PLAGUE_INTERVAL, TRIBE_PU_AGGRESSION_MULT,
   TRIBE_PU_PLAYER_DEFAULT, TRIBE_PU_IDS, TRIBE_POWER_UPS, type TribePowerUpId,
@@ -323,6 +325,27 @@ export class Game {
   // recalls collectors — tower damage is the only thing that matters now.
   private cpuAllIn    = false;
   private playerAllIn = false;
+  // Per-side decision profile — 'legacy' disables the tempo features
+  // (spend-down follow-up buys, reactive spawn) so self-play can A/B them.
+  // Persists across reset() so a harness can assign sides per match.
+  private cpuProfiles: Record<'player' | 'enemy', CpuProfile> = {
+    player: CPU_DEFAULT_PROFILE, enemy: CPU_DEFAULT_PROFILE,
+  };
+  // Reactive spawn: the opponent's live field threat (from assessCpuStance)
+  // and a slowly-relaxing baseline of it. A rise of CPU_REACTIVE_THREAT_DELTA
+  // above the baseline — the player dumping their bank — triggers a buy now
+  // instead of at the next timer tick.
+  private oppThreat         = { player: 0, enemy: 0 };
+  private oppThreatBaseline = { player: 0, enemy: 0 };
+  // Dev: simulation steps per clock tick (>1 = fixed 60 Hz steps, used by the
+  // self-play harness to run whole matches in seconds). While fast-forwarding
+  // the clock is a Worker interval, not the rAF ticker: Chrome throttles rAF
+  // and main-thread timers to 1 Hz when the tab is hidden or the window is
+  // covered, which stalled a self-play run the moment the user alt-tabbed
+  // away. Worker timers are exempt, so the batch keeps stepping; the ticker
+  // then only renders whatever frames the browser still grants.
+  private fastForward = 1;
+  private ffWorker: Worker | null = null;
   // Power-up fetch assignments: one fetcher per settled power-up (first CPU
   // side to claim wins). Validated each collect-AI tick — entries drop when
   // the power-up is taken/expired or the fetcher dies.
@@ -408,7 +431,10 @@ export class Game {
     this.onEnemyTowerHpChanged   = onEnemyTowerHpChanged;
     this.onPlayerTowerHpChanged  = onPlayerTowerHpChanged;
     this.hud            = new CharacterHUD(hudEl);
-    this.tickFn         = (_dt) => this.tick();
+    this.tickFn         = (_dt) => {
+      if (this.fastForward > 1) return;   // the fast-forward worker is stepping
+      this.tick(this.app.ticker.deltaMS);
+    };
 
     this.app = new PIXI.Application({
       view: canvas,
@@ -906,6 +932,37 @@ export class Game {
 
   isCpuVsCpu(): boolean { return this.cpuVsCpu; }
 
+  /** Dev: which decision profile a CPU-driven side uses (see cpu.tempo). */
+  setCpuProfile(side: 'player' | 'enemy', profile: CpuProfile): void { this.cpuProfiles[side] = profile; }
+  getCpuProfile(side: 'player' | 'enemy'): CpuProfile { return this.cpuProfiles[side]; }
+
+  /** Dev: run `steps` fixed 60 Hz simulation steps per 60 Hz clock tick (1 =
+   *  real time, driven by the rAF ticker). Above 1 a Worker interval clocks
+   *  the simulation so it survives a hidden tab or covered window; each batch
+   *  is capped at 50 ms of work so rendering and input still get a turn. */
+  setFastForward(steps: number): void {
+    this.fastForward = Math.max(1, Math.floor(steps));
+    if (this.fastForward > 1 && !this.ffWorker) {
+      const src = 'setInterval(() => postMessage(0), 1000 / 60)';
+      this.ffWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      this.ffWorker.onmessage = () => {
+        const start = performance.now();
+        for (let i = 0; i < this.fastForward; i++) {
+          this.tick(1000 / 60);
+          if (performance.now() - start > 50) break;
+        }
+      };
+    } else if (this.fastForward === 1 && this.ffWorker) {
+      this.ffWorker.terminate();
+      this.ffWorker = null;
+    }
+  }
+
+  /** Current tower HP of both sides — read by the self-play harness at game over. */
+  get towerHp(): { player: number; enemy: number } {
+    return { player: this.playerTower.hp, enemy: this.enemyTower.hp };
+  }
+
   /** Dev: force the CPU (enemy) to purchase a specific unit type every spawn,
    *  bypassing its stance-driven AI order. Pass null to restore normal AI. */
   setCpuForcedType(type: CharacterConfig['id'] | null): void { this.cpuForcedType = type; }
@@ -1089,6 +1146,7 @@ export class Game {
     const oppSide: 'player' | 'enemy' = self === 'enemy' ? 'player' : 'enemy';
     const oppStr  = threat(oppChars,  oppSide, 0.15);
     const selfStr = threat(selfChars, self,    0.5);
+    this.oppThreat[self] = oppStr;   // read by checkReactiveSpawn
     const unitAdv   = selfStr - oppStr;
     const towerAdv  = (selfTower.hp / TOWER_HP) - (oppTower.hp / TOWER_HP);
     const coinAdv   = Math.min(1, Math.max(-1, (selfCoins - oppCoins) / 120));
@@ -1231,7 +1289,7 @@ export class Game {
       }
       const c = this.spawnCpuUnit(self, type, spawnY);
       if (self === 'enemy')  this.cpuStrategyInfo.decision = `Spawned ${type} #${c.id}`;
-      this.resetSpawnTimer(self, pressure);
+      this.scheduleFollowUpBuy(self, pressure, balance - cost, order, stance);
       return;
     }
     if (self === 'enemy') {
@@ -1239,6 +1297,48 @@ export class Game {
       this.cpuStrategyInfo.decision = `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
     }
     this.resetSpawnTimer(self, pressure);
+  }
+
+  /** After a buy: spend down a flush purse instead of parking it for the next
+   *  7–15 s timer tick. push / defend / all-in re-buy anything affordable
+   *  shortly; economy only chains when the TOP-ranked pick is still affordable
+   *  (fillers remain timer-paced, so "invest when rich" tiering survives).
+   *  'legacy' profile keeps the one-buy-per-tick cadence. */
+  private scheduleFollowUpBuy(
+    self: 'player' | 'enemy', pressure: number, balanceAfter: number,
+    order: { cost: number }[], stance: 'push' | 'economy' | 'defend',
+  ) {
+    const allIn = self === 'enemy' ? this.cpuAllIn : this.playerAllIn;
+    if (this.cpuProfiles[self] === 'legacy' || order.length === 0) {
+      this.resetSpawnTimer(self, pressure);
+      return;
+    }
+    let cheapest = Infinity;
+    for (const o of order) cheapest = Math.min(cheapest, o.cost);
+    const threshold = stance === 'economy' && !allIn ? order[0].cost : cheapest;
+    if (balanceAfter >= threshold) this.setSpawnInterval(self, CPU_SPEND_DOWN_GAP_MS);
+    else                           this.resetSpawnTimer(self, pressure);
+  }
+
+  /** Reactive spawn (stance cadence, `dtSec` apart): buy immediately when the
+   *  opponent's field threat jumps well above its relaxed baseline — the
+   *  player just spent a bank on units and the answer shouldn't wait for a
+   *  timer. The baseline is an EMA with CPU_REACTIVE_BASELINE_TAU so a steady
+   *  trickle doesn't keep tripping it; a trigger re-bases to the live value. */
+  private checkReactiveSpawn(self: 'player' | 'enemy', selfChars: Character[], oppChars: Character[], dtSec: number) {
+    const cur  = this.oppThreat[self];
+    const base = this.oppThreatBaseline[self];
+    const sinceSpawn = self === 'enemy' ? this.cpuSpawnTimer : this.playerSpawnTimer;
+    const armed = this.cpuProfiles[self] === 'improved' && !this.isOver
+      && cur - base >= CPU_REACTIVE_THREAT_DELTA && sinceSpawn >= CPU_REACTIVE_MIN_GAP_MS;
+    if (armed) {
+      this.oppThreatBaseline[self] = cur;
+      this.spawnCpu(self, selfChars, oppChars);
+      // spawnCpu wrote its own decision; prefix it so the dev log shows the trigger.
+      if (self === 'enemy') this.cpuStrategyInfo.decision = `⚡ +${(cur - base).toFixed(1)} threat → ${this.cpuStrategyInfo.decision}`;
+      return;
+    }
+    this.oppThreatBaseline[self] = base + (cur - base) * (1 - Math.exp(-dtSec / CPU_REACTIVE_BASELINE_TAU));
   }
 
   /** CPU sprite sets load on first demand (only the player's loadout is
@@ -1503,9 +1603,8 @@ export class Game {
 
   // ── Tick ─────────────────────────────────────────────────────────────────────
 
-  private tick() {
-    const ticker = this.app.ticker;
-    const dt     = Math.min(ticker.deltaMS / 1000, 1 / 30);  // cap at 33 ms — prevents physics explosion on lag spikes
+  private tick(deltaMS: number) {
+    const dt = Math.min(deltaMS / 1000, 1 / 30);  // cap at 33 ms — prevents physics explosion on lag spikes
 
     // Camera — runs even when the game is over so the player can review the field
     const CAMERA_SPEED = 500; // px/s
@@ -1552,7 +1651,7 @@ export class Game {
     this.parallaxGfx2.x  = -this.cameraX * PARALLAX_FACTOR_FAR;
     setViewport(this.cameraX, this.cameraX + VIEWPORT_WIDTH / GAME_ZOOM);
 
-    if (this.isOver)   { this.tickGameOver(dt, ticker.deltaMS); return; }
+    if (this.isOver)   { this.tickGameOver(dt, deltaMS); return; }
     if (this.isPaused) { this.updateCulling(); return; }
 
     if (this.gameShark && this.coinBalance < 9999) this.coinBalance += 9999 - this.coinBalance;
@@ -1562,8 +1661,8 @@ export class Game {
     this.cpuCoinBalance += cpuRate    * dt;
     this.notifyCoins();
     this.notifyCpuCoins();
-    this.notifyCpuCharsMs    += ticker.deltaMS;
-    this.notifyCpuStrategyMs += ticker.deltaMS;
+    this.notifyCpuCharsMs    += deltaMS;
+    this.notifyCpuStrategyMs += deltaMS;
     if (this.notifyCpuCharsMs    >= 200) { this.notifyCpuCharsMs    = 0; this.notifyCpuChars(); }
     if (this.notifyCpuStrategyMs >= 150) { this.notifyCpuStrategyMs = 0; this.notifyCpuStrategy(); }
     this.notifyEnemyTowerHp();
@@ -1594,52 +1693,54 @@ export class Game {
 
     // Throttle stance assessment to every 500 ms — frame-perfect precision not needed.
     // Also refresh the opponent-cluster cache here: same cadence, avoids a per-spawn O(n²) scan.
-    this.cpuStanceMs += ticker.deltaMS;
+    this.cpuStanceMs += deltaMS;
     if (this.cpuStanceMs >= 500) {
       this.cpuStanceMs = 0;
       this.cpuStance = this.assessCpuStance('enemy', this.enemyLive, this.playerLive);
       if (this.cpuVsCpu) this.playerStance = this.assessCpuStance('player', this.playerLive, this.enemyLive);
       this.cachedEnemyOppClustered  = this.isCharsClustered(this.playerLive);
       if (this.cpuVsCpu) this.cachedPlayerOppClustered = this.isCharsClustered(this.enemyLive);
+      this.checkReactiveSpawn('enemy', this.enemyLive, this.playerLive, 0.5);
+      if (this.cpuVsCpu) this.checkReactiveSpawn('player', this.playerLive, this.enemyLive, 0.5);
     }
 
     // CPU auto-spawn (uses liveChars for strategic decisions)
-    this.cpuSpawnTimer += ticker.deltaMS;
+    this.cpuSpawnTimer += deltaMS;
     if (this.cpuSpawnTimer >= this.cpuSpawnInterval) {
       this.spawnCpu('enemy', this.enemyLive, this.playerLive);
     }
 
     // CPU vs CPU: drive the player side with a second AI instance
     if (this.cpuVsCpu) {
-      this.playerSpawnTimer += ticker.deltaMS;
+      this.playerSpawnTimer += deltaMS;
       if (this.playerSpawnTimer >= this.playerSpawnInterval) {
         this.spawnCpu('player', this.playerLive, this.enemyLive);
       }
     }
 
     // Coin drop
-    this.coinDropTimer += ticker.deltaMS;
+    this.coinDropTimer += deltaMS;
     if (this.coinDropTimer >= this.coinDropInterval) {
       this.spawnCoin(COIN_VALUE, 'gold');
       this.resetCoinDropTimer();
     }
 
     // Silver coin drop
-    this.silverDropTimer += ticker.deltaMS;
+    this.silverDropTimer += deltaMS;
     if (this.silverDropTimer >= this.silverDropInterval) {
       this.spawnCoin(SILVER_COIN_VALUE, 'silver');
       this.resetSilverDropTimer();
     }
 
     // Blue coin drop — rare jackpot
-    this.blueDropTimer += ticker.deltaMS;
+    this.blueDropTimer += deltaMS;
     if (this.blueDropTimer >= this.blueDropInterval) {
       this.spawnCoin(BLUE_COIN_VALUE, 'blue');
       this.resetBlueDropTimer();
     }
 
     // Power-up drop (every 40 s) with 20 s lead-up indicator
-    this.powerUpTimer += ticker.deltaMS;
+    this.powerUpTimer += deltaMS;
     const timeUntilDrop = this.powerUpInterval - this.powerUpTimer;
 
     if (timeUntilDrop <= POWERUP_INDICATOR_LEAD * 1000) {
@@ -1723,7 +1824,7 @@ export class Game {
 
     // Throttle the collect-AI assign/recall pass; ~4 Hz is plenty for the
     // strategic decision and removes a per-tick `.filter()` + closure × 2 sides.
-    this.cpuCollectAIMs += ticker.deltaMS;
+    this.cpuCollectAIMs += deltaMS;
     const runCollectAI = this.cpuCollectAIMs >= 250;
     if (runCollectAI) this.cpuCollectAIMs = 0;
     if (runCollectAI) this.tickCpuCollectAI('enemy', this.enemyLive, liveCoins);
@@ -2639,6 +2740,8 @@ export class Game {
     this.playerStance          = 'economy';
     this.cpuAllIn              = false;
     this.playerAllIn           = false;
+    this.oppThreat             = { player: 0, enemy: 0 };
+    this.oppThreatBaseline     = { player: 0, enemy: 0 };
     this.puFetchers.clear();
     // Tribe power-ups: fresh cooldowns; the CPU picks its ability for the new
     // match (uniform random — all four are situationally strong). The player's
@@ -2696,6 +2799,7 @@ export class Game {
   }
 
   destroy() {
+    this.setFastForward(1);
     this.app.ticker.remove(this.tickFn);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup',   this.onKeyUp);

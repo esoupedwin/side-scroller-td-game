@@ -1,11 +1,11 @@
-import { GameConfig, type AttackStyle, type CharTypeName, type TribePowerUpId } from './gameConfig';
+import { GameConfig, type AttackStyle, type CharTypeName, type TribePowerUpId, type CpuProfile } from './gameConfig';
 import { isTouchDevice } from './mobile';
 import type { CharacterConfig } from './Character';
 import type { Tribe } from './Tribes';
 
 // Re-export the config-derived character types — source files import from
 // constants.ts, never from gameConfig.ts directly.
-export type { AttackStyle, CharTypeName, TribePowerUpId };
+export type { AttackStyle, CharTypeName, TribePowerUpId, CpuProfile };
 
 const { canvas, groundY, colors, towers, characters, cpu, economy } = GameConfig;
 const ch    = characters;
@@ -101,6 +101,11 @@ export const CPU_NEUTRAL_MAX_FACTOR  = cpu.neutralMaxFactor;
 export const CPU_RETREAT_HP_FRAC      = cpu.retreatHpFrac;
 export const CPU_RETREAT_RECOVER_FRAC = cpu.retreatRecoverFrac;
 export const CPU_ENDGAME_SEC          = cpu.endgameSec;
+export const CPU_DEFAULT_PROFILE: CpuProfile = cpu.defaultProfile;
+export const CPU_SPEND_DOWN_GAP_MS     = cpu.tempo.spendDownGapMs;
+export const CPU_REACTIVE_THREAT_DELTA = cpu.tempo.reactiveThreatDelta;
+export const CPU_REACTIVE_MIN_GAP_MS   = cpu.tempo.reactiveMinGapMs;
+export const CPU_REACTIVE_BASELINE_TAU = cpu.tempo.reactiveBaselineTau;
 export const CPU_VAL_RANGE_DIVISOR    = cpu.valuation.rangeReachDivisor;
 export const CPU_VAL_HP_DIVISOR       = cpu.valuation.hpTankyDivisor;
 export const CPU_VAL_SPLASH_PUSH_MULT = cpu.valuation.splashPushMult;
@@ -194,6 +199,7 @@ export const TRIBE_PU_IDS = Object.keys(TRIBE_POWER_UPS) as readonly TribePowerU
 // ── Dev cheats ───────────────────────────────────────────────────────────────
 export const CHEAT_PLAYER_COIN_GRANT  = GameConfig.cheats.playerCoinGrant;
 export const CHEAT_CPU_COIN_GRANT     = GameConfig.cheats.cpuCoinGrant;
+export const CHEAT_SELF_PLAY_SPEED    = GameConfig.cheats.selfPlaySpeed;
 export const CHEAT_SKIP_INTRO_SCREENS = GameConfig.cheats.skipIntroScreens;
 export const CHEAT_TOWER_DAMAGE       = GameConfig.cheats.towerDamage;
 export const CHEAT_CLOCK_SKIP_SEC     = GameConfig.cheats.clockSkipSec;

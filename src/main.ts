@@ -5,6 +5,7 @@ import {
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, MOBILE_HUD_SCALE, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS, CHEAT_TOWER_DAMAGE,
   CHEAT_CLOCK_SKIP_SEC,
   CHEAT_CLOCK_SKIP_BIG_SEC,
+  CHEAT_SELF_PLAY_SPEED, type CpuProfile,
   TRIBE_POWER_UPS, TRIBE_PU_IDS, TRIBE_PU_PLAYER_DEFAULT,
   type CharTypeName, type TribePowerUpId,
 } from './constants';
@@ -1168,6 +1169,102 @@ refreshDiagnoseUi();
   });
 }
 
+// ── Self-play A/B ─────────────────────────────────────────────────────────
+// Runs N CPU-vs-CPU matches fast-forwarded with the 'improved' profile on one
+// side and 'legacy' on the other, swapping sides every match (the enemy side
+// loses timeout ties and maps are asymmetric, so a fixed assignment would
+// bias the result), then prints the win table. handleGameOver reports each
+// finished match through selfPlay.onMatchOver.
+interface SelfPlayResult {
+  improvedSide: 'player' | 'enemy';
+  winner:       'player' | 'enemy';
+  reason:       'tower' | 'timeout';
+  margin:       number;   // tower HP, improved side − legacy side
+}
+const selfPlay = {
+  active:  false,
+  total:   0,
+  results: [] as SelfPlayResult[],
+  onMatchOver: null as ((winner: 'player' | 'enemy', reason: 'tower' | 'timeout') => void) | null,
+};
+{
+  const btn      = document.getElementById('selfplay-btn')    as HTMLButtonElement;
+  const countSel = document.getElementById('selfplay-count')  as HTMLSelectElement;
+  const resultEl = document.getElementById('selfplay-result') as HTMLPreElement;
+  let prevCpuVsCpu = false;
+  let prevProfiles: Record<'player' | 'enemy', CpuProfile> = { player: 'improved', enemy: 'improved' };
+
+  const improvedSideFor = (i: number): 'player' | 'enemy' => (i % 2 === 0 ? 'enemy' : 'player');
+
+  const startMatch = () => {
+    const i   = selfPlay.results.length;
+    const imp = improvedSideFor(i);
+    game.setCpuProfile(imp, 'improved');
+    game.setCpuProfile(imp === 'enemy' ? 'player' : 'enemy', 'legacy');
+    btn.textContent = `Self-play ${i + 1}/${selfPlay.total}`;
+    resultEl.textContent = `running match ${i + 1}/${selfPlay.total} (improved = ${imp})…`;
+    restartCurrentGame();
+  };
+
+  const finish = () => {
+    selfPlay.active = false;
+    game.setFastForward(1);
+    game.setCpuProfile('player', prevProfiles.player);
+    game.setCpuProfile('enemy',  prevProfiles.enemy);
+    cpuProfileSelect.value = prevProfiles.enemy;
+    if (game.isCpuVsCpu() !== prevCpuVsCpu) {
+      game.setCpuVsCpu(prevCpuVsCpu);
+      refreshCpuVsCpuUi();
+    }
+
+    const r = selfPlay.results;
+    const n = r.length;
+    const impWins   = r.filter(x => x.winner === x.improvedSide);
+    const asEnemy   = r.filter(x => x.improvedSide === 'enemy');
+    const asPlayer  = r.filter(x => x.improvedSide === 'player');
+    const byTower   = r.filter(x => x.reason === 'tower').length;
+    const avgMargin = n ? r.reduce((a, x) => a + x.margin, 0) / n : 0;
+    const pct = (k: number, d: number) => d ? `${Math.round(100 * k / d)}%` : '—';
+    resultEl.textContent =
+      `self-play ${n} matches · improved vs legacy · ${CHEAT_SELF_PLAY_SPEED}×\n` +
+      `improved  ${impWins.length}/${n} (${pct(impWins.length, n)})\n` +
+      `  as enemy  ${asEnemy.filter(x => x.winner === 'enemy').length}/${asEnemy.length}` +
+      `   as player ${asPlayer.filter(x => x.winner === 'player').length}/${asPlayer.length}\n` +
+      `legacy    ${n - impWins.length}/${n}\n` +
+      `by tower ${byTower} · by timeout ${n - byTower}\n` +
+      `avg tower-HP margin (improved − legacy): ${avgMargin >= 0 ? '+' : ''}${avgMargin.toFixed(0)}`;
+    btn.disabled    = false;
+    btn.textContent = 'Self-play A/B';
+  };
+
+  selfPlay.onMatchOver = (winner, reason) => {
+    if (!selfPlay.active) return;
+    const imp = improvedSideFor(selfPlay.results.length);
+    const hp  = game.towerHp;
+    const margin = imp === 'enemy' ? hp.enemy - hp.player : hp.player - hp.enemy;
+    selfPlay.results.push({ improvedSide: imp, winner, reason, margin });
+    if (selfPlay.results.length >= selfPlay.total) finish();
+    else setTimeout(startMatch, 150);   // let the game-over frame render before the next reset
+  };
+
+  btn.addEventListener('click', () => {
+    if (selfPlay.active) return;
+    selfPlay.active  = true;
+    selfPlay.total   = parseInt(countSel.value, 10) || 6;
+    selfPlay.results = [];
+    prevCpuVsCpu = game.isCpuVsCpu();
+    prevProfiles = { player: game.getCpuProfile('player'), enemy: game.getCpuProfile('enemy') };
+    if (!prevCpuVsCpu) {
+      game.setCpuVsCpu(true);
+      refreshCpuVsCpuUi();
+    }
+    game.setFastForward(CHEAT_SELF_PLAY_SPEED);
+    resultEl.style.display = '';
+    btn.disabled = true;
+    startMatch();
+  });
+}
+
 // ── Dev panel: map selector ────────────────────────────────────────────────
 {
   const mapSelect   = document.getElementById('dev-map-select')   as HTMLSelectElement;
@@ -1289,6 +1386,14 @@ const cpuForceSelect = document.getElementById('dev-cpu-force-select') as HTMLSe
   });
 }
 
+// Enemy-side CPU decision profile — play against 'legacy' to feel the tempo
+// difference by hand; the self-play harness below measures it.
+const cpuProfileSelect = document.getElementById('dev-cpu-profile-select') as HTMLSelectElement;
+cpuProfileSelect.value = game.getCpuProfile('enemy');
+cpuProfileSelect.addEventListener('change', () => {
+  game.setCpuProfile('enemy', cpuProfileSelect.value as CpuProfile);
+});
+
 function handleCpuCoinsChanged(coins: number) {
   cpuCoinAmountEl.textContent = String(coins);
 }
@@ -1398,7 +1503,7 @@ function handleGameOver(winner: 'player' | 'enemy', reason: 'tower' | 'timeout')
     : '—';
 
   if (winner === 'player') {
-    startConfetti();
+    if (!selfPlay.active) startConfetti();   // harness matches aren't the player's win
     goTitle.textContent = '🏆 Victory!';
     goTitle.style.color = '#00b4d8';
     goSub.textContent   = reason === 'timeout'
@@ -1412,4 +1517,5 @@ function handleGameOver(winner: 'player' | 'enemy', reason: 'tower' | 'timeout')
       : 'Your tower has fallen…';
   }
   gameOverEl.style.display = 'block';
+  selfPlay.onMatchOver?.(winner, reason);
 }

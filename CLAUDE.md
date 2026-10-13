@@ -464,6 +464,14 @@ Spawn interval scales with pressure (`playerCount - cpuCount`):
 - Comfortable (`≤ -CPU_PRESSURE_THRESHOLD`): slow spawn
 - Neutral: middle range
 
+### Tempo (`gameConfig.cpu.tempo`, per-side `CpuProfile`)
+The player can spend a whole bank the instant they have it; the CPU used to buy one unit per timer tick and then wait 7–15 s on a full purse. Two features close that gap, both gated by the side's profile (`Game.setCpuProfile(side, 'improved' | 'legacy')`, default `cpu.defaultProfile`; the dev panel's **CPU AI** select sets the enemy side):
+- **Spend-down** (`scheduleFollowUpBuy`): after a buy, re-arm the spawn timer at `spendDownGapMs` while another unit is affordable — push / defend / all-in chain on anything, economy only while the *top-ranked* pick is still affordable (fillers stay timer-paced so "invest when rich" tiering survives).
+- **Reactive spawn** (`checkReactiveSpawn`, stance cadence): `assessCpuStance` records the opponent's field threat; an EMA baseline (`reactiveBaselineTau`) relaxes toward it, and a rise of `reactiveThreatDelta` warrior-equivalents above the baseline with `reactiveMinGapMs` since the last spawn decision buys immediately and re-bases. The dev decision log shows it as `⚡ +Δ threat → Spawned …`.
+
+### Self-play A/B harness (dev panel)
+**Self-play A/B** runs N CPU-vs-CPU matches with `'improved'` on one side and `'legacy'` on the other, swapping sides every match (the enemy loses timeout ties and maps are asymmetric), and prints wins by side, tower/timeout split, and the mean tower-HP margin (`#selfplay-result`). Matches run at `cheats.selfPlaySpeed` fixed 60 Hz steps per clock tick via `Game.setFastForward(k)`; above 1 the clock is a **Worker interval**, not the rAF ticker, because Chrome throttles rAF and main-thread timers to 1 Hz when the tab is hidden or the window is covered (which stalled runs the moment the user alt-tabbed). Each batch is capped at 50 ms so rendering still gets a turn. `handleGameOver` reports each match through `selfPlay.onMatchOver`; confetti is suppressed during a run. Use it to put a win-rate number on any AI change instead of eyeballing.
+
 ### Attribute-driven unit valuation
 Unit selection and threat assessment are **derived from live config attributes** — there are no hardcoded per-type preference lists. `Game.unitProfile(tribe, type)` (cached per tribe/type in a module-level Map) computes from `charConfig`/`charCost`:
 - `dps` — sustained damage/sec folding in burst rounds (`burstCount`), magazine reload (`shotsBeforeCooldown`/`cooldownSec`), poison DoT per hit, and miss chance (`critical`)

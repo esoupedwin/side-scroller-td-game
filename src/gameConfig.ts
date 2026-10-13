@@ -314,6 +314,20 @@ export const GameConfig = {
     retreatHpFrac:        0.15,     // AI combat units fall back to 'defend' below this HP fraction…
     retreatRecoverFrac:   0.6,      // …and only rejoin the fight once healed back above this (hysteresis)
 
+    // ── Tempo ────────────────────────────────────────────────────────────────
+    // The player can spend their whole bank the instant they have it; the CPU
+    // used to buy ONE unit per spawn-timer tick and then wait 7–15 s on a full
+    // purse. These close that gap (Game.spawnCpu follow-up scheduling and
+    // Game.checkReactiveSpawn). The 'legacy' profile switches them off so the
+    // dev-panel self-play harness can A/B old against new.
+    defaultProfile: 'improved' as const,   // CpuProfile applied to both CPU sides at start
+    tempo: {
+      spendDownGapMs:      700,   // delay before a follow-up buy while still affordable (push/defend/all-in: anything; economy: only the top-ranked pick)
+      reactiveThreatDelta: 1.0,   // opponent field-threat rise (warrior-equivalents) above the relaxed baseline that triggers an immediate buy
+      reactiveMinGapMs:    1500,  // floor between the previous spawn decision and a reactive buy
+      reactiveBaselineTau: 4,     // s — time constant the threat baseline relaxes toward the live value
+    },
+
     // ── Endgame (time-aware stance) ──────────────────────────────────────────
     // With this many seconds left, timeout rules take over stance selection:
     // the timeout winner is decided purely by tower HP (the enemy side loses
@@ -436,6 +450,9 @@ export const GameConfig = {
     // load (and on tribe/map switches) and jump straight into the match with
     // EVERY owned character card loaded — no 7-card cap, no 3-2-1 countdown.
     skipIntroScreens: false,
+    // Dev-panel self-play harness: CPU-vs-CPU matches simulated at this many
+    // fixed 60 Hz steps per rendered frame (12 → a 5-minute match in ~25 s).
+    selfPlaySpeed:    12,
   },
 
   vfx: {
@@ -532,6 +549,10 @@ export type AttackStyle = 'melee' | 'blast' | 'arrow' | 'bullet' | 'grenade' | '
 
 // The four tribe power-ups a side can bring into a match (see tribePowerUp above).
 export type TribePowerUpId = 'speed' | 'vitality' | 'plague' | 'aggression';
+
+// CPU decision profile (see cpu.tempo above): 'improved' enables the tempo
+// features, 'legacy' is the one-buy-per-timer behaviour kept for A/B runs.
+export type CpuProfile = 'improved' | 'legacy';
 
 // The unit-type union, derived from the config block keys — adding a new
 // character block automatically extends it (no hand-maintained union).

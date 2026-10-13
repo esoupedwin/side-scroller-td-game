@@ -1520,6 +1520,21 @@
           <pre id="bench-result" style="display:none; margin:0; font-size:10px; color:#cbd5e1; background:rgba(0,0,0,0.35); border:1px solid #334; border-radius:3px; padding:4px 6px; white-space:pre; user-select:text; max-width:240px; line-height:1.25;"></pre>
         </div>
 
+        <!-- ── Self-play A/B: 'improved' CPU profile vs 'legacy', both sides AI,
+             sides swapped every match, simulated fast-forwarded (main.ts) ── -->
+        <div class="dev-item" style="gap:5px; align-items:flex-start;">
+          <div class="dev-item" style="gap:4px;">
+            <button id="selfplay-btn" class="dev-btn" title="CPU vs CPU, improved profile vs legacy, sides alternating each match, fast-forwarded">Self-play A/B</button>
+            <select id="selfplay-count" class="dev-select" style="max-width:56px;" title="Matches per run">
+              <option value="2">2</option>
+              <option value="6" selected>6</option>
+              <option value="10">10</option>
+              <option value="20">20</option>
+            </select>
+          </div>
+          <pre id="selfplay-result" style="display:none; margin:0; font-size:10px; color:#cbd5e1; background:rgba(0,0,0,0.35); border:1px solid #334; border-radius:3px; padding:4px 6px; white-space:pre; user-select:text; max-width:260px; line-height:1.25;"></pre>
+        </div>
+
         <!-- ── Game Shark segment ── -->
         <div class="dev-item" style="gap:6px; border-left:1px solid rgba(255,255,255,0.07); padding-left:14px; align-items:flex-start;">
           <span class="dev-section-tag" style="border-right:none; padding-right:6px; margin-right:0;">GAME<br>SHARK</span>
@@ -1537,6 +1552,13 @@
             <div class="dev-item" style="gap:4px;">
               <span class="dev-item-label">CPU buys</span>
               <select id="dev-cpu-force-select" class="dev-select" style="max-width:110px;"></select>
+            </div>
+            <div class="dev-item" style="gap:4px;">
+              <span class="dev-item-label">CPU AI</span>
+              <select id="dev-cpu-profile-select" class="dev-select" style="max-width:110px;" title="Enemy-side decision profile (gameConfig.cpu.tempo)">
+                <option value="improved">Improved</option>
+                <option value="legacy">Legacy</option>
+              </select>
             </div>
             <div class="dev-item" style="gap:4px;">
               <button id="dev-dmg-player-tower-btn" class="dev-btn" title="Deal flat damage to the player's tower">Hurt P-Tower</button>
