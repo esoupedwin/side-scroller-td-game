@@ -11,7 +11,7 @@ import {
   EVASIVE_JUMP_COOLDOWN, EVASIVE_JUMP_CHANCE, EVASIVE_JUMP_SCAN_RANGE,
   CHAR_LOW_HEALTH_RATIO, CHAR_LOW_HEALTH_BLINK_COLOR, CHAR_LOW_HEALTH_BLINK_HZ, CHAR_POISON_COLOR,
   ATTACK_KNOCKBACK_VY,
-  TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
+  TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, SIEGE_MARGIN, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
   HARASS_RALLY_OFFSET, HARASS_GROUP_DIST, HARASS_RALLY_TOLERANCE,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST, COIN_THROW_MAX_Y_GAP,
   COIN_PICK_DIST_OFFSET,
@@ -192,6 +192,11 @@ export interface UpdateContext {
   onFire?:           (req: FireRequest) => void;
   onDamageTower?:    (dmg: number) => void;
   onDepositCoin:     (value: number) => void;
+  /** Harass units whose weapon outranges the enemy tower may shell it from
+   *  outside its range (see updateHarass). On for the human player's side;
+   *  for CPU-driven sides it follows the side's CpuProfile so self-play can
+   *  A/B it. */
+  siege:             boolean;
   onMeleeHit?:       (unitType: string, x: number) => void;
   /** Precomputed `Math.exp(-ATTACK_KNOCKBACK_DECAY * dt)` shared by every
    *  melee-swing and shotgun-blast hit landed this tick. Identical for every
@@ -2868,11 +2873,18 @@ export class Character {
   // â”€â”€ Harass behaviour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private updateHarass(ctx: UpdateContext) {
-    const { dt, enemies, allies, enemyTowerFrontX, homeTowerFrontX, onFire, blocks, navGraph } = ctx;
+    const { dt, enemies, allies, enemyTowerFrontX, enemyTowerY, homeTowerFrontX, onFire, blocks, navGraph } = ctx;
     if (this.isAirborne) return;
 
     const dir   = this.side === 'player' ? 1 : -1;
     const safeX = enemyTowerFrontX - dir * (TOWER_ATTACK_RANGE + HARASS_SAFETY_BUFFER);
+    // Siege line: a ranged unit whose weapon (less a margin) still outreaches
+    // the tower's range plus the harass buffer can stand where the tower is in
+    // ITS range but it is never in the tower's. Enemies still take priority —
+    // the tower is shelled only when there is nothing in weapon range.
+    const siegeReach = this.config.attackRange - SIEGE_MARGIN;
+    const canSiege   = ctx.siege && this.isRanged && siegeReach >= TOWER_ATTACK_RANGE + HARASS_SAFETY_BUFFER;
+    const siegeX     = enemyTowerFrontX - dir * siegeReach;
 
     // Retreat is highest priority â€” back off before doing anything else
     if (dir * (this.x - safeX) > 0) {
@@ -2899,6 +2911,13 @@ export class Character {
           return;
         }
       }
+    } else if (canSiege && dir * (this.x - siegeX) >= -4) {
+      // Nothing to shoot at and the tower is in reach — shell it from here and
+      // hold. An approaching enemy enters weapon range before it reaches us,
+      // and the in-range branch above (with its kiting) takes over.
+      this.state = 'fighting';
+      this.attackTower(enemyTowerFrontX, enemyTowerY, onFire, ctx.onDamageTower);
+      return;
     } else if (this.state === 'fighting') {
       // No valid in-range target this tick â€” release the fighting lock so the
       // movement branches below can correctly drive 'marching' (and so the
@@ -2957,6 +2976,11 @@ export class Character {
         if (this.state !== 'fighting') this.state = 'marching';
       }
       // else: enemy is ahead, in attack range, on same plane â€” hold position
+    } else if (canSiege) {
+      // No enemies: a sieging unit's job is the tower — walk to the line.
+      this.requestPath(siegeX, ctx.enemyTowerBaseFloorY, navGraph, dt);
+      this.followPath(dt, ctx.platforms);
+      this.state = 'marching';
     } else {
       // No enemies â€” use pathfinding to group up or rally near own tower
       const mate = this.nearestAlly(allies);

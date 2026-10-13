@@ -737,6 +737,7 @@ export class Game {
       navGraph:             this.navGraph,
       onFire:               (req) => this.fireProjectile(req),
       onDamageTower:        (dmg) => this.enemyTower.takeDamage(dmg),
+      siege:                true,   // patched each tick in patchCtx()
       onMeleeHit:       (unitType, x) => playSoundAt(unitType === 'conscript' ? 'punch' : 'sword_slash', x),
       attackKnockbackDecay: 1,   // patched each tick in patchCtx()
       onDepositCoin:    (value) => {
@@ -766,6 +767,7 @@ export class Game {
       navGraph:             this.navGraph,
       onFire:               (req) => this.fireProjectile(req),
       onDamageTower:        (dmg) => this.playerTower.takeDamage(dmg),
+      siege:                true,   // patched each tick in patchCtx()
       onMeleeHit:       (unitType, x) => playSoundAt(unitType === 'conscript' ? 'punch' : 'sword_slash', x),
       attackKnockbackDecay: 1,   // patched each tick in patchCtx()
       onDepositCoin:    (value) => {
@@ -1467,6 +1469,12 @@ export class Game {
     ctx.homeTowerFrontX      = home.frontX;
     ctx.homeTowerBaseFloorY  = home.baseY;
     ctx.worldWidth           = this.mapDef.worldWidth;
+    // Siege is always on for the human player; a CPU-driven side follows its
+    // profile so self-play can A/B it (the player side is CPU-driven only in
+    // CPU-vs-CPU mode).
+    ctx.siege = ctx === this.playerCtx
+      ? (!this.cpuVsCpu || this.cpuProfiles.player === 'improved')
+      : this.cpuProfiles.enemy === 'improved';
   }
 
   /**

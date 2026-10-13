@@ -217,6 +217,8 @@ Setting `behavior` via the setter handles side effects automatically:
 
 **Harass behavior**: advance toward enemies but stop at `safeX` (enemy tower range + `HARASS_SAFETY_BUFFER`). When no enemies are visible: group near the nearest ally (within 55 px), or rally 80 px in front of own tower if alone.
 
+**Siege** (inside harass, gated by `UpdateContext.siege`): a ranged unit whose `attackRange − SIEGE_MARGIN` still clears `TOWER_ATTACK_RANGE + HARASS_SAFETY_BUFFER` (sniper 532, rifleman 392 vs tower 300) has a *siege line* `enemyTowerFrontX − dir × (attackRange − SIEGE_MARGIN)` where the tower is in its range but it is never in the tower's. With nothing in weapon range it shells the tower from there (enemies always take priority, and the in-range branch's kiting still applies); with no enemies visible it walks to the line instead of rallying at home. `siege` is always on for the human player's side; CPU-driven sides follow their `CpuProfile` (`Game.patchCtx`) so self-play can A/B it. Melee and short-range units are unaffected — harass still deals no tower damage for them.
+
 **Defend behavior**: patrol within own tower's attack range, engaging any enemy that enters range. Ranged units kite away from closing melee.
 
 ### isRanged / isMeleeType helpers
@@ -451,12 +453,12 @@ Three anomaly types (debounced at 2s per character):
 
 `tickCpuBehaviorAI()` sets behavior based on current stance:
 - Defend stance: melee/blast → `'defend'`, ranged → `'harass'`
-- Push stance: melee/blast → `'attacking'`, ranged → `'harass'`; **finisher**: when the opponent has ≤1 non-collecting units alive, the harass split is suspended and everyone attacks (harass deals zero tower damage)
+- Push stance: melee/blast → `'attacking'`, ranged → `'harass'`; **finisher**: when the opponent has ≤1 non-collecting units alive, the harass split is suspended and everyone attacks (harass deals no tower damage except for sieging long-range units)
 - `assessCpuStance` threat discounts collectors: opponent's ×0.15, own ×0.5 (recallable but currently off the front line)
 
 ### Endgame (time-aware stance)
 The timeout winner is decided purely by tower HP (the enemy side loses ties), so inside the final `CPU_ENDGAME_SEC` (default 75 s) `assessCpuStance` ignores the mid-game score:
-- **Behind on tower HP → ALL-IN**: stance `'push'` plus an all-in flag (`cpuAllIn`/`playerAllIn`). Behavior AI sends *every* unit to `'attacking'` (no harass split — harass deals zero tower damage; no low-HP retreats), collect AI recalls collectors (`wantedCollectors = 0`), and `resetSpawnTimer` uses the urgent interval regardless of unit-count pressure. This deliberately overrides the critical-own-tower defend — turtling while behind converts a possible loss into a certain one.
+- **Behind on tower HP → ALL-IN**: stance `'push'` plus an all-in flag (`cpuAllIn`/`playerAllIn`). Behavior AI sends *every* unit to `'attacking'` (no harass split — only sieging long-range harassers damage the tower; no low-HP retreats), collect AI recalls collectors (`wantedCollectors = 0`), and `resetSpawnTimer` uses the urgent interval regardless of unit-count pressure. This deliberately overrides the critical-own-tower defend — turtling while behind converts a possible loss into a certain one.
 - **Ahead on tower HP → defend the lead** and run out the clock (unless the opponent tower is critical, then push to finish).
 
 Spawn interval scales with pressure (`playerCount - cpuCount`):

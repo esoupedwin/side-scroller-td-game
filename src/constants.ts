@@ -273,6 +273,7 @@ export const CHAR_POISON_COLOR           = ch.poisonColor;
 export const ATTACK_KNOCKBACK_VY    = ch.attackKnockbackVy;
 export const ATTACK_KNOCKBACK_DECAY = ch.attackKnockbackDecay;
 export const HARASS_SAFETY_BUFFER   = ch.harassSafetyBuffer;
+export const SIEGE_MARGIN           = ch.siegeMargin;
 export const HARASS_RALLY_OFFSET    = ch.harassRallyOffset;
 export const HARASS_GROUP_DIST      = ch.harassGroupDist;
 export const HARASS_RALLY_TOLERANCE = ch.harassRallyTolerance;
