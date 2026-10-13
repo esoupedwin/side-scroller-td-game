@@ -132,21 +132,21 @@ export const GameConfig = {
       rifleman: {
         id:          'rifleman' as const,
         attackStyle: 'bullet' as const, icon: '🔫', uiColor: '#7a8c42',
-        hp:          90, speed: 78, attackRange: 280, attackPower: 9,
+        hp:          90, speed: 78, attackRange: 392, attackPower: 9,
         fireRate:    0.25, cost: 70, critical: 0.07, knockback: 0,
         shotsBeforeCooldown: 3, cooldownSec: 1.5,  // 3 rounds, then a 1.5 s reload
       },
       musketeer: {
         id:          'musketeer' as const,
         attackStyle: 'bullet' as const, icon: '🤠', uiColor: '#b8860b',
-        hp:          65, speed: 92, attackRange: 200, attackPower: 7,
+        hp:          65, speed: 92, attackRange: 280, attackPower: 7,
         fireRate:    1.4, cost: 75, critical: 0.09, knockback: 0,
         burstCount:  1, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
       },
       sniper: {
         id:          'sniper' as const,
         attackStyle: 'bullet' as const, icon: '🎯', uiColor: '#e07b39',
-        hp:          70, speed: 50, attackRange: 380, attackPower: 35,
+        hp:          70, speed: 50, attackRange: 532, attackPower: 35,
         fireRate:    3.1, cost: 100, critical: 0.05, knockback: 0,
       },
       viking: {
@@ -178,7 +178,7 @@ export const GameConfig = {
       pirateking: {
         id:          'pirateking' as const,
         attackStyle: 'bullet' as const, icon: '🤠', uiColor: '#b8860b',
-        hp:          105, speed: 100, attackRange: 200, attackPower: 7,
+        hp:          105, speed: 100, attackRange: 280, attackPower: 7,
         fireRate:    2.4, cost: 100, critical: 0.09, knockback: 100,
         burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
       },
@@ -206,21 +206,21 @@ export const GameConfig = {
       rifleman: {
         id:          'rifleman' as const,
         attackStyle: 'bullet' as const, icon: '🔫', uiColor: '#7a8c42',
-        hp:          90, speed: 78, attackRange: 280, attackPower: 9,
+        hp:          90, speed: 78, attackRange: 392, attackPower: 9,
         fireRate:    0.25, cost: 70, critical: 0.07, knockback: 0,
         shotsBeforeCooldown: 3, cooldownSec: 1.5,
       },
       gunslinger: {
         id:          'gunslinger' as const,
         attackStyle: 'bullet' as const, icon: '🤠', uiColor: '#b8860b',
-        hp:          85, speed: 92, attackRange: 200, attackPower: 7,
+        hp:          85, speed: 92, attackRange: 280, attackPower: 7,
         fireRate:    1.4, cost: 75, critical: 0.09, knockback: 0,
         burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
       },
       sniper: {
         id:          'sniper' as const,
         attackStyle: 'bullet' as const, icon: '🎯', uiColor: '#e07b39',
-        hp:          70, speed: 50, attackRange: 380, attackPower: 35,
+        hp:          70, speed: 50, attackRange: 532, attackPower: 35,
         fireRate:    3.1, cost: 100, critical: 0.05, knockback: 0,
         spriteFolder: 'Sniper',  // asset folder is capitalised on disk
       },
@@ -255,7 +255,7 @@ export const GameConfig = {
       tanker: {
         id:          'tanker' as const,
         attackStyle: 'bullet' as const, icon: '🪖', uiColor: '#8b4513',
-        hp:          500, speed: 30, attackRange: 240, attackPower: 75,
+        hp:          500, speed: 30, attackRange: 336, attackPower: 75,
         fireRate:    3.2, cost: 160, critical: 0.08, width: 80, height: 70, knockback: 0,
       },
     },
