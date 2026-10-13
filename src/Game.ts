@@ -63,7 +63,8 @@ import {
   CPU_DEFAULT_PROFILE, CPU_SPEND_DOWN_GAP_MS, CPU_REACTIVE_THREAT_DELTA,
   CPU_REACTIVE_MIN_GAP_MS, CPU_REACTIVE_BASELINE_TAU, type CpuProfile,
   CPU_STANCE_PUSH_ENTER, CPU_STANCE_PUSH_EXIT, CPU_STANCE_DEFEND_ENTER, CPU_STANCE_DEFEND_EXIT,
-  CPU_STANCE_MIN_DWELL_SEC,
+  CPU_STANCE_MIN_DWELL_SEC, CPU_RETREAT_HP_FRAC_RANGED, CPU_VAL_COUNTER_WEIGHT, CPU_VAL_SAME_TYPE_PENALTY,
+  TOWER_ATTACK_RANGE, cpuProfileFeatures, type CpuFeature,
   TRIBE_PU_COOLDOWN_SEC, TRIBE_PU_DURATION_SEC, TRIBE_PU_SPEED_MULT, TRIBE_PU_HEAL_PER_SEC,
   TRIBE_PU_PLAGUE_DAMAGE, TRIBE_PU_PLAGUE_TICKS, TRIBE_PU_PLAGUE_INTERVAL, TRIBE_PU_AGGRESSION_MULT,
   TRIBE_PU_PLAYER_DEFAULT, TRIBE_PU_IDS, TRIBE_POWER_UPS, type TribePowerUpId,
@@ -332,6 +333,9 @@ export class Game {
   // Persists across reset() so a harness can assign sides per match.
   private cpuProfiles: Record<'player' | 'enemy', CpuProfile> = {
     player: CPU_DEFAULT_PROFILE, enemy: CPU_DEFAULT_PROFILE,
+  };
+  private cpuFeatures: Record<'player' | 'enemy', ReadonlySet<CpuFeature>> = {
+    player: cpuProfileFeatures(CPU_DEFAULT_PROFILE), enemy: cpuProfileFeatures(CPU_DEFAULT_PROFILE),
   };
   // Reactive spawn: the opponent's live field threat (from assessCpuStance)
   // and a slowly-relaxing baseline of it. A rise of CPU_REACTIVE_THREAT_DELTA
@@ -939,7 +943,10 @@ export class Game {
   isCpuVsCpu(): boolean { return this.cpuVsCpu; }
 
   /** Dev: which decision profile a CPU-driven side uses (see cpu.tempo). */
-  setCpuProfile(side: 'player' | 'enemy', profile: CpuProfile): void { this.cpuProfiles[side] = profile; }
+  setCpuProfile(side: 'player' | 'enemy', profile: CpuProfile): void {
+    this.cpuProfiles[side] = profile;
+    this.cpuFeatures[side] = cpuProfileFeatures(profile);
+  }
   getCpuProfile(side: 'player' | 'enemy'): CpuProfile { return this.cpuProfiles[side]; }
 
   /** Dev: run `steps` fixed 60 Hz simulation steps per 60 Hz clock tick (1 =
@@ -1194,7 +1201,7 @@ export class Game {
     // Critical tower overrides
     else if (selfTower.hp / TOWER_HP < 0.28) stance = 'defend';
     else if (oppTower.hp / TOWER_HP < 0.28)  stance = 'push';
-    else if (this.cpuProfiles[self] === 'improved') {
+    else if (this.cpuFeatures[self].has('stableStance')) {
       // Hysteresis relative to the current stance (see gameConfig.cpu.stance):
       // a stance is left at a smaller |score| than it was entered at, and no
       // non-critical switch happens inside the dwell window.
@@ -1292,11 +1299,33 @@ export class Game {
       return p.combat * p.reach * p.reach; // economy
     };
 
+    // counterComp: weigh each candidate by the opponent's live mix — standoff
+    // range against a melee-heavy field, durability against a ranged-heavy
+    // one — and discourage stacking one type however well it scores.
+    const counter = this.cpuFeatures[self].has('counterComp');
+    let meleeShare = 0, rangedShare = 0;
+    const ownCount = new Map<string, number>();
+    if (counter) {
+      let n = 0;
+      for (const c of oppChars) {
+        if (c.behavior === 'collecting') continue;
+        n++;
+        const s = c.config.attackStyle;
+        if (s === 'melee' || s === 'blast')       meleeShare++;
+        else if (s === 'arrow' || s === 'bullet') rangedShare++;
+      }
+      if (n > 0) { meleeShare /= n; rangedShare /= n; }
+      for (const c of selfChars) ownCount.set(c.config.id, (ownCount.get(c.config.id) ?? 0) + 1);
+    }
+    const shape = (type: string, p: UnitProfile): number => !counter ? 1 :
+      (1 + CPU_VAL_COUNTER_WEIGHT * (meleeShare * (p.reach - 1) + rangedShare * (p.tanky - 1)))
+      * Math.max(0.4, 1 - CPU_VAL_SAME_TYPE_PENALTY * (ownCount.get(type) ?? 0));
+
     const order: { type: CharacterConfig['id']; cost: number; score: number }[] = [];
     for (const type of TRIBE_ROSTERS[cpuTribe]) {
       const p = Game.unitProfile(cpuTribe, type);
       if (!p.canFight || !Number.isFinite(p.cost)) continue; // skip support / unpriced types
-      order.push({ type: type as CharacterConfig['id'], cost: p.cost, score: stanceScore(p) });
+      order.push({ type: type as CharacterConfig['id'], cost: p.cost, score: stanceScore(p) * shape(type, p) });
     }
     order.sort((a, b) => b.score - a.score);
 
@@ -1331,13 +1360,17 @@ export class Game {
     order: { cost: number }[], stance: 'push' | 'economy' | 'defend',
   ) {
     const allIn = self === 'enemy' ? this.cpuAllIn : this.playerAllIn;
-    if (this.cpuProfiles[self] === 'legacy' || order.length === 0) {
+    const feat  = this.cpuFeatures[self];
+    if (!feat.has('tempo') || order.length === 0) {
       this.resetSpawnTimer(self, pressure);
       return;
     }
     let cheapest = Infinity;
     for (const o of order) cheapest = Math.min(cheapest, o.cost);
-    const threshold = stance === 'economy' && !allIn ? order[0].cost : cheapest;
+    // reactionReserve: in economy keep one cheap unit's cost back, so the
+    // reactive buy has something to spend when the opponent dumps a bank.
+    const reserve   = feat.has('reactionReserve') ? cheapest : 0;
+    const threshold = stance === 'economy' && !allIn ? order[0].cost + reserve : cheapest;
     if (balanceAfter >= threshold) this.setSpawnInterval(self, CPU_SPEND_DOWN_GAP_MS);
     else                           this.resetSpawnTimer(self, pressure);
   }
@@ -1351,7 +1384,7 @@ export class Game {
     const cur  = this.oppThreat[self];
     const base = this.oppThreatBaseline[self];
     const sinceSpawn = self === 'enemy' ? this.cpuSpawnTimer : this.playerSpawnTimer;
-    const armed = this.cpuProfiles[self] === 'improved' && !this.isOver
+    const armed = this.cpuFeatures[self].has('tempo') && !this.isOver
       && cur - base >= CPU_REACTIVE_THREAT_DELTA && sinceSpawn >= CPU_REACTIVE_MIN_GAP_MS;
     if (armed) {
       this.oppThreatBaseline[self] = cur;
@@ -1493,8 +1526,8 @@ export class Game {
     // profile so self-play can A/B it (the player side is CPU-driven only in
     // CPU-vs-CPU mode).
     ctx.siege = ctx === this.playerCtx
-      ? (!this.cpuVsCpu || this.cpuProfiles.player === 'improved')
-      : this.cpuProfiles.enemy === 'improved';
+      ? (!this.cpuVsCpu || this.cpuFeatures.player.has('siege'))
+      : this.cpuFeatures.enemy.has('siege');
   }
 
   /**
@@ -2414,10 +2447,12 @@ export class Game {
     // Desired collector count by stance — carrying collectors always finish
     // their run. Endgame all-in wants zero: coins can't flip a tower-HP
     // deficit in the final stretch, but another attacker might.
-    const wantedCollectors =
-      allIn               ? 0 :
+    const baseWanted =
       stance === 'push'   ? 1 :
       stance === 'defend' ? (selfChars.length >= 3 ? 1 : 0) : 2;
+    // blueCoinPriority: a blue coin is worth ~7 gold — always worth one runner.
+    const jackpot = this.cpuFeatures[self].has('blueCoinPriority') && liveCoins.some(c => c.value >= BLUE_COIN_VALUE);
+    const wantedCollectors = allIn ? 0 : Math.max(baseWanted, jackpot ? 1 : 0);
 
     // Recall excess non-carrying collectors — track count inline, no inner filter
     let activeCount = collectors.length;
@@ -2552,12 +2587,17 @@ export class Game {
     // tower directly. No harass (it holds outside tower range and deals zero
     // tower damage), no low-HP retreats (a unit healing at base contributes
     // nothing to flipping the HP deficit before timeout), no power-up detours.
+    // rushFinisher: 'rush' charges straight at the tower and jumps blockers
+    // instead of pathing around and trading with a wall — the right gait for
+    // the last 75 s behind on tower HP and for finishing an undefended tower.
+    const feat = this.cpuFeatures[self];
+    const charge: 'rush' | 'attacking' = feat.has('rushFinisher') ? 'rush' : 'attacking';
     if (allIn) {
       for (const c of selfChars) {
         c.fetchX = null;   // abandon power-up fetches — tower damage only
         if (c.behavior === 'collecting') continue;  // collect AI recalls these
-        if (c.behavior !== 'attacking') {
-          c.behavior = 'attacking';
+        if (c.behavior !== charge) {
+          c.behavior = charge;
           noteDecision(`⚔ ALL-IN #${c.id} (${c.config.id}) — endgame`);
         }
       }
@@ -2586,6 +2626,11 @@ export class Game {
     // that retreat (skipped by the stance logic below) until healed past the
     // recover threshold — hysteresis prevents it from bouncing straight back into
     // the fight at 1 HP. Collectors are left alone (they finish their coin run).
+    // smartRetreat: ranged units are pulled earlier (one more volley kills a
+    // 70–100 HP unit), and nobody starts a retreat from inside the enemy
+    // tower's range — the walk home kills it anyway, so it commits.
+    const smartRetreat   = feat.has('smartRetreat');
+    const oppTowerFrontX = self === 'enemy' ? this.playerTower.frontX : this.enemyTower.frontX;
     for (const c of selfChars) {
       if (c.behavior === 'collecting') continue;
       const hpFrac = c.hp / c.maxHp;
@@ -2595,10 +2640,14 @@ export class Game {
         } else if (c.behavior !== 'defend') {
           c.behavior = 'defend';                    // keep falling back while healing
         }
-      } else if (hpFrac < CPU_RETREAT_HP_FRAC && (c.behavior === 'attacking' || c.behavior === 'harass')) {
-        this.retreatingUnits.add(c);
-        c.behavior = 'defend';
-        noteDecision(`🚑 Retreat #${c.id} (${c.config.id}) — critical HP`);
+      } else if (c.behavior === 'attacking' || c.behavior === 'harass' || c.behavior === 'rush') {
+        const threshold = smartRetreat && isRangedUnit(c) ? CPU_RETREAT_HP_FRAC_RANGED : CPU_RETREAT_HP_FRAC;
+        const committed = smartRetreat && Math.abs(c.x - oppTowerFrontX) <= TOWER_ATTACK_RANGE;
+        if (hpFrac < threshold && !committed) {
+          this.retreatingUnits.add(c);
+          c.behavior = 'defend';
+          noteDecision(`🚑 Retreat #${c.id} (${c.config.id}) — critical HP`);
+        }
       }
     }
 
@@ -2625,15 +2674,17 @@ export class Game {
       for (const c of selfChars) {
         if (c.behavior === 'collecting') continue;
         if (this.retreatingUnits.has(c)) continue;   // healing at base — leave it alone
-        if (c.behavior === 'defend') {
-          // Lift any lingering defend assignments
-          c.behavior = !finisher && isRangedUnit(c) ? 'harass' : 'attacking';
+        const want: 'rush' | 'attacking' = finisher ? charge : 'attacking';
+        if (c.behavior === 'defend' || (c.behavior === 'rush' && !finisher)) {
+          // Lift lingering defend assignments, and stand rushers down once
+          // the finisher window closes (new defenders appeared).
+          c.behavior = !finisher && isRangedUnit(c) ? 'harass' : want;
           noteDecision(`⇒ Push #${c.id} (${c.config.id})`);
         } else if (!finisher && isRangedUnit(c) && c.behavior !== 'harass') {
           c.behavior = 'harass';
           noteDecision(`↯ Harass push #${c.id} (${c.config.id})`);
-        } else if ((finisher || isMelee(c)) && c.behavior !== 'attacking') {
-          c.behavior = 'attacking';
+        } else if ((finisher || isMelee(c)) && c.behavior !== want) {
+          c.behavior = want;
           noteDecision(finisher ? `⚔ Finish tower #${c.id} (${c.config.id})` : `⇒ Attack #${c.id} (${c.config.id})`);
         }
       }
@@ -2641,7 +2692,7 @@ export class Game {
       // Economy: recall all harassers and defenders back to full attack
       for (const c of selfChars) {
         if (this.retreatingUnits.has(c)) continue;   // healing at base — leave it alone
-        if (c.behavior === 'harass' || c.behavior === 'defend') {
+        if (c.behavior === 'harass' || c.behavior === 'defend' || c.behavior === 'rush') {
           c.behavior = 'attacking';
           noteDecision(`⇒ Economy attack #${c.id} (${c.config.id})`);
         }

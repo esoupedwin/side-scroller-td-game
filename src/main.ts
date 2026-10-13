@@ -5,7 +5,7 @@ import {
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, MOBILE_HUD_SCALE, LOADOUT_MAX_CARDS, CHEAT_SKIP_INTRO_SCREENS, CHEAT_TOWER_DAMAGE,
   CHEAT_CLOCK_SKIP_SEC,
   CHEAT_CLOCK_SKIP_BIG_SEC,
-  CHEAT_SELF_PLAY_SPEED, type CpuProfile,
+  CHEAT_SELF_PLAY_SPEED, CPU_PROFILES, type CpuProfile,
   TRIBE_POWER_UPS, TRIBE_PU_IDS, TRIBE_PU_PLAYER_DEFAULT,
   type CharTypeName, type TribePowerUpId,
 } from './constants';
@@ -1170,16 +1170,17 @@ refreshDiagnoseUi();
 }
 
 // ── Self-play A/B ─────────────────────────────────────────────────────────
-// Runs N CPU-vs-CPU matches fast-forwarded with the 'improved' profile on one
-// side and 'legacy' on the other, swapping sides every match (the enemy side
-// loses timeout ties and maps are asymmetric, so a fixed assignment would
-// bias the result), then prints the win table. handleGameOver reports each
-// finished match through selfPlay.onMatchOver.
+// Runs N CPU-vs-CPU matches fast-forwarded with profile A on one side and
+// profile B on the other, swapping sides every match (the enemy side loses
+// timeout ties and maps are asymmetric, so a fixed assignment would bias the
+// result), then prints the win table. Pick A = improved, B = legacy for the
+// headline number, or B = improved-no-<flag> to ablate one feature.
+// handleGameOver reports each finished match through selfPlay.onMatchOver.
 interface SelfPlayResult {
-  improvedSide: 'player' | 'enemy';
-  winner:       'player' | 'enemy';
-  reason:       'tower' | 'timeout';
-  margin:       number;   // tower HP, improved side − legacy side
+  aSide:  'player' | 'enemy';
+  winner: 'player' | 'enemy';
+  reason: 'tower' | 'timeout';
+  margin: number;   // tower HP, A side − B side
 }
 const selfPlay = {
   active:  false,
@@ -1189,20 +1190,26 @@ const selfPlay = {
 };
 {
   const btn      = document.getElementById('selfplay-btn')    as HTMLButtonElement;
+  const aSel     = document.getElementById('selfplay-a')      as HTMLSelectElement;
+  const bSel     = document.getElementById('selfplay-b')      as HTMLSelectElement;
   const countSel = document.getElementById('selfplay-count')  as HTMLSelectElement;
   const resultEl = document.getElementById('selfplay-result') as HTMLPreElement;
+  fillProfileSelect(aSel, 'improved');
+  fillProfileSelect(bSel, 'legacy');
+  let profileA: CpuProfile = 'improved';
+  let profileB: CpuProfile = 'legacy';
   let prevCpuVsCpu = false;
   let prevProfiles: Record<'player' | 'enemy', CpuProfile> = { player: 'improved', enemy: 'improved' };
 
-  const improvedSideFor = (i: number): 'player' | 'enemy' => (i % 2 === 0 ? 'enemy' : 'player');
+  const aSideFor = (i: number): 'player' | 'enemy' => (i % 2 === 0 ? 'enemy' : 'player');
 
   const startMatch = () => {
-    const i   = selfPlay.results.length;
-    const imp = improvedSideFor(i);
-    game.setCpuProfile(imp, 'improved');
-    game.setCpuProfile(imp === 'enemy' ? 'player' : 'enemy', 'legacy');
+    const i = selfPlay.results.length;
+    const a = aSideFor(i);
+    game.setCpuProfile(a, profileA);
+    game.setCpuProfile(a === 'enemy' ? 'player' : 'enemy', profileB);
     btn.textContent = `Self-play ${i + 1}/${selfPlay.total}`;
-    resultEl.textContent = `running match ${i + 1}/${selfPlay.total} (improved = ${imp})…`;
+    resultEl.textContent = `running match ${i + 1}/${selfPlay.total} (A = ${a})…`;
     restartCurrentGame();
   };
 
@@ -1219,30 +1226,31 @@ const selfPlay = {
 
     const r = selfPlay.results;
     const n = r.length;
-    const impWins   = r.filter(x => x.winner === x.improvedSide);
-    const asEnemy   = r.filter(x => x.improvedSide === 'enemy');
-    const asPlayer  = r.filter(x => x.improvedSide === 'player');
+    const aWins     = r.filter(x => x.winner === x.aSide);
+    const asEnemy   = r.filter(x => x.aSide === 'enemy');
+    const asPlayer  = r.filter(x => x.aSide === 'player');
     const byTower   = r.filter(x => x.reason === 'tower').length;
     const avgMargin = n ? r.reduce((a, x) => a + x.margin, 0) / n : 0;
     const pct = (k: number, d: number) => d ? `${Math.round(100 * k / d)}%` : '—';
     resultEl.textContent =
-      `self-play ${n} matches · improved vs legacy · ${CHEAT_SELF_PLAY_SPEED}×\n` +
-      `improved  ${impWins.length}/${n} (${pct(impWins.length, n)})\n` +
+      `self-play ${n} matches · ${CHEAT_SELF_PLAY_SPEED}×\n` +
+      `A ${profileA}  vs  B ${profileB}\n` +
+      `A wins  ${aWins.length}/${n} (${pct(aWins.length, n)})\n` +
       `  as enemy  ${asEnemy.filter(x => x.winner === 'enemy').length}/${asEnemy.length}` +
       `   as player ${asPlayer.filter(x => x.winner === 'player').length}/${asPlayer.length}\n` +
-      `legacy    ${n - impWins.length}/${n}\n` +
+      `B wins  ${n - aWins.length}/${n}\n` +
       `by tower ${byTower} · by timeout ${n - byTower}\n` +
-      `avg tower-HP margin (improved − legacy): ${avgMargin >= 0 ? '+' : ''}${avgMargin.toFixed(0)}`;
+      `avg tower-HP margin (A − B): ${avgMargin >= 0 ? '+' : ''}${avgMargin.toFixed(0)}`;
     btn.disabled    = false;
     btn.textContent = 'Self-play A/B';
   };
 
   selfPlay.onMatchOver = (winner, reason) => {
     if (!selfPlay.active) return;
-    const imp = improvedSideFor(selfPlay.results.length);
-    const hp  = game.towerHp;
-    const margin = imp === 'enemy' ? hp.enemy - hp.player : hp.player - hp.enemy;
-    selfPlay.results.push({ improvedSide: imp, winner, reason, margin });
+    const a  = aSideFor(selfPlay.results.length);
+    const hp = game.towerHp;
+    const margin = a === 'enemy' ? hp.enemy - hp.player : hp.player - hp.enemy;
+    selfPlay.results.push({ aSide: a, winner, reason, margin });
     if (selfPlay.results.length >= selfPlay.total) finish();
     else setTimeout(startMatch, 150);   // let the game-over frame render before the next reset
   };
@@ -1252,6 +1260,8 @@ const selfPlay = {
     selfPlay.active  = true;
     selfPlay.total   = parseInt(countSel.value, 10) || 6;
     selfPlay.results = [];
+    profileA = aSel.value as CpuProfile;
+    profileB = bSel.value as CpuProfile;
     prevCpuVsCpu = game.isCpuVsCpu();
     prevProfiles = { player: game.getCpuProfile('player'), enemy: game.getCpuProfile('enemy') };
     if (!prevCpuVsCpu) {
@@ -1386,10 +1396,20 @@ const cpuForceSelect = document.getElementById('dev-cpu-force-select') as HTMLSe
   });
 }
 
-// Enemy-side CPU decision profile — play against 'legacy' to feel the tempo
-// difference by hand; the self-play harness below measures it.
+// Enemy-side CPU decision profile — play against 'legacy' (or an
+// 'improved-no-<flag>' ablation) to feel a feature by hand; the self-play
+// harness below measures it.
+function fillProfileSelect(sel: HTMLSelectElement, value: CpuProfile) {
+  for (const p of CPU_PROFILES) {
+    const opt = document.createElement('option');
+    opt.value = p;
+    opt.textContent = p;
+    sel.appendChild(opt);
+  }
+  sel.value = value;
+}
 const cpuProfileSelect = document.getElementById('dev-cpu-profile-select') as HTMLSelectElement;
-cpuProfileSelect.value = game.getCpuProfile('enemy');
+fillProfileSelect(cpuProfileSelect, game.getCpuProfile('enemy'));
 cpuProfileSelect.addEventListener('change', () => {
   game.setCpuProfile('enemy', cpuProfileSelect.value as CpuProfile);
 });

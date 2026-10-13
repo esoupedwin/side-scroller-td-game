@@ -314,6 +314,7 @@ export const GameConfig = {
     neutralMaxFactor:     0.75,
     retreatHpFrac:        0.15,     // AI combat units fall back to 'defend' below this HP fraction…
     retreatRecoverFrac:   0.6,      // …and only rejoin the fight once healed back above this (hysteresis)
+    retreatHpFracRanged:  0.30,     // 'smartRetreat' feature: ranged units pull out earlier — 70–100 HP dies to one more sniper volley
 
     // ── Tempo ────────────────────────────────────────────────────────────────
     // The player can spend their whole bank the instant they have it; the CPU
@@ -362,6 +363,11 @@ export const GameConfig = {
       hpTankyDivisor:    350,   // tanky = 1 + hp/divisor — lower values reward durability more
       splashPushMult:    1.6,   // push-score multiplier for AoE units when opponents are clustered
       threatNorm:        55,    // combat×reach divisor so a baseline warrior threat ≈ 1.0
+      // 'counterComp' feature: buy-order multiplier 1 + counterWeight × (meleeShare × (reach−1) + rangedShare × (tanky−1))
+      // — standoff range against a melee-heavy field, durability against a ranged-heavy one —
+      // and × (1 − sameTypePenalty × alive-of-that-type), floored at 0.4, against stacking one type.
+      counterWeight:     0.6,
+      sameTypePenalty:   0.15,
     },
   },
 
@@ -566,9 +572,8 @@ export type AttackStyle = 'melee' | 'blast' | 'arrow' | 'bullet' | 'grenade' | '
 // The four tribe power-ups a side can bring into a match (see tribePowerUp above).
 export type TribePowerUpId = 'speed' | 'vitality' | 'plague' | 'aggression';
 
-// CPU decision profile (see cpu.tempo above): 'improved' enables the tempo
-// features, 'legacy' is the one-buy-per-timer behaviour kept for A/B runs.
-export type CpuProfile = 'improved' | 'legacy';
+// CPU decision profiles are feature-flag sets — see CPU_FEATURES / CpuProfile
+// in constants.ts. cpu.defaultProfile above names the one both sides start with.
 
 // The unit-type union, derived from the config block keys — adding a new
 // character block automatically extends it (no hand-maintained union).

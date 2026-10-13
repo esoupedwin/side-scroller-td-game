@@ -1524,7 +1524,10 @@
              sides swapped every match, simulated fast-forwarded (main.ts) ── -->
         <div class="dev-item" style="gap:5px; align-items:flex-start;">
           <div class="dev-item" style="gap:4px;">
-            <button id="selfplay-btn" class="dev-btn" title="CPU vs CPU, improved profile vs legacy, sides alternating each match, fast-forwarded">Self-play A/B</button>
+            <button id="selfplay-btn" class="dev-btn" title="CPU vs CPU, profile A vs profile B, sides alternating each match, fast-forwarded">Self-play A/B</button>
+            <select id="selfplay-a" class="dev-select" style="max-width:120px;" title="Profile A"></select>
+            <span class="dev-item-label">vs</span>
+            <select id="selfplay-b" class="dev-select" style="max-width:120px;" title="Profile B"></select>
             <select id="selfplay-count" class="dev-select" style="max-width:56px;" title="Matches per run">
               <option value="2">2</option>
               <option value="6" selected>6</option>
@@ -1555,10 +1558,8 @@
             </div>
             <div class="dev-item" style="gap:4px;">
               <span class="dev-item-label">CPU AI</span>
-              <select id="dev-cpu-profile-select" class="dev-select" style="max-width:110px;" title="Enemy-side decision profile (gameConfig.cpu.tempo)">
-                <option value="improved">Improved</option>
-                <option value="legacy">Legacy</option>
-              </select>
+              <!-- options generated from CPU_PROFILES in main.ts -->
+              <select id="dev-cpu-profile-select" class="dev-select" style="max-width:150px;" title="Enemy-side decision profile — a feature-flag set (CPU_FEATURES in constants.ts)"></select>
             </div>
             <div class="dev-item" style="gap:4px;">
               <button id="dev-dmg-player-tower-btn" class="dev-btn" title="Deal flat damage to the player's tower">Hurt P-Tower</button>

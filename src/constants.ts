@@ -1,11 +1,48 @@
-import { GameConfig, type AttackStyle, type CharTypeName, type TribePowerUpId, type CpuProfile } from './gameConfig';
+import { GameConfig, type AttackStyle, type CharTypeName, type TribePowerUpId } from './gameConfig';
 import { isTouchDevice } from './mobile';
 import type { CharacterConfig } from './Character';
 import type { Tribe } from './Tribes';
 
 // Re-export the config-derived character types — source files import from
 // constants.ts, never from gameConfig.ts directly.
-export type { AttackStyle, CharTypeName, TribePowerUpId, CpuProfile };
+export type { AttackStyle, CharTypeName, TribePowerUpId };
+
+// ── CPU decision profiles ────────────────────────────────────────────────────
+// Every AI improvement is a feature flag so the dev-panel self-play harness can
+// ablate it one at a time: 'improved' = every flag, 'legacy' = none,
+// 'improved-no-<flag>' = every flag but that one. Game.setCpuProfile(side, …)
+// resolves a side's profile through cpuProfileFeatures().
+export const CPU_FEATURES = [
+  'tempo',            // spend-down follow-up buys + reactive spawn (Game.scheduleFollowUpBuy / checkReactiveSpawn)
+  'stableStance',     // stance hysteresis + dwell (Game.assessCpuStance)
+  'siege',            // long-range harassers shell the tower from outside its range (Character.updateHarass)
+  'rushFinisher',     // finisher / all-in charge with 'rush' (jumps blockers) instead of 'attacking'
+  'reactionReserve',  // economy spend-down keeps one cheap unit's cost back so a reactive buy can land
+  'smartRetreat',     // ranged units retreat earlier; nobody starts a retreat from inside enemy tower range
+  'blueCoinPriority', // a blue coin on the field always drafts one collector (not during all-in)
+  'counterComp',      // buy order weighs the opponent's live mix and penalises stacking one type
+] as const;
+export type CpuFeature = typeof CPU_FEATURES[number];
+// Flags that measured no gain in self-play (10-match ablations, 2026-10-13):
+// rushFinisher 4/10 vs without (+74 margin); counterComp 5/10 (−142 margin).
+// Kept out of 'improved' but available as 'improved-plus-<flag>' for re-testing
+// after a rework — delete from this list to promote one.
+export const CPU_EXPERIMENTAL: readonly CpuFeature[] = ['rushFinisher', 'counterComp'];
+export type CpuProfile =
+  | 'legacy' | 'improved' | `improved-no-${CpuFeature}` | `improved-plus-${CpuFeature}`;
+const CPU_STANDARD = CPU_FEATURES.filter(f => !CPU_EXPERIMENTAL.includes(f));
+export const CPU_PROFILES: readonly CpuProfile[] = [
+  'improved', 'legacy',
+  ...CPU_STANDARD.map(f => `improved-no-${f}` as const),
+  ...CPU_EXPERIMENTAL.map(f => `improved-plus-${f}` as const),
+];
+export function cpuProfileFeatures(profile: CpuProfile): ReadonlySet<CpuFeature> {
+  if (profile === 'legacy') return new Set();
+  const set = new Set<CpuFeature>(CPU_STANDARD);
+  if (profile.startsWith('improved-no-'))   set.delete(profile.slice('improved-no-'.length)   as CpuFeature);
+  if (profile.startsWith('improved-plus-')) set.add(profile.slice('improved-plus-'.length) as CpuFeature);
+  return set;
+}
 
 const { canvas, groundY, colors, towers, characters, cpu, economy } = GameConfig;
 const ch    = characters;
@@ -100,6 +137,7 @@ export const CPU_NEUTRAL_MIN_FACTOR  = cpu.neutralMinFactor;
 export const CPU_NEUTRAL_MAX_FACTOR  = cpu.neutralMaxFactor;
 export const CPU_RETREAT_HP_FRAC      = cpu.retreatHpFrac;
 export const CPU_RETREAT_RECOVER_FRAC = cpu.retreatRecoverFrac;
+export const CPU_RETREAT_HP_FRAC_RANGED = cpu.retreatHpFracRanged;
 export const CPU_ENDGAME_SEC          = cpu.endgameSec;
 export const CPU_DEFAULT_PROFILE: CpuProfile = cpu.defaultProfile;
 export const CPU_SPEND_DOWN_GAP_MS     = cpu.tempo.spendDownGapMs;
@@ -115,6 +153,8 @@ export const CPU_VAL_RANGE_DIVISOR    = cpu.valuation.rangeReachDivisor;
 export const CPU_VAL_HP_DIVISOR       = cpu.valuation.hpTankyDivisor;
 export const CPU_VAL_SPLASH_PUSH_MULT = cpu.valuation.splashPushMult;
 export const CPU_VAL_THREAT_NORM      = cpu.valuation.threatNorm;
+export const CPU_VAL_COUNTER_WEIGHT   = cpu.valuation.counterWeight;
+export const CPU_VAL_SAME_TYPE_PENALTY = cpu.valuation.sameTypePenalty;
 
 // ── Platform ─────────────────────────────────────────────────────────────────
 export const PLATFORM_X      = GameConfig.platform.x;
