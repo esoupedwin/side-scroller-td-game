@@ -1819,7 +1819,12 @@ export class Character {
   }
 
   private earnAP(amount: number) {
-    if (this.rank >= 3) return;
+    // A dead unit can still be credited a kill: a grenade or rocket it threw
+    // lands after it was culled (and its container destroyed) the same tick it
+    // died. Promoting it would redraw destroyed Graphics — a TypeError thrown
+    // out of Game.tick on every frame, freezing the match — and restore HP on
+    // a corpse. Kills earned from the grave don't count.
+    if (this.isDead || this.rank >= 3) return;
     this.ap += amount;
     while (this.rank < 3 && this.ap >= PROMO_THRESHOLDS[this.rank]) {
       this.rank = (this.rank + 1) as 0 | 1 | 2 | 3;
