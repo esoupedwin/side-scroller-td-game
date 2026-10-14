@@ -323,6 +323,23 @@ export const GameConfig = {
     // Game.checkReactiveSpawn). The 'legacy' profile switches them off so the
     // dev-panel self-play harness can A/B old against new.
     defaultProfile: 'improved' as const,   // CpuProfile applied to both CPU sides at start
+    // ── Coin runners ('coinRunners' feature) ─────────────────────────────────
+    // Dedicated collectors: the tribe's best speed-per-coin unit (conscript),
+    // bought FIRST at match start and re-bought whenever one dies, always on
+    // 'collecting' and exempt from the stance collector cap. Without them the
+    // CPU's opening buy was a slow investment unit and collectors were only
+    // drafted after a coin already existed — a player parking two conscripts
+    // under the box won every race.
+    runners: {
+      opening:      2,    // runners wanted during the opening…
+      openingSec:   25,   // …which lasts this long from match start
+      economy:      2,    // runners wanted per stance afterwards
+      push:         1,
+      defend:       1,
+      berserkBonus: 1,    // extra runner while the coin box is berserk
+      max:          3,
+    },
+
     // ── Wave staging ('stageWave' feature) ───────────────────────────────────
     // The tower shoots the nearest unit at 40 dmg/s, so attackers that trickle
     // in die one at a time. In a push the melee first gather at a line just

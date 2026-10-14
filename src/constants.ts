@@ -23,6 +23,7 @@ export const CPU_FEATURES = [
   'counterComp',      // buy order weighs the opponent's live mix (range vs melee-heavy, durability vs ranged-heavy)
   'typeDiversity',    // buy order penalises stacking one type (× (1 − sameTypePenalty × alive-of-type))
   'stageWave',        // push melee gather outside enemy tower range and charge together, tanks first (Game.tickWaveStaging)
+  'coinRunners',      // dedicated fast cheap collectors bought at the opening and kept alive (Game.tryBuyRunner)
 ] as const;
 export type CpuFeature = typeof CPU_FEATURES[number];
 // Flags that measured no gain in self-play (10-match ablations, 2026-10-13):
@@ -153,6 +154,13 @@ export const CPU_STANCE_DEFEND_ENTER   = cpu.stance.defendEnter;
 export const CPU_STANCE_DEFEND_EXIT    = cpu.stance.defendExit;
 export const CPU_STANCE_MIN_DWELL_SEC  = cpu.stance.minDwellSec;
 export const CPU_STANCE_SCORE_TAU_SEC  = cpu.stance.scoreTauSec;
+export const RUNNERS_OPENING       = cpu.runners.opening;
+export const RUNNERS_OPENING_SEC   = cpu.runners.openingSec;
+export const RUNNERS_ECONOMY       = cpu.runners.economy;
+export const RUNNERS_PUSH          = cpu.runners.push;
+export const RUNNERS_DEFEND        = cpu.runners.defend;
+export const RUNNERS_BERSERK_BONUS = cpu.runners.berserkBonus;
+export const RUNNERS_MAX           = cpu.runners.max;
 export const WAVE_STAGE_OFFSET   = cpu.wave.stageOffset;
 export const WAVE_TANK_LEAD      = cpu.wave.tankLead;
 export const WAVE_TANK_THRESHOLD = cpu.wave.tankThreshold;

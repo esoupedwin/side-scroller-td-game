@@ -103,6 +103,9 @@ function berserkDelay(afterCooldown: boolean): number {
     + BERSERK_DELAY_MIN_S + Math.random() * (BERSERK_DELAY_MAX_S - BERSERK_DELAY_MIN_S);
 }
 
+/** Per-tribe cache for Game.runnerType. */
+const runnerTypeCache = new Map<Tribe, CharacterConfig['id']>();
+
 /** Close-combat styles — the units that form walls and waves (never type names). */
 const isMeleeStyle = (c: Character): boolean =>
   c.config.attackStyle === 'melee' || c.config.attackStyle === 'blast';
@@ -376,6 +379,9 @@ export class Game {
     player: { released: new Set<Character>(), holdSince: null as number | null },
     enemy:  { released: new Set<Character>(), holdSince: null as number | null },
   };
+  // Dedicated coin runners per side ('coinRunners'): always 'collecting',
+  // exempt from the stance collector cap, re-bought when they die.
+  private readonly runners = { player: new Set<Character>(), enemy: new Set<Character>() };
   // Dev: simulation steps per clock tick (>1 = fixed 60 Hz steps, used by the
   // self-play harness to run whole matches in seconds). While fast-forwarding
   // the clock is a Worker interval, not the rAF ticker: Chrome throttles rAF
@@ -1293,7 +1299,13 @@ export class Game {
     const cpuTribe  = tribeForSide(self);
     const cost$     = (type: string) => charCost(cpuTribe, type);
     const stance    = self === 'enemy' ? this.cpuStance : this.playerStance;
-    const pressure  = oppChars.length - selfChars.length;
+    // Unit-count pressure drives the spawn cadence. With dedicated runners in
+    // play (coinRunners) count FIGHTERS only — two runners otherwise read as
+    // two extra soldiers and the side eases off its combat buys.
+    const fighters  = (cs: Character[]) => cs.reduce((n, c) => n + (c.behavior !== 'collecting' ? 1 : 0), 0);
+    const pressure  = this.cpuFeatures[self].has('coinRunners')
+      ? fighters(oppChars) - fighters(selfChars)
+      : oppChars.length - selfChars.length;
     const balance   = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
     // spawnX is computed per unit type (width varies) — see cpuSpawnX below
     const spawnY    = self === 'enemy' ? this.enemyTower.spawnY : this.playerTower.spawnY;
@@ -1314,6 +1326,11 @@ export class Game {
       this.resetSpawnTimer(self, pressure);
       return;
     }
+
+    // ── Coin runners first ('coinRunners') ────────────────────────────────
+    // Cheap, fast collectors are the best coins-per-coin investment there is
+    // and they only pay off if they exist before the drops do.
+    if (this.tryBuyRunner(self, pressure)) return;
 
     // ── Attribute-driven buy order ────────────────────────────────────────────
     // Score every combat unit in the tribe's roster from its derived profile
@@ -1400,6 +1417,68 @@ export class Game {
       this.cpuStrategyInfo.decision = `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
     }
     this.resetSpawnTimer(self, pressure);
+  }
+
+  /** The tribe's best collector: the roster unit with the most move speed per
+   *  coin of cost (the conscript on both tribes). Cached per tribe. */
+  private static runnerType(tribe: Tribe): CharacterConfig['id'] {
+    let cached = runnerTypeCache.get(tribe);
+    if (cached) return cached;
+    let best: string = TRIBE_ROSTERS[tribe][0];
+    let bestScore = -Infinity;
+    for (const type of TRIBE_ROSTERS[tribe]) {
+      const cfg = charConfig(tribe, type);
+      const cost = charCost(tribe, type);
+      if (!Number.isFinite(cost) || cost <= 0) continue;
+      const score = cfg.speed / cost;
+      if (score > bestScore) { bestScore = score; best = type; }
+    }
+    cached = best as CharacterConfig['id'];
+    runnerTypeCache.set(tribe, cached);
+    return cached;
+  }
+
+  /** Runners a side wants right now: a bigger opening squad, then per stance,
+   *  plus one while the coin box is berserk; none during the endgame all-in. */
+  private desiredRunners(self: 'player' | 'enemy'): number {
+    if (!this.cpuFeatures[self].has('coinRunners')) return 0;
+    const allIn  = self === 'enemy' ? this.cpuAllIn : this.playerAllIn;
+    if (allIn) return 0;
+    const stance = self === 'enemy' ? this.cpuStance : this.playerStance;
+    const base = this.elapsedSeconds < RUNNERS_OPENING_SEC ? RUNNERS_OPENING
+      : stance === 'push' ? RUNNERS_PUSH : stance === 'defend' ? RUNNERS_DEFEND : RUNNERS_ECONOMY;
+    return Math.min(RUNNERS_MAX, base + (this.berserkRemaining > 0 ? RUNNERS_BERSERK_BONUS : 0));
+  }
+
+  /** Buy a runner if the side is short of them and can afford one. Returns
+   *  true when it bought (or is waiting on the runner's sprites) — the caller
+   *  skips the stance buy order this tick either way. */
+  private tryBuyRunner(self: 'player' | 'enemy', pressure: number): boolean {
+    const runners = this.runners[self];
+    for (const r of runners) if (r.isDead) runners.delete(r);
+    const want = this.desiredRunners(self);
+    if (runners.size >= want) return false;
+    // Soldiers first when the line is breaking: outnumbered on fighters, or
+    // the tower is critical, the stance order gets the coins.
+    const selfTower = self === 'enemy' ? this.enemyTower : this.playerTower;
+    if (pressure >= CPU_PRESSURE_THRESHOLD || selfTower.hp / TOWER_HP < 0.28) return false;
+    const tribe = tribeForSide(self);
+    const type  = Game.runnerType(tribe);
+    const cost  = charCost(tribe, type);
+    const balance = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
+    if (balance < cost) return false;    // let the stance order try its fillers
+    if (this.spriteSetPending(self, tribe, type)) return true;
+    if (self === 'enemy') this.cpuCoinBalance -= cost;
+    else { this.coinBalance -= cost; this.notifyCoins(); }
+    const spawnY = self === 'enemy' ? this.enemyTower.spawnY : this.playerTower.spawnY;
+    const c = this.spawnCpuUnit(self, type, spawnY);
+    c.behavior = 'collecting';
+    runners.add(c);
+    if (self === 'enemy') this.cpuStrategyInfo.decision = `🏃 Runner ${type} #${c.id} (${runners.size}/${want})`;
+    // Another runner still owed → chain quickly; otherwise the normal cadence.
+    if (runners.size < want && this.cpuFeatures[self].has('tempo')) this.setSpawnInterval(self, CPU_SPEND_DOWN_GAP_MS);
+    else this.resetSpawnTimer(self, pressure);
+    return true;
   }
 
   /** After a buy: spend down a flush purse instead of parking it for the next
@@ -2552,8 +2631,17 @@ export class Game {
   private tickCpuCollectAI(self: 'player' | 'enemy', selfChars: Character[], liveCoins: Coin[]) {
     const stance     = self === 'enemy' ? this.cpuStance : this.playerStance;
     const allIn      = self === 'enemy' ? this.cpuAllIn  : this.playerAllIn;
-    const collectors = selfChars.filter(c => c.behavior === 'collecting');
     const noteDecision = (msg: string) => { if (self === 'enemy') this.cpuStrategyInfo.decision = msg; };
+
+    // Runners: keep them on the job (the behaviour AI never touches collecting
+    // units, but a retreat or a dev command could); all-in releases them.
+    const runners = this.runners[self];
+    for (const r of runners) if (r.isDead) runners.delete(r);
+    for (const r of runners) {
+      if (allIn) { r.behavior = 'attacking'; runners.delete(r); }
+      else if (r.behavior !== 'collecting') r.behavior = 'collecting';
+    }
+    const collectors = selfChars.filter(c => c.behavior === 'collecting' && !runners.has(c));
 
     // Desired collector count by stance — carrying collectors always finish
     // their run. Endgame all-in wants zero: coins can't flip a tower-HP
@@ -2563,7 +2651,9 @@ export class Game {
       stance === 'defend' ? (selfChars.length >= 3 ? 1 : 0) : 2;
     // blueCoinPriority: a blue coin is worth ~7 gold — always worth one runner.
     const jackpot = this.cpuFeatures[self].has('blueCoinPriority') && liveCoins.some(c => c.value >= BLUE_COIN_VALUE);
-    const wantedCollectors = allIn ? 0 : Math.max(baseWanted, jackpot ? 1 : 0);
+    // Runners count toward the total, so combat units are only drafted to
+    // collect when the runners alone don't cover the stance's wanted count.
+    const wantedCollectors = allIn ? 0 : Math.max(0, Math.max(baseWanted, jackpot ? 1 : 0) - runners.size);
 
     // Recall excess non-carrying collectors — track count inline, no inner filter
     let activeCount = collectors.length;
@@ -2995,6 +3085,7 @@ export class Game {
     this.scoreEma              = { player: null, enemy: null };
     this.scoreTotalEma         = { player: null, enemy: null };
     for (const w of [this.wave.player, this.wave.enemy]) { w.released.clear(); w.holdSince = null; }
+    this.runners.player.clear(); this.runners.enemy.clear();
     this.puFetchers.clear();
     // Tribe power-ups: fresh cooldowns; the CPU picks its ability for the new
     // match (uniform random — all four are situationally strong). The player's
