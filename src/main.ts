@@ -218,6 +218,9 @@ function handleCoinBoxBerserk() {
 }
 
 let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged, handleEnemyTowerHpChanged, handlePlayerTowerHpChanged, handleCoinBoxBerserk);
+// Dev builds expose the live Game on `window.game` so the console / browser
+// automation can poke it (cheats, fast-forward, state) without UI plumbing.
+if (import.meta.env.DEV) (window as unknown as { game: Game }).game = game;
 
 // ── Tribe power-up: selection persistence + activation button ───────────────
 const TRIBE_PU_KEY = 'coin_tribe_powerup';
