@@ -24,6 +24,7 @@ export const CPU_FEATURES = [
   'typeDiversity',    // buy order penalises stacking one type (× (1 − sameTypePenalty × alive-of-type))
   'stageWave',        // push melee gather outside enemy tower range and charge together, tanks first (Game.tickWaveStaging)
   'coinRunners',      // dedicated fast cheap collectors bought at the opening and kept alive (Game.tryBuyRunner)
+  'smartCollect',     // collectors camp at the coin box and skip coins an enemy collector reaches first (Character.updateCollecting)
 ] as const;
 export type CpuFeature = typeof CPU_FEATURES[number];
 // Flags that measured no gain in self-play (10-match ablations, 2026-10-13):
@@ -350,6 +351,9 @@ export const ATTACK_KNOCKBACK_VY    = ch.attackKnockbackVy;
 export const ATTACK_KNOCKBACK_DECAY = ch.attackKnockbackDecay;
 export const HARASS_SAFETY_BUFFER   = ch.harassSafetyBuffer;
 export const SIEGE_MARGIN           = ch.siegeMargin;
+export const COLLECT_CAMP_OFFSET    = ch.collectCampOffset;
+export const COLLECT_CONTEST_MARGIN = ch.collectContestMargin;
+export const COLLECT_DANGER_PX      = ch.collectDangerPx;
 export const HARASS_RALLY_OFFSET    = ch.harassRallyOffset;
 export const HARASS_GROUP_DIST      = ch.harassGroupDist;
 export const HARASS_RALLY_TOLERANCE = ch.harassRallyTolerance;

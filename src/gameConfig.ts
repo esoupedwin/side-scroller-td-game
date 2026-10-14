@@ -43,6 +43,9 @@ export const GameConfig = {
     hpBarWidth:         28,     // px
     hpBarHeight:        5,      // px
     harassSafetyBuffer: 40,  // px outside enemy tower range where harass units hold
+    collectCampOffset:  50,  // px on its own side of the coin box an idle collector waits ('smartCollect') — first to the next drop
+    collectContestMargin: 0.85, // 'smartCollect': a coin an enemy collector reaches in under this fraction of our travel time is deprioritised
+    collectDangerPx:    140,  // 'smartCollect': a coin with an enemy COMBAT unit this close is deprioritised, and a camp spot this close to one is abandoned for a fallback nearer home
     siegeMargin:        12,  // px inside its own weapon range a sieging harass unit stands from the enemy tower — a ranged unit whose range minus this still clears towerRange + harassSafetyBuffer shells the tower from a line the tower can never answer
     harassRallyOffset:   80, // px in front of own tower where a lone harass unit rallies when no enemies are visible
     harassGroupDist:     55, // px — a harass unit regroups toward its nearest ally when farther than this

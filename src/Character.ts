@@ -12,7 +12,7 @@ import {
   CHAR_LOW_HEALTH_RATIO, CHAR_LOW_HEALTH_BLINK_COLOR, CHAR_LOW_HEALTH_BLINK_HZ, CHAR_POISON_COLOR,
   ATTACK_KNOCKBACK_VY,
   TOWER_ATTACK_RANGE, HARASS_SAFETY_BUFFER, SIEGE_MARGIN, DEFEND_PURSUIT_RANGE, RANGED_KITE_THRESHOLD,
-  WAVE_ARRIVE_TOL,
+  WAVE_ARRIVE_TOL, COLLECT_CAMP_OFFSET, COLLECT_CONTEST_MARGIN, COLLECT_DANGER_PX,
   HARASS_RALLY_OFFSET, HARASS_GROUP_DIST, HARASS_RALLY_TOLERANCE,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST, COIN_THROW_MAX_Y_GAP,
   COIN_PICK_DIST_OFFSET,
@@ -198,6 +198,12 @@ export interface UpdateContext {
    *  for CPU-driven sides it follows the side's CpuProfile so self-play can
    *  A/B it. */
   siege:             boolean;
+  /** Coin box centre x — where idle collectors wait under 'smartCollect'. */
+  coinBoxX:          number;
+  /** 'smartCollect': idle collectors camp at the coin box on their own side
+   *  and skip coins an enemy collector will reach first. Always on for the
+   *  human player's side; CPU sides follow their CpuProfile (Game.patchCtx). */
+  smartCollect:      boolean;
   onMeleeHit?:       (unitType: string, x: number) => void;
   /** Precomputed `Math.exp(-ATTACK_KNOCKBACK_DECAY * dt)` shared by every
    *  melee-swing and shotgun-blast hit landed this tick. Identical for every
@@ -2864,6 +2870,25 @@ export class Character {
         const cc = c.claimedCoin;
         if (cc) claimed.add(cc);
       }
+      // smartCollect: a coin an enemy collector will reach first is a wasted
+      // run — treat it like a claimed coin (deprioritised, still the fallback
+      // when nothing else is on the field).
+      if (ctx.smartCollect) {
+        const mySpeed = this.moveSpeed;
+        for (const coin of coins) {
+          if (coin.isDead || coin.isPickedUp || claimed.has(coin)) continue;
+          const myEta = Math.abs(coin.x - this.x) / mySpeed;
+          for (const e of enemies) {
+            if (e.isDead) continue;
+            const d = Math.abs(coin.x - e.x);
+            // An enemy fighter standing on the coin makes the run a death run;
+            // an enemy collector that gets there first makes it a wasted one.
+            const fighterOnIt = e.behavior !== 'collecting' && d <= COLLECT_DANGER_PX;
+            const beatsUs     = e.behavior === 'collecting' && !e.carryingCoin && d / e.moveSpeed < myEta * COLLECT_CONTEST_MARGIN;
+            if (fighterOnIt || beatsUs) { claimed.add(coin); break; }
+          }
+        }
+      }
       this.targetCoin = this.coinClosestToTower(coins, homeTowerFrontX, claimed);
     }
 
@@ -2897,6 +2922,27 @@ export class Character {
         this.showCoinCarry();
         this.clearPath();
         this.state = 'returning';
+      }
+    } else if (ctx.smartCollect) {
+      // No coins on field — camp just on our side of the coin box, at full
+      // speed and pathed, so we are first to the next drop. The side offset
+      // keeps two camps from standing in each other.
+      this.state = 'marching';
+      const dir   = this.side === 'player' ? 1 : -1;
+      let campX = ctx.coinBoxX - dir * COLLECT_CAMP_OFFSET;
+      // Enemy fighters near the camp spot: wait further back toward home —
+      // a 110 HP conscript standing in a brawl is a 15-coin donation.
+      for (const e of enemies) {
+        if (!e.isDead && e.behavior !== 'collecting' && Math.abs(e.x - campX) <= COLLECT_DANGER_PX * 1.5) {
+          campX -= dir * COLLECT_DANGER_PX * 2;
+          break;
+        }
+      }
+      if (Math.abs(this.x - campX) > 30) {
+        this.requestPath(campX, this.groundY, navGraph, dt);
+        this.followPath(dt, ctx.platforms);
+      } else {
+        this.clearPath();
       }
     } else {
       // No coins on field â€” drift toward center drop zone

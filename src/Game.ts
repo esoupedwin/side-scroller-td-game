@@ -68,6 +68,8 @@ import {
   CPU_STANCE_MIN_DWELL_SEC, CPU_STANCE_SCORE_TAU_SEC, CPU_RETREAT_HP_FRAC_RANGED, CPU_VAL_COUNTER_WEIGHT, CPU_VAL_SAME_TYPE_PENALTY,
   TOWER_ATTACK_RANGE, cpuProfileFeatures, type CpuFeature,
   WAVE_STAGE_OFFSET, WAVE_TANK_LEAD, WAVE_TANK_THRESHOLD, WAVE_MIN_UNITS, WAVE_MAX_HOLD_SEC,
+  RUNNERS_OPENING, RUNNERS_OPENING_SEC, RUNNERS_ECONOMY, RUNNERS_PUSH, RUNNERS_DEFEND,
+  RUNNERS_BERSERK_BONUS, RUNNERS_MAX,
   TRIBE_PU_COOLDOWN_SEC, TRIBE_PU_DURATION_SEC, TRIBE_PU_SPEED_MULT, TRIBE_PU_HEAL_PER_SEC,
   TRIBE_PU_PLAGUE_DAMAGE, TRIBE_PU_PLAGUE_TICKS, TRIBE_PU_PLAGUE_INTERVAL, TRIBE_PU_AGGRESSION_MULT,
   TRIBE_PU_PLAYER_DEFAULT, TRIBE_PU_IDS, TRIBE_POWER_UPS, type TribePowerUpId,
@@ -785,6 +787,8 @@ export class Game {
       onFire:               (req) => this.fireProjectile(req),
       onDamageTower:        (dmg) => this.enemyTower.takeDamage(dmg),
       siege:                true,   // patched each tick in patchCtx()
+      coinBoxX:             this.mapDef.coinBox.x,
+      smartCollect:         true,   // patched each tick in patchCtx()
       onMeleeHit:       (unitType, x) => playSoundAt(unitType === 'conscript' ? 'punch' : 'sword_slash', x),
       attackKnockbackDecay: 1,   // patched each tick in patchCtx()
       onDepositCoin:    (value) => {
@@ -815,6 +819,8 @@ export class Game {
       onFire:               (req) => this.fireProjectile(req),
       onDamageTower:        (dmg) => this.playerTower.takeDamage(dmg),
       siege:                true,   // patched each tick in patchCtx()
+      coinBoxX:             this.mapDef.coinBox.x,
+      smartCollect:         true,   // patched each tick in patchCtx()
       onMeleeHit:       (unitType, x) => playSoundAt(unitType === 'conscript' ? 'punch' : 'sword_slash', x),
       attackKnockbackDecay: 1,   // patched each tick in patchCtx()
       onDepositCoin:    (value) => {
@@ -1714,6 +1720,9 @@ export class Game {
     ctx.siege = ctx === this.playerCtx
       ? (!this.cpuVsCpu || this.cpuFeatures.player.has('siege'))
       : this.cpuFeatures.enemy.has('siege');
+    ctx.smartCollect = ctx === this.playerCtx
+      ? (!this.cpuVsCpu || this.cpuFeatures.player.has('smartCollect'))
+      : this.cpuFeatures.enemy.has('smartCollect');
   }
 
   /**
