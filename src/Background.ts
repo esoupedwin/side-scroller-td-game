@@ -160,8 +160,12 @@ export function buildTowerRangeMarkers(
 // coinBox.skin override (map-builder data URL).
 const DEFAULT_COIN_BOX_SKIN = '/sprites/misc/box_01.png';
 
-export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
+/** Builds the coin box art into `world` and returns its container, so the
+ *  box can be shaken in place (berserk mode) without touching the spawn strip. */
+export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef): PIXI.Container {
   const { x, y: logicalY, width: logicalW, height: logicalH } = coinBox;
+  const box = new PIXI.Container();
+  world.addChild(box);
   // Cosmetic-only render scale (gameConfig.coinBox.visualScale), centred on
   // the logical box — the coin spawn strip and map footprint are unaffected.
   const w = logicalW * COIN_BOX_VISUAL_SCALE;
@@ -198,7 +202,7 @@ export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
   g.drawRect(x + w / 2 - cs,  y + h - cs, cs, cs);
   g.endFill();
 
-  world.addChild(g);
+  box.addChild(g);
 
   // Star icon centred in the box
   const cx = x;
@@ -228,10 +232,11 @@ export function buildCoinBox(world: PIXI.Container, coinBox: CoinBoxDef) {
       sprite.y      = y;
       sprite.width  = w;
       sprite.height = h;
-      world.addChild(sprite);
+      box.addChild(sprite);
       g.visible = false;
     })
     .catch(() => { /* missing/corrupt skin — keep the procedural box */ });
+  return box;
 }
 
 /**

@@ -401,6 +401,26 @@ export const GameConfig = {
     // Cosmetic-only render scale of the box art, centred on the logical box —
     // the coin spawn strip and map-builder footprint are unaffected.
     visualScale: 1.25,
+
+    // ── Berserk mode (Game.tickBerserk) ──────────────────────────────────────
+    // At a random time after the match starts the box goes berserk: it
+    // vibrates and pours gold/silver out at rateMult× the usual drop rate for
+    // durationSec, launched UP out of the top of the box instead of falling
+    // from its underside. Then a cooldownSec lockout, then another random
+    // delayMin–delayMax wait before the next one. Blue coins keep their own
+    // (rare) schedule.
+    berserk: {
+      durationSec:     5,
+      rateMult:        10,
+      cooldownSec:     60,
+      delayMinSec:     15,    // random wait after the cooldown — and after match start — before it fires
+      delayMaxSec:     60,
+      launchSpeedMin:  300,   // px/s out of the top of the box… (the lid sits ~200 px below the world top; 420 px/s peaks ~170 px up, still in frame)
+      launchSpeedMax:  420,
+      launchSpreadDeg: 55,    // …fanned ± this many degrees from straight up
+      shakeAmp:        4,     // px — vibration amplitude of the box art
+      shakeHz:         28,    // vibration frequency
+    },
   },
 
   economy: {

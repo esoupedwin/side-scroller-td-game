@@ -1053,6 +1053,31 @@
       #loadout-start-btn:disabled { opacity: 0.4; cursor: default; }
 
       /* ── Match-start 3-2-1 countdown ───────────────────────────────────────── */
+      /* ── Coin box berserk banner ──────────────────────────────────────────── */
+      /* "COINS BERSERK" flies in from the right, holds centre, flies out to the
+         left (main.ts handleCoinBoxBerserk). Fixed to the viewport like the
+         start countdown; z 150 sits above the HUD, under the game-over banner. */
+      #berserk-banner {
+        position: fixed; top: 22%; left: 0;
+        display: none;
+        white-space: nowrap;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        font-size: 96px; font-weight: 900; letter-spacing: 4px;
+        color: #ffd166;
+        -webkit-text-stroke: 8px #3a1d00;
+        paint-order: stroke fill;
+        text-shadow: 0 0 24px rgba(255, 170, 40, 0.85), 0 6px 18px rgba(0, 0, 0, 0.7);
+        pointer-events: none;
+        z-index: 150;
+      }
+      #berserk-banner.run { display: block; animation: berserk-fly 2.6s both; }
+      @keyframes berserk-fly {
+        0%   { transform: translateX(100vw);            animation-timing-function: cubic-bezier(0.1, 0.8, 0.3, 1); }
+        24%  { transform: translateX(calc(50vw - 50%)); animation-timing-function: linear; }
+        76%  { transform: translateX(calc(50vw - 50%)); animation-timing-function: cubic-bezier(0.7, 0, 0.9, 0.2); }
+        100% { transform: translateX(-110%); }
+      }
+
       #start-countdown {
         position: fixed; inset: 0;
         display: none;
@@ -1571,6 +1596,7 @@
               <button id="dev-dmg-cpu-tower-btn" class="dev-btn" title="Deal flat damage to the CPU's tower">Hurt CPU-Tower</button>
               <button id="dev-skip-clock-btn" class="dev-btn" title="Remove seconds from the match clock">-10s</button>
               <button id="dev-skip-clock-big-btn" class="dev-btn" title="Remove a minute from the match clock">-60s</button>
+              <button id="dev-berserk-btn" class="dev-btn" title="Send the coin box berserk now">Berserk</button>
             </div>
           </div>
         </div>
@@ -1593,6 +1619,7 @@
     <!-- ── Pause menu (Esc key) ─────────────────────────────────────────── -->
     <!-- ── Match-start countdown (3-2-1 after the loadout Start button) ── -->
     <div id="start-countdown"></div>
+    <div id="berserk-banner">COINS BERSERK</div>
 
     <!-- ── Loadout selection (shown before each map starts) ── -->
     <div id="loadout-screen" style="display:none;">

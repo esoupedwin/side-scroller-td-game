@@ -179,6 +179,17 @@ export const COIN_BOX_W          = GameConfig.coinBox.width;
 export const COIN_BOX_H          = GameConfig.coinBox.height;
 export const COIN_BOX_SPREAD_DEG = GameConfig.coinBox.spreadDeg;
 export const COIN_BOX_VISUAL_SCALE = GameConfig.coinBox.visualScale;
+const bz = GameConfig.coinBox.berserk;
+export const BERSERK_DURATION_S     = bz.durationSec;
+export const BERSERK_RATE_MULT      = bz.rateMult;
+export const BERSERK_COOLDOWN_S     = bz.cooldownSec;
+export const BERSERK_DELAY_MIN_S    = bz.delayMinSec;
+export const BERSERK_DELAY_MAX_S    = bz.delayMaxSec;
+export const BERSERK_LAUNCH_MIN     = bz.launchSpeedMin;
+export const BERSERK_LAUNCH_MAX     = bz.launchSpeedMax;
+export const BERSERK_SPREAD_DEG     = bz.launchSpreadDeg;
+export const BERSERK_SHAKE_AMP      = bz.shakeAmp;
+export const BERSERK_SHAKE_HZ       = bz.shakeHz;
 
 // ── Economy ──────────────────────────────────────────────────────────────────
 export const STARTING_COINS      = economy.startingCoins;

@@ -303,6 +303,9 @@ Shared by `Coin.drawCoin()` and `Character.showCoinCarry()` — single color def
 Sky-dropped coins spawn at `COIN_DROP_START_Y` (near top of canvas) with no initial velocity.  
 Dropped-by-character coins are spawned from `pendingCoinDrop` with a random horizontal bounce velocity.
 
+### Coin box berserk (`gameConfig.coinBox.berserk`, `Game.tickBerserk`)
+At a random `delayMin–delayMax` after match start the coin box goes **berserk** for `durationSec` (5 s): the gold and silver drop clocks advance `rateMult`× (10×) faster, `spawnCoin` launches each coin **up out of the top of the box** (`cb.y − 12`, speed `launchSpeedMin–Max`, fanned ± `launchSpreadDeg` from vertical; negative vy is up) instead of releasing it from the underside, and the box art (`buildCoinBox` now returns its container, kept as `Game.coinBoxVisual`) vibrates at `shakeHz`/`shakeAmp`. Afterwards `cooldownSec` (60 s) plus a fresh random delay before the next one. Blue coins keep their own schedule. `end()` calls `stopBerserk(false)` so the box isn't left offset on the game-over screen; `cheatBerserk()` (dev-panel **Berserk**) fires one on demand. `Game.isCoinBoxBerserk` is exposed for UI/AI use. Burst start also calls the `onCoinBoxBerserk` constructor callback — main.ts runs the **"COINS BERSERK"** banner (`#berserk-banner`, CSS keyframes `berserk-fly`: in from the right, hold centre, out to the left over 2.6 s; `animationend` clears the `run` class).
+
 ### Pickup / carry / deposit flow
 1. Character reaches coin → `coin.pickup()` (sets `isPickedUp`, hides container, removes physics body)
 2. Character stores `coinCarryValue` + `coinCarryKind`, calls `showCoinCarry()` (uses `COIN_PALETTE`)

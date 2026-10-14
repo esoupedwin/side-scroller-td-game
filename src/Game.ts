@@ -52,6 +52,8 @@ import {
   PASSIVE_INCOME_RATE, LOW_BALANCE_THRESHOLD, LOW_BALANCE_INCOME_MULT,
   COIN_VALUE, KILL_REWARD, TOWER_KILL_REWARD, COIN_DROP_MIN_MS, COIN_DROP_MAX_MS,
   COIN_LIFETIME_S,
+  BERSERK_DURATION_S, BERSERK_RATE_MULT, BERSERK_COOLDOWN_S, BERSERK_DELAY_MIN_S, BERSERK_DELAY_MAX_S,
+  BERSERK_LAUNCH_MIN, BERSERK_LAUNCH_MAX, BERSERK_SPREAD_DEG, BERSERK_SHAKE_AMP, BERSERK_SHAKE_HZ,
   COIN_DROP_VX_MIN, COIN_DROP_VX_MAX, COIN_DROP_VY_MIN, COIN_DROP_VY_MAX,
   COIN_GRAVITY,
   SILVER_COIN_VALUE, SILVER_DROP_MIN_MS, SILVER_DROP_MAX_MS,
@@ -93,6 +95,13 @@ function withSpawnBoosts(cfg: CharacterConfig): CharacterConfig {
 
 const PARALLAX_FACTOR     = 0.15; // near background scrolls at 15 % of world camera speed
 const PARALLAX_FACTOR_FAR = 0.05; // far background scrolls at 5 % — feels more distant
+
+/** Seconds until the coin box next goes berserk: an optional cooldown plus a
+ *  random wait, so players can't set a watch by it. */
+function berserkDelay(afterCooldown: boolean): number {
+  return (afterCooldown ? BERSERK_COOLDOWN_S : 0)
+    + BERSERK_DELAY_MIN_S + Math.random() * (BERSERK_DELAY_MAX_S - BERSERK_DELAY_MIN_S);
+}
 
 /** Close-combat styles — the units that form walls and waves (never type names). */
 const isMeleeStyle = (c: Character): boolean =>
@@ -299,6 +308,12 @@ export class Game {
   private silverDropInterval    = 0;
   private blueDropTimer         = 0;
   private blueDropInterval      = 0;
+  // Coin box berserk (see tickBerserk): seconds of the current burst left
+  // (0 = idle), seconds until the next one, and the box art being shaken.
+  private berserkRemaining      = 0;
+  private berserkTimer          = berserkDelay(false);
+  private berserkPhase          = 0;
+  private coinBoxVisual: PIXI.Container | null = null;
   private isOver           = false;
   private isPaused         = false;
 
@@ -321,6 +336,7 @@ export class Game {
   private readonly onTimeChanged:        (seconds: number) => void;
   private readonly onEnemyTowerHpChanged:  (hp: number, maxHp: number) => void;
   private readonly onPlayerTowerHpChanged: (hp: number, maxHp: number) => void;
+  private readonly onCoinBoxBerserk:       () => void;
   private readonly tickFn:               (dt: number) => void;
 
   private lastCpuCharsSig     = '';
@@ -444,6 +460,7 @@ export class Game {
     onTimeChanged:        (seconds: number) => void,
     onEnemyTowerHpChanged:  (hp: number, maxHp: number) => void,
     onPlayerTowerHpChanged: (hp: number, maxHp: number) => void,
+    onCoinBoxBerserk:       () => void = () => {},
   ) {
     this.onGameOver              = onGameOver;
     this.onCoinsChanged          = onCoinsChanged;
@@ -453,6 +470,7 @@ export class Game {
     this.onTimeChanged           = onTimeChanged;
     this.onEnemyTowerHpChanged   = onEnemyTowerHpChanged;
     this.onPlayerTowerHpChanged  = onPlayerTowerHpChanged;
+    this.onCoinBoxBerserk        = onCoinBoxBerserk;
     this.hud            = new CharacterHUD(hudEl);
     this.tickFn         = (_dt) => {
       if (this.fastForward > 1) return;   // the fast-forward worker is stepping
@@ -1485,11 +1503,66 @@ export class Game {
     const fallH     = lowestPlatY - (cb.y + cb.height);
     const spreadRad = cb.spreadDeg * (Math.PI / 180);
     const vxMax     = Math.tan(spreadRad) * Math.sqrt(Math.max(1, fallH) * COIN_GRAVITY / 2);
-    const vx        = (Math.random() * 2 - 1) * vxMax;
-    const coin = new Coin(cb.x, COIN_LIFETIME_S, value, kind, vx, 0, cb.y + cb.height, this.physics, dt, wallL, wallR, this.mapGroundY, this.mapDef.coinSkins?.[kind]);
+    let vx = (Math.random() * 2 - 1) * vxMax;
+    let vy = 0;
+    let y  = cb.y + cb.height;   // normal: released from the underside, falls out
+    if (this.berserkRemaining > 0) {
+      // Berserk: fired UP out of the top of the box in a fan (negative vy is up).
+      const ang   = (Math.random() * 2 - 1) * BERSERK_SPREAD_DEG * (Math.PI / 180);
+      const speed = BERSERK_LAUNCH_MIN + Math.random() * (BERSERK_LAUNCH_MAX - BERSERK_LAUNCH_MIN);
+      vx = Math.sin(ang) * speed;
+      vy = -Math.cos(ang) * speed;
+      y  = cb.y - 12;              // just above the lid so the arc starts clear of the box art
+    }
+    const coin = new Coin(cb.x, COIN_LIFETIME_S, value, kind, vx, vy, y, this.physics, dt, wallL, wallR, this.mapGroundY, this.mapDef.coinSkins?.[kind]);
     this.coins.push(coin);
     this.coinLayer.addChild(coin.container);
   }
+
+  // ── Coin box berserk ───────────────────────────────────────────────────────
+  // Idle → (random wait) → berserk for BERSERK_DURATION_S → cooldown + random
+  // wait → … While berserk the box art vibrates and spawnCoin launches coins
+  // out of the top. Returns the ms to advance the gold/silver drop clocks by
+  // this tick (BERSERK_RATE_MULT× while active).
+  private tickBerserk(dt: number, deltaMS: number): number {
+    if (this.berserkRemaining > 0) {
+      this.berserkRemaining -= dt;
+      this.berserkPhase     += dt;
+      const box = this.coinBoxVisual;
+      if (box) {
+        const w = this.berserkPhase * Math.PI * 2 * BERSERK_SHAKE_HZ;
+        box.x = Math.sin(w) * BERSERK_SHAKE_AMP + (Math.random() - 0.5) * BERSERK_SHAKE_AMP;
+        box.y = Math.cos(w * 1.31) * BERSERK_SHAKE_AMP * 0.6;
+      }
+      if (this.berserkRemaining <= 0) this.stopBerserk(true);
+      return deltaMS * BERSERK_RATE_MULT;
+    }
+    this.berserkTimer -= dt;
+    if (this.berserkTimer <= 0) this.startBerserk();
+    return deltaMS;
+  }
+
+  private startBerserk() {
+    this.berserkRemaining = BERSERK_DURATION_S;
+    this.berserkPhase     = 0;
+    this.diagnostics.noteEvent(this.elapsedSeconds, 'Coin box berserk');
+    this.onCoinBoxBerserk();   // main.ts: "COINS BERSERK" banner fly-through
+  }
+
+  /** End the burst; `schedule` arms the next one after the cooldown. */
+  private stopBerserk(schedule: boolean) {
+    this.berserkRemaining = 0;
+    if (this.coinBoxVisual) { this.coinBoxVisual.x = 0; this.coinBoxVisual.y = 0; }
+    if (schedule) this.berserkTimer = berserkDelay(true);
+  }
+
+  /** Dev: trigger a berserk burst now (Game Shark). */
+  cheatBerserk(): void {
+    if (this.isOver || this.berserkRemaining > 0) return;
+    this.startBerserk();
+  }
+
+  get isCoinBoxBerserk(): boolean { return this.berserkRemaining > 0; }
 
   // ── Timers ───────────────────────────────────────────────────────────────────
 
@@ -1813,15 +1886,17 @@ export class Game {
       }
     }
 
-    // Coin drop
-    this.coinDropTimer += deltaMS;
+    // Coin drop — gold and silver clocks run BERSERK_RATE_MULT× faster while
+    // the box is berserk; blue keeps its own rare schedule.
+    const dropMs = this.tickBerserk(dt, deltaMS);
+    this.coinDropTimer += dropMs;
     if (this.coinDropTimer >= this.coinDropInterval) {
       this.spawnCoin(COIN_VALUE, 'gold');
       this.resetCoinDropTimer();
     }
 
     // Silver coin drop
-    this.silverDropTimer += deltaMS;
+    this.silverDropTimer += dropMs;
     if (this.silverDropTimer >= this.silverDropInterval) {
       this.spawnCoin(SILVER_COIN_VALUE, 'silver');
       this.resetSilverDropTimer();
@@ -2822,6 +2897,7 @@ export class Game {
 
   private end(winner: 'player' | 'enemy', reason: 'tower' | 'timeout') {
     this.isOver = true;
+    this.stopBerserk(false);   // tickBerserk no longer runs — don't leave the box frozen mid-shake
     // Push one final HP sync before tick() starts early-exiting at `isOver`:
     // the killing blow lands after this tick already ran its notify pass, so
     // without this the top HUD freezes on the pre-fatal value and a tower that
@@ -2895,6 +2971,9 @@ export class Game {
     this.powerUps     = [];
     this.damageLabels = [];
     this.powerUpTimer           = 0;
+    this.berserkRemaining       = 0;
+    this.berserkTimer           = berserkDelay(false);
+    this.berserkPhase           = 0;
     this.powerUpIndicatorActive = false;
     this.powerUpLastCountdown   = -1;
     this.isOver                = false;

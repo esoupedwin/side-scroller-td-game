@@ -200,7 +200,24 @@ const lastDisabledByBtn = new Map<HTMLButtonElement, boolean>();
 // spawn buttons so they start with the correct disabled state.
 let lastKnownCoins = 0;
 
-let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged, handleEnemyTowerHpChanged, handlePlayerTowerHpChanged);
+// Coin box berserk: run the "COINS BERSERK" fly-through (CSS keyframes on
+// #berserk-banner). Re-triggering mid-flight restarts it — the reflow between
+// removing and re-adding the class is what resets a CSS animation.
+const berserkBanner = document.getElementById('berserk-banner')!;
+const BERSERK_BANNER_MS = 2600;   // keep in step with the berserk-fly keyframes duration
+let berserkBannerTimer = 0;
+const hideBerserkBanner = () => { berserkBanner.classList.remove('run'); window.clearTimeout(berserkBannerTimer); };
+// animationend only dispatches on a rendered frame; the timer covers a tab
+// that is hidden or a window that is covered when the burst fires.
+berserkBanner.addEventListener('animationend', hideBerserkBanner);
+function handleCoinBoxBerserk() {
+  hideBerserkBanner();
+  void berserkBanner.offsetWidth;
+  berserkBanner.classList.add('run');
+  berserkBannerTimer = window.setTimeout(hideBerserkBanner, BERSERK_BANNER_MS + 200);
+}
+
+let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpuCoinsChanged, handleCpuCharsChanged, handleCpuStrategyChanged, handleTimeChanged, handleEnemyTowerHpChanged, handlePlayerTowerHpChanged, handleCoinBoxBerserk);
 
 // ── Tribe power-up: selection persistence + activation button ───────────────
 const TRIBE_PU_KEY = 'coin_tribe_powerup';
@@ -1383,6 +1400,9 @@ dropPowerUpBtn.addEventListener('click', () => {
 });
 
 // ── Game Shark: flat tower damage ─────────────────────────────────────────
+document.getElementById('dev-berserk-btn')!.addEventListener('click', () => {
+  game.cheatBerserk();
+});
 document.getElementById('dev-dmg-player-tower-btn')!.addEventListener('click', () => {
   game.cheatDamageTower('player', CHEAT_TOWER_DAMAGE);
 });
