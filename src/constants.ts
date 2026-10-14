@@ -235,6 +235,8 @@ export const PROJ_TOWER_SPLASH   = proj.towerSplashBonus;
 // ── UI ───────────────────────────────────────────────────────────────────────
 export const DMG_LABEL_LIFETIME  = ui.damageLabel.lifetimeSec;
 export const DMG_LABEL_RISE      = ui.damageLabel.risePx;
+export const DMG_LABEL_FONT_SIZE = ui.damageLabel.fontSize;
+export const DMG_LABEL_STROKE    = ui.damageLabel.strokeWidth;
 
 // ── Loadout ──────────────────────────────────────────────────────────────────
 export const LOADOUT_MAX_CARDS   = GameConfig.loadout.maxCards;

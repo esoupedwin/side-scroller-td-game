@@ -552,7 +552,7 @@ export class Game {
     buildBackground(this.world, m.worldWidth);
     this.rangeMarkers = buildTowerRangeMarkers(this.world, m.playerTowerX, m.enemyTowerX);
     this.rangeMarkers.visible = this.devMode;
-    buildCoinBox(this.world, m.coinBox);
+    this.coinBoxVisual = buildCoinBox(this.world, m.coinBox);
 
     // Scene-prop layer: platforms, blocks, and behind-character decor all share
     // ONE sortable container so their zIndex values order them in a single
@@ -2076,10 +2076,12 @@ export class Game {
     for (const c of liveChars) {
       const color = c.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
       for (const ev of c.pendingDamages) {
+        // A hit that would print as 0 (a miss, or damage that rounds away) reads
+        // as "Missed" — a floating zero looks like a bug.
         const label = ev.text
           ? new DamageLabel(ev.x, ev.y, 0, ev.color ?? 0x999999, ev.text)   // custom word (e.g. "Blocked")
-          : ev.amount === 0
-            ? new DamageLabel(ev.x, ev.y, 0, 0x999999, 'Miss')
+          : Math.round(ev.amount) <= 0
+            ? new DamageLabel(ev.x, ev.y, 0, 0x999999, 'Missed')
             : new DamageLabel(ev.x, ev.y, ev.amount, ev.color ?? color);   // poison ticks carry their own green
         this.damageLabels.push(label);
         this.labelLayer.addChild(label.container);

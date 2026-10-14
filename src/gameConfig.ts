@@ -475,6 +475,8 @@ export const GameConfig = {
     damageLabel: {
       lifetimeSec: 1.0,
       risePx:      38,   // total upward travel over lifetime
+      fontSize:    26,   // px — doubled from 13 so hit numbers read at a glance (also sizes "Missed" / "Blocked" / rank words)
+      strokeWidth: 4,    // px outline — scaled with the font so the fill stays legible over busy backgrounds
     },
   },
 

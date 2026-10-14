@@ -1,5 +1,5 @@
 import * as PIXI from 'pixi.js';
-import { DMG_LABEL_LIFETIME, DMG_LABEL_RISE } from './constants';
+import { DMG_LABEL_LIFETIME, DMG_LABEL_RISE, DMG_LABEL_FONT_SIZE, DMG_LABEL_STROKE } from './constants';
 
 // Per-color TextStyle cache. Each PIXI.Text otherwise wraps its inline style
 // object in a fresh TextStyle and re-resolves font metrics on construction;
@@ -11,12 +11,12 @@ function getDamageStyle(color: number): PIXI.TextStyle {
   let s = TEXT_STYLE_CACHE.get(color);
   if (!s) {
     s = new PIXI.TextStyle({
-      fontSize:        13,
+      fontSize:        DMG_LABEL_FONT_SIZE,
       fontWeight:      'bold',
       fontFamily:      'Segoe UI, sans-serif',
       fill:            color,
       stroke:          0x000000,
-      strokeThickness: 3,
+      strokeThickness: DMG_LABEL_STROKE,
       dropShadow:      false,
     });
     TEXT_STYLE_CACHE.set(color, s);

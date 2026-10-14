@@ -1997,7 +1997,7 @@ export class Character {
       if (dmg <= 0) return;  // fully absorbed — no damage, no flinch, no poison
     }
 
-    // Always queue a label event (amount=0 â†' "Miss" in Game.ts). Poison ticks
+    // Always queue a label event (amount=0 â†' "Missed" in Game.ts). Poison ticks
     // render green so the damage-over-time reads distinctly from a direct hit.
     this.pendingDamages.push({ amount: dmg, x: this.x, y: this.y - this.config.height - 6, color: poisonTick ? CHAR_POISON_COLOR : undefined });
     if (dmg <= 0) return;  // miss â€” no HP change, no coin drop, no kill
