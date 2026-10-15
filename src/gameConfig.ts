@@ -111,7 +111,10 @@ export const GameConfig = {
     //             damage and knockback, flashes a shield arc, and floats a
     //             "Blocked" label; a 100% block also stops poison),
     //             spawnCooldownSec (player re-buy lockout for this type;
-    //             default economy.spawnCooldownSec).
+    //             default economy.spawnCooldownSec),
+    //             unique (special character: at most one living instance per
+    //             side; the card locks while it is on the field and reopens
+    //             when it dies — on top of the normal cooldown).
     kattgard: {
       conscript: {
         id:          'conscript' as const,
@@ -162,6 +165,7 @@ export const GameConfig = {
         hp:          350, speed: 100, attackRange: 44, attackPower: 20,
         fireRate:    1.0, cost: 120, critical: 0.12, knockback: 400,
         blockChance: 0.25, blockPercent: 0.5,   // axe-haft parry — 25% chance to halve a hit
+        spawnCooldownSec: 60
       },
       shocktrooper: {
         id:          'shocktrooper' as const,
@@ -188,7 +192,8 @@ export const GameConfig = {
         hp:          105, speed: 100, attackRange: 280, attackPower: 7,
         fireRate:    2.4, cost: 100, critical: 0.09, knockback: 100,
         burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
-        spawnCooldownSec: 60
+        spawnCooldownSec: 90,
+        unique: true,   // special character — one on the field at a time; re-buy only after it dies
       },
     },
     lapinor: {
@@ -239,6 +244,7 @@ export const GameConfig = {
         hp:          280, speed: 80, attackRange: 44, attackPower: 28,
         fireRate:    1.1, cost: 150, critical: 0.08, knockback: 250,
         blockChance: 0.35, blockPercent: 0.6,   // shield block — 35% chance to stop 60% of a hit
+        spawnCooldownSec: 60
       },
       grenadier: {
         id:          'grenadier' as const,
@@ -251,6 +257,7 @@ export const GameConfig = {
         attackStyle: 'rocket' as const, icon: '🚀', uiColor: '#cc4400',
         hp:          120, speed: 68, attackRange: 260, attackPower: 70,
         fireRate:    3.5, cost: 120, critical: 0.06, knockback: 0,
+        spawnCooldownSec: 70
       },
     },
     // Tribe-less types: CPU-only / hidden (not in any roster). Shared fallback.

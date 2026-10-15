@@ -210,6 +210,9 @@ Optional per-block config (currently viking 0.25/0.5, knight 0.35/0.6). Rolled i
 ### Purchase cooldown (player only)
 After the player buys a type, that type's spawn card locks for `spawnCooldownSec` (per character block; default `economy.spawnCooldownSec` = 10 s, resolved by `charSpawnCooldown(tribe, type)`). `Game.spawnPlayer` refuses while locked; `armPlayerSpawnCooldown` records `playerSpawnReadyAt` in **game time** (`elapsedSeconds`), so pause holds the timer and fast-forward advances it. `reset()` arms the whole player roster, so every card begins the match on cooldown (the clocks start at GO, since the match is paused behind the 3-2-1); `Game.playerSpawnCooldown(type)` → `{ remaining, frac }`. `main.ts` `refreshSpawnButtons()` (called on balance change and from the 10 Hz tribe-power-up poll) disables the card, sets `.on-cooldown` + `--cd`, and writes the seconds into `.spawn-cd`; the CSS draws a dark shade that drains upward. The CPU is not subject to it — its cadence comes from its own spawn timer.
 
+### Special (unique) characters
+A character block with `unique: true` (currently pirateking) can have **at most one living instance per side**. `Game.isUniqueDeployed(side, type)` (via `charIsUnique`) gates both `spawnPlayer` and the CPU buy order in `spawnCpu`; the lock releases the moment the instance dies, independent of (and in addition to) the purchase cooldown. The player's card shows a gold shade with an "ON FIELD" badge (`.spawn-btn.deployed`), which takes precedence over the cooldown readout.
+
 ### Behavior vs State
 - **`behavior`** (`'attacking' | 'collecting' | 'harass' | 'defend'`) — the character's strategic intent; player-controlled or set by CPU AI
 - **`state`** (`'marching' | 'fighting' | 'collecting' | 'returning' | 'dead'`) — what the character is doing this frame; set inside `update()`

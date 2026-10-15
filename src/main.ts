@@ -1550,18 +1550,22 @@ function refreshSpawnButtons() {
   const playerTribe = getPlayerTribe();
   for (const [t, btn] of spawnBtns) {
     const cd = gameConstructed ? game.playerSpawnCooldown(t) : { remaining: 0, frac: 1 };
-    const onCooldown = cd.remaining > 0;
-    const next = gameOver || onCooldown || lastKnownCoins < charCost(playerTribe, t);
+    // Special character already alive — the card stays locked until it dies.
+    // Takes precedence over the cooldown readout (both can be true at once).
+    const deployed   = gameConstructed && game.isUniqueDeployed('player', t);
+    const onCooldown = !deployed && cd.remaining > 0;
+    const next = gameOver || deployed || onCooldown || lastKnownCoins < charCost(playerTribe, t);
     if (lastDisabledByBtn.get(btn) !== next) {
       btn.disabled = next;
       lastDisabledByBtn.set(btn, next);
     }
-    // Countdown text + recharge sweep. Writes are guarded so a ready card
-    // costs nothing per poll.
-    const label = onCooldown ? `${Math.ceil(cd.remaining)}s` : '';
+    // Countdown text + recharge sweep, or the "on the field" badge. Writes are
+    // guarded so a ready card costs nothing per poll.
+    const label = deployed ? 'ON FIELD' : onCooldown ? `${Math.ceil(cd.remaining)}s` : '';
     const cdEl  = btn.querySelector<HTMLElement>('.spawn-cd');
     if (cdEl && cdEl.textContent !== label) cdEl.textContent = label;
     if (btn.classList.contains('on-cooldown') !== onCooldown) btn.classList.toggle('on-cooldown', onCooldown);
+    if (btn.classList.contains('deployed')    !== deployed)   btn.classList.toggle('deployed', deployed);
     if (onCooldown) btn.style.setProperty('--cd', cd.frac.toFixed(3));
   }
 }

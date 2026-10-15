@@ -400,6 +400,7 @@ type RawCharCfg = {
   poisonDamage?: number; poisonTicks?: number; poisonIntervalSec?: number;
   blockChance?: number; blockPercent?: number;
   spawnCooldownSec?: number;
+  unique?: boolean;
   displayName?: string; icon?: string; uiColor?: string;
   spriteFolder?: string;   // sprite-only concern — consumed by SpriteRegistry, not CharacterConfig
 };
@@ -426,6 +427,7 @@ function toCharConfig(c: RawCharCfg): CharacterConfig {
     blockChance:       c.blockChance,
     blockPercent:      c.blockPercent,
     spawnCooldownSec:  c.spawnCooldownSec,
+    unique:            c.unique,
     displayName:       c.displayName,
     icon:              c.icon,
     uiColor:           c.uiColor,
@@ -483,6 +485,11 @@ export function charCost(tribe: Tribe, type: string): number {
  *  spawnCooldownSec, else the economy-wide default. */
 export function charSpawnCooldown(tribe: Tribe, type: string): number {
   return charConfig(tribe, type)?.spawnCooldownSec ?? SPAWN_COOLDOWN_SEC;
+}
+
+/** Special character: a side may field at most one living instance of it. */
+export function charIsUnique(tribe: Tribe, type: string): boolean {
+  return charConfig(tribe, type)?.unique === true;
 }
 
 // ── Config-driven character UI lookups ───────────────────────────────────────

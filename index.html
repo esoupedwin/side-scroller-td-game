@@ -773,6 +773,22 @@
         pointer-events: none;
       }
       .spawn-btn .spawn-cd:empty { display: none; }
+      /* Special character already on the field: a full gold-tinted shade and an
+         "ON FIELD" badge — the card reopens when that instance dies. */
+      .spawn-btn.deployed:disabled { opacity: 1; }
+      .spawn-btn.deployed::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: rgba(120, 90, 10, 0.62);
+      }
+      .spawn-btn.deployed .spawn-cd {
+        font-size: 15px;
+        letter-spacing: 0.06em;
+        color: #ffd166;
+        white-space: nowrap;
+      }
 
       /* ── Game over screen ───────────────────────────────────────────────────── */
       /* z-index 160 keeps the banner readable above the victory confetti

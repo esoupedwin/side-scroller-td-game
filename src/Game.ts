@@ -42,7 +42,7 @@ import {
   CAMERA_TOWER_BOTTOM_GAP, TEXTURE_GC_IDLE_SEC, CPU_SPRITE_RETRY_MS,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  charConfig, charCost, charSpawnCooldown,
+  charConfig, charCost, charSpawnCooldown, charIsUnique,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
   GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY, ATTACK_KNOCKBACK_DECAY,
   ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX, ROCKET_SPLASH_MIN_FRAC,
@@ -904,14 +904,15 @@ export class Game {
 
   // ── Spawn ────────────────────────────────────────────────────────────────────
 
-  /** Returns false if the player cannot afford this unit or the type is still
-   *  on its purchase cooldown. */
+  /** Returns false if the player cannot afford this unit, the type is still
+   *  on its purchase cooldown, or it is a special character already alive. */
   spawnPlayer(type: CharacterConfig['id']): boolean {
     if (this.isOver) return false;
     const playerTribe = getPlayerTribe();
     const cost = charCost(playerTribe, type);
     if (this.coinBalance < cost) return false;
     if (this.playerSpawnCooldown(type).remaining > 0) return false;
+    if (this.isUniqueDeployed('player', type)) return false;
 
     this.coinBalance -= cost;
     this.notifyCoins();
@@ -928,6 +929,13 @@ export class Game {
     this.hud.add(c);
     this.recordPlayerSpawn(type);
     return true;
+  }
+
+  /** True when `type` is a special (unique) character and `side` already has a
+   *  living one — its card stays locked until that instance dies. */
+  isUniqueDeployed(side: 'player' | 'enemy', type: string): boolean {
+    if (!charIsUnique(tribeForSide(side), type)) return false;
+    return this.characters.some(c => c.side === side && !c.isDead && c.config.id === type);
   }
 
   /** Lock a type's spawn card for its configured cooldown. Keyed on game time
@@ -1436,6 +1444,7 @@ export class Game {
     for (const type of TRIBE_ROSTERS[cpuTribe]) {
       const p = Game.unitProfile(cpuTribe, type);
       if (!p.canFight || !Number.isFinite(p.cost)) continue; // skip support / unpriced types
+      if (this.isUniqueDeployed(self, type)) continue;       // special character already on the field
       order.push({ type: type as CharacterConfig['id'], cost: p.cost, score: stanceScore(p) * shape(type, p) });
     }
     order.sort((a, b) => b.score - a.score);

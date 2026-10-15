@@ -158,6 +158,9 @@ export interface CharacterConfig {
   // time). Unset → economy default (SPAWN_COOLDOWN_SEC). Read via
   // charSpawnCooldown(); the Character itself never consults it.
   spawnCooldownSec?: number;
+  // Special character: at most one living instance per side. Enforced at
+  // purchase time (Game.spawnPlayer / spawnCpu via charIsUnique), not here.
+  unique?: boolean;
   // Optional UI metadata (spawn button / HUD card) — generic fallbacks apply.
   displayName?: string;
   icon?:        string;
