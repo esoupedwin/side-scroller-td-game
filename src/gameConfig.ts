@@ -109,13 +109,16 @@ export const GameConfig = {
     //             each incoming character hit has blockChance probability of
     //             being blocked; a blocked hit deals (1 − blockPercent) of its
     //             damage and knockback, flashes a shield arc, and floats a
-    //             "Blocked" label; a 100% block also stops poison).
+    //             "Blocked" label; a 100% block also stops poison),
+    //             spawnCooldownSec (player re-buy lockout for this type;
+    //             default economy.spawnCooldownSec).
     kattgard: {
       conscript: {
         id:          'conscript' as const,
         attackStyle: 'melee' as const, icon: '👊', uiColor: '#b07040',
         hp:          110, speed: 150, attackRange: 36, attackPower: 10,
         fireRate:    0.65, cost: 15, critical: 0.18, knockback: 0,
+        spawnCooldownSec: 5
       },
       warrior: {
         id:          'warrior' as const,
@@ -185,6 +188,7 @@ export const GameConfig = {
         hp:          105, speed: 100, attackRange: 280, attackPower: 7,
         fireRate:    2.4, cost: 100, critical: 0.09, knockback: 100,
         burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
+        spawnCooldownSec: 60
       },
     },
     lapinor: {
@@ -193,6 +197,7 @@ export const GameConfig = {
         attackStyle: 'melee' as const, icon: '👊', uiColor: '#b07040',
         hp:          110, speed: 150, attackRange: 36, attackPower: 10,
         fireRate:    0.65, cost: 15, critical: 0.18, knockback: 0,
+        spawnCooldownSec: 5
       },
       warrior: {
         id:          'warrior' as const,
@@ -217,7 +222,7 @@ export const GameConfig = {
       gunslinger: {
         id:          'gunslinger' as const,
         attackStyle: 'bullet' as const, icon: '🤠', uiColor: '#b8860b',
-        hp:          85, speed: 92, attackRange: 280, attackPower: 7,
+        hp:          85, speed: 92, attackRange: 320, attackPower: 7,
         fireRate:    1.4, cost: 75, critical: 0.09, knockback: 0,
         burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
       },
@@ -446,6 +451,11 @@ export const GameConfig = {
   economy: {
     startingCoins:      150,
     passiveIncomeRate:  0.8,
+    // After the player buys a unit, that type's spawn card locks for this long
+    // (game time — pauses with the match). A character block can override it
+    // with its own spawnCooldownSec. Player-side only; the CPU is paced by
+    // its own spawn timer.
+    spawnCooldownSec:   10,
     coinValue:          30,
     killReward:         2,
     towerKillReward:    15,
@@ -489,6 +499,17 @@ export const GameConfig = {
     arrowArcFactor:     0.28,
     arrowSplash:        24,     // px
     towerSplashBonus:   30,     // extra px added to splash radius when targeting a tower
+    // A bullet/arrow that is shield-blocked (Character.takeDamage block roll)
+    // doesn't vanish — it ricochets back the way it came at a random angle
+    // and falls harmlessly (no further hits), fading out over lifeSec.
+    ricochet: {
+      speedMin:     350,  // px/s
+      speedMax:     550,  // px/s — ~380 px of carry at 45° under this gravity
+      angleMinDeg:  15,   // ° above horizontal, measured back toward the shooter
+      angleMaxDeg:  75,
+      gravity:      800,  // px/s² — matches character gravity
+      lifeSec:      1.1,  // long enough for the steepest/fastest arc to come back down
+    },
   },
 
   ui: {

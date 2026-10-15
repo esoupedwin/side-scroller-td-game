@@ -154,6 +154,10 @@ export interface CharacterConfig {
   // hit entirely (and with it the poison it would have applied).
   blockChance?:  number;
   blockPercent?: number;
+  // Player re-buy lockout for this type after a purchase (seconds of game
+  // time). Unset → economy default (SPAWN_COOLDOWN_SEC). Read via
+  // charSpawnCooldown(); the Character itself never consults it.
+  spawnCooldownSec?: number;
   // Optional UI metadata (spawn button / HUD card) — generic fallbacks apply.
   displayName?: string;
   icon?:        string;
@@ -1981,7 +1985,12 @@ export class Character {
     if (this.legsSprite) this.switchLegsAnimation('idle');
   }
 
-  takeDamage(dmg: number, killer?: Character, poisonTick = false) {
+  /**
+   * Apply a hit. Returns `true` when the hit was shield-blocked (whether or not
+   * any damage got through) so the source can react — a projectile ricochets
+   * off a block instead of vanishing.
+   */
+  takeDamage(dmg: number, killer?: Character, poisonTick = false): boolean {
     // ── Shield block ─────────────────────────────────────────────────────────
     // Character-sourced direct hits only: tower fire has no `killer` and poison
     // ticks stem from an earlier (unblocked) hit. The knockback scale is
@@ -2000,13 +2009,13 @@ export class Character {
       this.pendingDamages.push({ amount: 0, x: this.x, y: this.y - this.config.height - 28, color: BLOCK_LABEL_COLOR, text: 'Blocked' });
       const faceDir = (Math.sign(killer.x - this.x) || this.lastMoveDir) as 1 | -1;
       spawnBlockFlash(this.x, this.y - this.config.height * 0.55, faceDir);
-      if (dmg <= 0) return;  // fully absorbed — no damage, no flinch, no poison
+      if (dmg <= 0) return true;  // fully absorbed — no damage, no flinch, no poison
     }
 
     // Always queue a label event (amount=0 â†' "Missed" in Game.ts). Poison ticks
     // render green so the damage-over-time reads distinctly from a direct hit.
     this.pendingDamages.push({ amount: dmg, x: this.x, y: this.y - this.config.height - 6, color: poisonTick ? CHAR_POISON_COLOR : undefined });
-    if (dmg <= 0) return;  // miss â€” no HP change, no coin drop, no kill
+    if (dmg <= 0) return blocked;  // miss â€” no HP change, no coin drop, no kill
 
     this.hp = Math.max(0, this.hp - dmg);
     this.drawBar();
@@ -2031,6 +2040,7 @@ export class Character {
       // A direct hit from a poison-capable attacker starts (or refreshes) poison.
       this.applyPoisonFrom(killer);
     }
+    return blocked;
   }
 
   /** Whether this character's attacks apply poison — all three poison values set

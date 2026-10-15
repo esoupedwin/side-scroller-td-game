@@ -229,6 +229,7 @@ export const COIN_FRICTION           = economy.coinFriction;
 export const COIN_FRICTION_AIR       = economy.coinFrictionAir;
 export const SURFACE_FRICTION        = economy.surfaceFriction;
 export const COIN_VISUAL_SCALE       = economy.coinVisualScale;
+export const SPAWN_COOLDOWN_SEC      = economy.spawnCooldownSec;
 
 // ── Projectiles ──────────────────────────────────────────────────────────────
 export const BULLET_SPEED        = proj.bulletSpeed;
@@ -240,6 +241,12 @@ export const ARROW_MIN_TIME      = proj.arrowMinTime;
 export const ARROW_ARC_FACTOR    = proj.arrowArcFactor;
 export const ARROW_SPLASH        = proj.arrowSplash;
 export const PROJ_TOWER_SPLASH   = proj.towerSplashBonus;
+export const PROJ_RICOCHET_SPEED_MIN     = proj.ricochet.speedMin;
+export const PROJ_RICOCHET_SPEED_MAX     = proj.ricochet.speedMax;
+export const PROJ_RICOCHET_ANGLE_MIN_DEG = proj.ricochet.angleMinDeg;
+export const PROJ_RICOCHET_ANGLE_MAX_DEG = proj.ricochet.angleMaxDeg;
+export const PROJ_RICOCHET_GRAVITY       = proj.ricochet.gravity;
+export const PROJ_RICOCHET_LIFE_SEC      = proj.ricochet.lifeSec;
 
 // ── UI ───────────────────────────────────────────────────────────────────────
 export const DMG_LABEL_LIFETIME  = ui.damageLabel.lifetimeSec;
@@ -392,6 +399,7 @@ type RawCharCfg = {
   burstCount?: number;
   poisonDamage?: number; poisonTicks?: number; poisonIntervalSec?: number;
   blockChance?: number; blockPercent?: number;
+  spawnCooldownSec?: number;
   displayName?: string; icon?: string; uiColor?: string;
   spriteFolder?: string;   // sprite-only concern — consumed by SpriteRegistry, not CharacterConfig
 };
@@ -417,6 +425,7 @@ function toCharConfig(c: RawCharCfg): CharacterConfig {
     poisonIntervalSec: c.poisonIntervalSec,
     blockChance:       c.blockChance,
     blockPercent:      c.blockPercent,
+    spawnCooldownSec:  c.spawnCooldownSec,
     displayName:       c.displayName,
     icon:              c.icon,
     uiColor:           c.uiColor,
@@ -468,6 +477,12 @@ export function charCost(tribe: Tribe, type: string): number {
   return CHAR_COST_BY_TRIBE[tribe][type]
       ?? CHAR_COST_BY_TRIBE[otherTribe(tribe)][type]
       ?? Infinity;
+}
+
+/** Player re-buy lockout (seconds) for a unit: the block's own
+ *  spawnCooldownSec, else the economy-wide default. */
+export function charSpawnCooldown(tribe: Tribe, type: string): number {
+  return charConfig(tribe, type)?.spawnCooldownSec ?? SPAWN_COOLDOWN_SEC;
 }
 
 // ── Config-driven character UI lookups ───────────────────────────────────────

@@ -42,7 +42,7 @@ import {
   CAMERA_TOWER_BOTTOM_GAP, TEXTURE_GC_IDLE_SEC, CPU_SPRITE_RETRY_MS,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
-  charConfig, charCost,
+  charConfig, charCost, charSpawnCooldown,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
   GRENADE_KNOCKBACK_MAX_VX, GRENADE_KNOCKBACK_MAX_VY, GRENADE_KNOCKBACK_DECAY, ATTACK_KNOCKBACK_DECAY,
   ROCKET_FUSE_S, ROCKET_SPLASH_R, ROCKET_GRAVITY, ROCKET_LAUNCH_VX, ROCKET_SPLASH_MIN_FRAC,
@@ -154,6 +154,7 @@ export class Game {
   private powerUpLayer!: PIXI.Container;
   private vfxLayer!:     PIXI.Container;
   private labelLayer!:   PIXI.Container;
+  private ricochetLayer!: PIXI.Container;  // shield-deflected projectiles — above units, labels, and towers
   private afterImageLayer!: PIXI.Container;  // speed-boost ghost trails — renders behind characters
   private frontDecorLayer!: PIXI.Container;  // decor with z >= DECOR_FRONT_Z — renders in front of characters
   private decorObjects:  Decor[]      = [];
@@ -321,6 +322,12 @@ export class Game {
   private coinBoxVisual: PIXI.Container | null = null;
   private isOver           = false;
   private isPaused         = false;
+
+  // ── Player purchase cooldowns ─────────────────────────────────────────────
+  // type → game-time (elapsedSeconds) at which the card unlocks, and the
+  // length of that lockout so the card can draw a 0→1 recharge sweep.
+  private playerSpawnReadyAt    = new Map<string, number>();
+  private playerSpawnCooldownLen = new Map<string, number>();
 
   // ── Match statistics (surfaced on the game-over screen) ──────────────────
   // Every enemy-side death counts as a player kill (all damage an enemy unit
@@ -635,6 +642,10 @@ export class Game {
     this.enemyTower  = new Tower('enemy',  m.enemyTowerX,  m.enemyTowerY  ?? this.mapGroundY, getEnemyTribe());
     this.world.addChild(this.playerTower.container);
     this.world.addChild(this.enemyTower.container);
+    // Ricochets sit above everything in play (including the towers, which are
+    // added after the labels) so a deflected shot is never hidden mid-flight.
+    this.ricochetLayer = new PIXI.Container();
+    this.world.addChild(this.ricochetLayer);
     const towerTop = this.mapGroundY - TOWER_HEIGHT;
     this.playerTowerAABB = {
       left:  m.playerTowerX - TOWER_WIDTH / 2,
@@ -893,15 +904,18 @@ export class Game {
 
   // ── Spawn ────────────────────────────────────────────────────────────────────
 
-  /** Returns false if the player cannot afford this unit. */
+  /** Returns false if the player cannot afford this unit or the type is still
+   *  on its purchase cooldown. */
   spawnPlayer(type: CharacterConfig['id']): boolean {
     if (this.isOver) return false;
     const playerTribe = getPlayerTribe();
     const cost = charCost(playerTribe, type);
     if (this.coinBalance < cost) return false;
+    if (this.playerSpawnCooldown(type).remaining > 0) return false;
 
     this.coinBalance -= cost;
     this.notifyCoins();
+    this.armPlayerSpawnCooldown(type);
 
     const config  = withSpawnBoosts(charConfig(playerTribe, type));
     // Offset by half the character body width so the unit's tower-side edge
@@ -914,6 +928,28 @@ export class Game {
     this.hud.add(c);
     this.recordPlayerSpawn(type);
     return true;
+  }
+
+  /** Lock a type's spawn card for its configured cooldown. Keyed on game time
+   *  so the lockout pauses with the match and tracks fast-forward. Called on
+   *  every purchase, and for the whole roster at match start (reset()) so
+   *  every card begins the match recharging. */
+  private armPlayerSpawnCooldown(type: string) {
+    const cooldown = charSpawnCooldown(getPlayerTribe(), type);
+    if (cooldown <= 0) return;
+    this.playerSpawnReadyAt.set(type, this.elapsedSeconds + cooldown);
+    this.playerSpawnCooldownLen.set(type, cooldown);
+  }
+
+  /** Purchase-cooldown state for one of the player's spawn cards: seconds
+   *  left (0 when ready) and the recharge fraction 0→1 for the card's sweep. */
+  playerSpawnCooldown(type: string): { remaining: number; frac: number } {
+    const readyAt = this.playerSpawnReadyAt.get(type);
+    if (readyAt === undefined) return { remaining: 0, frac: 1 };
+    const remaining = Math.max(0, readyAt - this.elapsedSeconds);
+    if (remaining <= 0) { this.playerSpawnReadyAt.delete(type); return { remaining: 0, frac: 1 }; }
+    const len = this.playerSpawnCooldownLen.get(type) ?? remaining;
+    return { remaining, frac: len > 0 ? 1 - remaining / len : 1 };
   }
 
   private recordPlayerSpawn(type: string) {
@@ -2194,6 +2230,9 @@ export class Game {
       p.update(dt, liveChars, this.playerTower, this.enemyTower, this.blockData);
       const impact = p.consumeImpact();
       if (impact) spawnHitSpark(impact.x, impact.y);
+      // A deflected shot is the payoff of a block — lift it to the topmost
+      // world layer so it isn't lost behind the units it bounces through.
+      if (p.consumeRicochetStart()) this.ricochetLayer.addChild(p.container);
       // Startle the sheep when a projectile lands within 55 px of it
       if (wasAlive && p.isDead && this.sheep && Math.abs(p.x - this.sheep.x) <= 55) {
         this.sheep.reactToHit(p.x);
@@ -2282,7 +2321,7 @@ export class Game {
     { let wi = 0;
       for (let ri = 0; ri < this.projectiles.length; ri++) {
         const p = this.projectiles[ri];
-        if (p.isDead) { this.projLayer.removeChild(p.container); p.destroy(); }
+        if (p.isDead) { p.container.parent?.removeChild(p.container); p.destroy(); }  // projLayer, or ricochetLayer after a deflection
         else          { this.projectiles[wi++] = p; }
       }
       this.projectiles.length = wi; }
@@ -3113,6 +3152,12 @@ export class Game {
     this.lastNotifiedPlayerTowerHp = -1;
     this.timeRemaining         = this.mapDurationSec;
     this.lastNotifiedTime      = -1;
+    // Every spawn card starts the match on its own cooldown. Armed at
+    // elapsedSeconds = 0 (timeRemaining was just reset above), and the match
+    // sits paused behind the 3-2-1 countdown, so the clocks start at GO.
+    this.playerSpawnReadyAt.clear();
+    this.playerSpawnCooldownLen.clear();
+    for (const type of TRIBE_ROSTERS[getPlayerTribe()]) this.armPlayerSpawnCooldown(type);
 
     this.notifyCpuCharsMs    = 0;
     this.notifyCpuStrategyMs = 0;

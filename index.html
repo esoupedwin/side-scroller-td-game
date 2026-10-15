@@ -745,6 +745,34 @@
       }
       .spawn-btn:active    { transform: scale(0.95); }
       .spawn-btn:disabled  { opacity: 0.4; cursor: not-allowed; transform: none; }
+      /* Purchase cooldown: the card stays at full opacity but a dark shade
+         drains from the top as --cd goes 0→1 (set by refreshSpawnButtons()),
+         with the seconds left centred on top. Overrides :disabled's fade so
+         "on cooldown" reads differently from "can't afford". */
+      .spawn-btn { position: relative; }
+      .spawn-btn.on-cooldown:disabled { opacity: 1; }
+      .spawn-btn.on-cooldown::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: rgba(20, 16, 32, 0.72);
+        clip-path: inset(0 0 calc(var(--cd, 0) * 100%) 0);
+        transition: clip-path 0.12s linear;
+      }
+      .spawn-btn .spawn-cd {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1;
+        font-size: 30px;
+        font-weight: 900;
+        color: #fff;
+        text-shadow: 0 2px 0 #000, 0 0 10px rgba(0, 0, 0, 0.8);
+        pointer-events: none;
+      }
+      .spawn-btn .spawn-cd:empty { display: none; }
 
       /* ── Game over screen ───────────────────────────────────────────────────── */
       /* z-index 160 keeps the banner readable above the victory confetti

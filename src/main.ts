@@ -81,7 +81,10 @@ function rebuildSpawnButtons() {
     cost.className   = 'btn-cost';
     cost.id          = `${t}-cost`;
     cost.textContent = String(charCost(tribe, t));
-    btn.append(name, portrait, cost);
+    // Purchase-cooldown readout; hidden (:empty) while the card is ready.
+    const cd = document.createElement('span');
+    cd.className = 'spawn-cd';
+    btn.append(name, portrait, cost, cd);
 
     // Card art is optional — the cream emoji card stays until the PNG loads.
     const art = new Image();
@@ -199,6 +202,9 @@ const lastDisabledByBtn = new Map<HTMLButtonElement, boolean>();
 // Last balance seen by handleCoinsChanged — replayed onto freshly (re)built
 // spawn buttons so they start with the correct disabled state.
 let lastKnownCoins = 0;
+// Set right after `new Game(...)` — refreshSpawnButtons() runs from inside the
+// constructor (via handleCoinsChanged) before `game` is assigned.
+let gameConstructed = false;
 
 // Coin box berserk: run the "COINS BERSERK" fly-through (CSS keyframes on
 // #berserk-banner). Re-triggering mid-flight restarts it — the reflow between
@@ -221,6 +227,7 @@ let game = new Game(canvas, hudEl, handleGameOver, handleCoinsChanged, handleCpu
 // Dev builds expose the live Game on `window.game` so the console / browser
 // automation can poke it (cheats, fast-forward, state) without UI plumbing.
 if (import.meta.env.DEV) (window as unknown as { game: Game }).game = game;
+gameConstructed = true;
 
 // ── Tribe power-up: selection persistence + activation button ───────────────
 const TRIBE_PU_KEY = 'coin_tribe_powerup';
@@ -279,7 +286,8 @@ tribePUBtn.addEventListener('click', () => {
 refreshTribePUBtn();
 // 10 Hz poll — smooth enough for the recharge ring sweep (the registered
 // @property --cd transition interpolates between updates), still trivial cost.
-window.setInterval(refreshTribePUBtn, 100);
+// The spawn cards' purchase-cooldown sweep rides the same poll.
+window.setInterval(() => { refreshTribePUBtn(); refreshSpawnButtons(); }, 100);
 
 // Squad-screen picker: one option card per power-up, highlighted selection.
 {
@@ -1530,14 +1538,31 @@ function handleCpuStrategyChanged(info: CpuStrategyInfo) {
 function handleCoinsChanged(coins: number) {
   lastKnownCoins = coins;
   coinAmountEl.textContent = String(coins);
+  refreshSpawnButtons();
+}
 
-  // Disable spawn buttons when game is over OR when there aren't enough coins
+// Spawn cards lock when the game is over, the balance is short, or the type is
+// on its purchase cooldown. Balance changes call this directly; the 10 Hz
+// tribe-power-up poll calls it too so the cooldown countdown and sweep tick
+// without a Game→UI event per frame. `game` is still in its TDZ when the Game
+// constructor fires the first handleCoinsChanged, hence the gameConstructed guard.
+function refreshSpawnButtons() {
   const playerTribe = getPlayerTribe();
   for (const [t, btn] of spawnBtns) {
-    const next = gameOver || coins < charCost(playerTribe, t);
-    if (lastDisabledByBtn.get(btn) === next) continue;
-    btn.disabled = next;
-    lastDisabledByBtn.set(btn, next);
+    const cd = gameConstructed ? game.playerSpawnCooldown(t) : { remaining: 0, frac: 1 };
+    const onCooldown = cd.remaining > 0;
+    const next = gameOver || onCooldown || lastKnownCoins < charCost(playerTribe, t);
+    if (lastDisabledByBtn.get(btn) !== next) {
+      btn.disabled = next;
+      lastDisabledByBtn.set(btn, next);
+    }
+    // Countdown text + recharge sweep. Writes are guarded so a ready card
+    // costs nothing per poll.
+    const label = onCooldown ? `${Math.ceil(cd.remaining)}s` : '';
+    const cdEl  = btn.querySelector<HTMLElement>('.spawn-cd');
+    if (cdEl && cdEl.textContent !== label) cdEl.textContent = label;
+    if (btn.classList.contains('on-cooldown') !== onCooldown) btn.classList.toggle('on-cooldown', onCooldown);
+    if (onCooldown) btn.style.setProperty('--cd', cd.frac.toFixed(3));
   }
 }
 

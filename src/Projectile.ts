@@ -4,7 +4,10 @@ import {
   BULLET_SPEED, BULLET_MIN_TIME, BULLET_ARC_FACTOR, BULLET_SPLASH,
   ARROW_SPEED, ARROW_MIN_TIME, ARROW_ARC_FACTOR, ARROW_SPLASH,
   PROJ_TOWER_SPLASH,
-  ATTACK_KNOCKBACK_VY, ATTACK_KNOCKBACK_DECAY,
+  PROJ_RICOCHET_SPEED_MIN, PROJ_RICOCHET_SPEED_MAX,
+  PROJ_RICOCHET_ANGLE_MIN_DEG, PROJ_RICOCHET_ANGLE_MAX_DEG,
+  PROJ_RICOCHET_GRAVITY, PROJ_RICOCHET_LIFE_SEC,
+  ATTACK_KNOCKBACK_VY, ATTACK_KNOCKBACK_DECAY, GROUND_Y,
 } from './constants';
 import type { Character } from './Character';
 import type { Tower, Side } from './Tower';
@@ -40,6 +43,14 @@ export class Projectile {
   // Game.ts after each update() call so the VFX layer (which Projectile must
   // not know about directly) can spawn a hit spark at the impact point.
   private pendingImpact: { x: number; y: number } | null = null;
+
+  // Set when a shield block deflected this projectile. From then on it is a
+  // harmless free-flight body (velocity + gravity) that fades out over
+  // PROJ_RICOCHET_LIFE_SEC — no further character/tower hits.
+  private ricochet: { vx: number; vy: number; age: number } | null = null;
+  // One-shot flag drained by Game.ts right after a deflection so it can lift
+  // the container out of the projectile layer and draw it above everything.
+  private ricochetJustStarted = false;
 
   constructor(
     side:   Side,
@@ -161,6 +172,8 @@ export class Projectile {
       this.flash = null;
     }
 
+    if (this.ricochet) { this.updateRicochet(dt, blocks); return; }
+
     this.elapsed += dt;
     const t = Math.min(this.elapsed / this.travelTime, 1);
 
@@ -191,10 +204,7 @@ export class Projectile {
       if (this.x > c.x + c.config.width / 2)  continue;
       if (this.y > c.y)                       continue;  // below feet
       if (this.y < c.y - c.collisionHeight)   continue;  // above head
-      c.takeDamage(this.damage, this.shooter ?? undefined);
-      this.applyKnockback(c, dt);
-      this.pendingImpact = { x: c.x, y: c.y - c.config.height * 0.5 };
-      this.isDead = true;
+      this.hitCharacter(c, dt);
       return;
     }
 
@@ -211,25 +221,81 @@ export class Projectile {
   }
 
   private land(characters: Character[], playerTower: Tower, enemyTower: Tower, dt: number) {
-    this.isDead = true;
     const targetTower = this.side === 'player' ? enemyTower : playerTower;
 
     const splash = this.kind === 'bullet' ? BULLET_SPLASH : ARROW_SPLASH;
-    let hitChar = false;
     for (const c of characters) {
       if (c.isDead || c.side === this.side) continue;
       if (Math.abs(c.x - this.tx) <= splash) {
-        c.takeDamage(this.damage, this.shooter ?? undefined);
-        this.applyKnockback(c, dt);
-        this.pendingImpact = { x: c.x, y: c.y - c.config.height * 0.5 };
-        hitChar = true;
-        break;
+        this.hitCharacter(c, dt);
+        return;
       }
     }
 
-    if (!hitChar && Math.abs(this.tx - targetTower.frontX) <= splash + PROJ_TOWER_SPLASH) {
+    this.isDead = true;
+    if (Math.abs(this.tx - targetTower.frontX) <= splash + PROJ_TOWER_SPLASH) {
       targetTower.takeDamage(this.damage);
     }
+  }
+
+  /**
+   * Resolve a hit on `c`: damage + knockback + hit spark. A shield-blocked hit
+   * deflects the projectile (see startRicochet) instead of ending it.
+   */
+  private hitCharacter(c: Character, dt: number) {
+    const blocked = c.takeDamage(this.damage, this.shooter ?? undefined);
+    this.applyKnockback(c, dt);
+    this.pendingImpact = { x: c.x, y: c.y - c.config.height * 0.5 };
+    if (blocked) this.startRicochet(c);
+    else         this.isDead = true;
+  }
+
+  /**
+   * Bounce back off a shield: a random speed within the ricochet range, at a
+   * random angle above horizontal, heading back toward where the shot came
+   * from. The deflected projectile is purely visual from here on.
+   */
+  private startRicochet(blocker: Character) {
+    const back  = -(Math.sign(this.tx - this.sx) || (this.side === 'player' ? 1 : -1));
+    const speed = PROJ_RICOCHET_SPEED_MIN + Math.random() * (PROJ_RICOCHET_SPEED_MAX - PROJ_RICOCHET_SPEED_MIN);
+    const deg   = PROJ_RICOCHET_ANGLE_MIN_DEG + Math.random() * (PROJ_RICOCHET_ANGLE_MAX_DEG - PROJ_RICOCHET_ANGLE_MIN_DEG);
+    const rad   = deg * Math.PI / 180;
+    // Start just outside the blocker's guard so the first ricochet frame isn't
+    // drawn inside the shield.
+    this.x = blocker.x + back * (blocker.config.width / 2 + 4);
+    this.ricochet = { vx: back * Math.cos(rad) * speed, vy: -Math.sin(rad) * speed, age: 0 };
+    this.ricochetJustStarted = true;
+  }
+
+  /** True exactly once, on the tick a shield deflected this projectile. */
+  consumeRicochetStart(): boolean {
+    const r = this.ricochetJustStarted;
+    this.ricochetJustStarted = false;
+    return r;
+  }
+
+  private updateRicochet(dt: number, blocks: BlockData[]) {
+    const r = this.ricochet!;
+    r.age += dt;
+    if (r.age >= PROJ_RICOCHET_LIFE_SEC) { this.isDead = true; return; }
+
+    r.vy   += PROJ_RICOCHET_GRAVITY * dt;
+    this.x += r.vx * dt;
+    this.y += r.vy * dt;
+
+    if (this.y >= GROUND_Y) { this.isDead = true; return; }
+    for (const b of blocks) {
+      if (this.x >= b.x && this.x <= b.x + b.width &&
+          this.y >= b.y && this.y <= b.y + b.height) {
+        this.isDead = true;
+        return;
+      }
+    }
+
+    if (this.kind !== 'bullet') this.gfx.rotation = Math.atan2(r.vy, r.vx);
+    this.container.alpha = 1 - r.age / PROJ_RICOCHET_LIFE_SEC;
+    this.container.x = this.x;
+    this.container.y = this.y;
   }
 
   /**
