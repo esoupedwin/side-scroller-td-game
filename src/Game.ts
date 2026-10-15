@@ -323,11 +323,13 @@ export class Game {
   private isOver           = false;
   private isPaused         = false;
 
-  // ── Player purchase cooldowns ─────────────────────────────────────────────
-  // type → game-time (elapsedSeconds) at which the card unlocks, and the
-  // length of that lockout so the card can draw a 0→1 recharge sweep.
-  private playerSpawnReadyAt    = new Map<string, number>();
-  private playerSpawnCooldownLen = new Map<string, number>();
+  // ── Purchase cooldowns (both sides) ───────────────────────────────────────
+  // Per side: type → game-time (elapsedSeconds) at which the type can be
+  // bought again, and the length of that lockout so the player's card can
+  // draw a 0→1 recharge sweep. Armed on every buy (spawnPlayer / spawnCpuUnit)
+  // and for both rosters at match start.
+  private spawnReadyAt     = { player: new Map<string, number>(), enemy: new Map<string, number>() };
+  private spawnCooldownLen = { player: new Map<string, number>(), enemy: new Map<string, number>() };
 
   // ── Match statistics (surfaced on the game-over screen) ──────────────────
   // Every enemy-side death counts as a player kill (all damage an enemy unit
@@ -911,12 +913,12 @@ export class Game {
     const playerTribe = getPlayerTribe();
     const cost = charCost(playerTribe, type);
     if (this.coinBalance < cost) return false;
-    if (this.playerSpawnCooldown(type).remaining > 0) return false;
+    if (this.spawnCooldown('player', type).remaining > 0) return false;
     if (this.isUniqueDeployed('player', type)) return false;
 
     this.coinBalance -= cost;
     this.notifyCoins();
-    this.armPlayerSpawnCooldown(type);
+    this.armSpawnCooldown('player', type);
 
     const config  = withSpawnBoosts(charConfig(playerTribe, type));
     // Offset by half the character body width so the unit's tower-side edge
@@ -938,26 +940,31 @@ export class Game {
     return this.characters.some(c => c.side === side && !c.isDead && c.config.id === type);
   }
 
-  /** Lock a type's spawn card for its configured cooldown. Keyed on game time
+  /** Lock a type for `side` for its configured cooldown. Keyed on game time
    *  so the lockout pauses with the match and tracks fast-forward. Called on
-   *  every purchase, and for the whole roster at match start (reset()) so
-   *  every card begins the match recharging. */
-  private armPlayerSpawnCooldown(type: string) {
-    const cooldown = charSpawnCooldown(getPlayerTribe(), type);
+   *  every purchase (either side), and for both rosters at match start
+   *  (reset()) so every type begins the match recharging. */
+  private armSpawnCooldown(side: 'player' | 'enemy', type: string) {
+    const cooldown = charSpawnCooldown(tribeForSide(side), type);
     if (cooldown <= 0) return;
-    this.playerSpawnReadyAt.set(type, this.elapsedSeconds + cooldown);
-    this.playerSpawnCooldownLen.set(type, cooldown);
+    this.spawnReadyAt[side].set(type, this.elapsedSeconds + cooldown);
+    this.spawnCooldownLen[side].set(type, cooldown);
   }
 
-  /** Purchase-cooldown state for one of the player's spawn cards: seconds
-   *  left (0 when ready) and the recharge fraction 0→1 for the card's sweep. */
-  playerSpawnCooldown(type: string): { remaining: number; frac: number } {
-    const readyAt = this.playerSpawnReadyAt.get(type);
+  /** Purchase-cooldown state of a type for `side`: seconds left (0 when
+   *  ready) and the recharge fraction 0→1 (drives the player card's sweep). */
+  spawnCooldown(side: 'player' | 'enemy', type: string): { remaining: number; frac: number } {
+    const readyAt = this.spawnReadyAt[side].get(type);
     if (readyAt === undefined) return { remaining: 0, frac: 1 };
     const remaining = Math.max(0, readyAt - this.elapsedSeconds);
-    if (remaining <= 0) { this.playerSpawnReadyAt.delete(type); return { remaining: 0, frac: 1 }; }
-    const len = this.playerSpawnCooldownLen.get(type) ?? remaining;
+    if (remaining <= 0) { this.spawnReadyAt[side].delete(type); return { remaining: 0, frac: 1 }; }
+    const len = this.spawnCooldownLen[side].get(type) ?? remaining;
     return { remaining, frac: len > 0 ? 1 - remaining / len : 1 };
+  }
+
+  /** Player-card convenience for the spawn bar (main.ts). */
+  playerSpawnCooldown(type: string): { remaining: number; frac: number } {
+    return this.spawnCooldown('player', type);
   }
 
   private recordPlayerSpawn(type: string) {
@@ -1441,10 +1448,12 @@ export class Game {
       * (diversity ? Math.max(0.4, 1 - CPU_VAL_SAME_TYPE_PENALTY * (ownCount.get(type) ?? 0)) : 1);
 
     const order: { type: CharacterConfig['id']; cost: number; score: number }[] = [];
+    let lockedOut = 0;   // roster types skipped only because of a purchase cooldown
     for (const type of TRIBE_ROSTERS[cpuTribe]) {
       const p = Game.unitProfile(cpuTribe, type);
       if (!p.canFight || !Number.isFinite(p.cost)) continue; // skip support / unpriced types
       if (this.isUniqueDeployed(self, type)) continue;       // special character already on the field
+      if (this.spawnCooldown(self, type).remaining > 0) { lockedOut++; continue; }  // same per-type cooldown the player has
       order.push({ type: type as CharacterConfig['id'], cost: p.cost, score: stanceScore(p) * shape(type, p) });
     }
     order.sort((a, b) => b.score - a.score);
@@ -1465,9 +1474,14 @@ export class Game {
     }
     if (self === 'enemy') {
       const needCost = order.reduce((m, o) => Math.min(m, o.cost), Infinity);
-      this.cpuStrategyInfo.decision = `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
+      this.cpuStrategyInfo.decision = order.length === 0 && lockedOut > 0
+        ? `Waiting — ${lockedOut} type${lockedOut === 1 ? '' : 's'} on purchase cooldown`
+        : `Saving — need ${needCost} (have ${Math.floor(this.cpuCoinBalance)})`;
     }
-    this.resetSpawnTimer(self, pressure);
+    // Everything affordable is cooling down: re-check soon rather than parking
+    // the purse for a full 7–15 s timer tick.
+    if (order.length === 0 && lockedOut > 0 && this.cpuFeatures[self].has('tempo')) this.setSpawnInterval(self, CPU_SPEND_DOWN_GAP_MS);
+    else this.resetSpawnTimer(self, pressure);
   }
 
   /** The tribe's best collector: the roster unit with the most move speed per
@@ -1518,6 +1532,7 @@ export class Game {
     const cost  = charCost(tribe, type);
     const balance = self === 'enemy' ? this.cpuCoinBalance : this.coinBalance;
     if (balance < cost) return false;    // let the stance order try its fillers
+    if (this.spawnCooldown(self, type).remaining > 0) return false;   // runner type cooling down — same deal
     if (this.spriteSetPending(self, tribe, type)) return true;
     if (self === 'enemy') this.cpuCoinBalance -= cost;
     else { this.coinBalance -= cost; this.notifyCoins(); }
@@ -1606,6 +1621,9 @@ export class Game {
     const c = new Character(self, cpuSpawnX, spawnY, cpuConfig, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide(self), type), this.mapGroundY);
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
+    // Every CPU buy (stance order, runner, dev forced type) goes through here,
+    // so this is where the side's per-type purchase cooldown is armed.
+    this.armSpawnCooldown(self, type);
     if (self === 'player') {
       this.hud.add(c);
       this.recordPlayerSpawn(type);   // CPU-vs-CPU mode drives the player side
@@ -3161,12 +3179,14 @@ export class Game {
     this.lastNotifiedPlayerTowerHp = -1;
     this.timeRemaining         = this.mapDurationSec;
     this.lastNotifiedTime      = -1;
-    // Every spawn card starts the match on its own cooldown. Armed at
+    // Every type on both sides starts the match on its own cooldown. Armed at
     // elapsedSeconds = 0 (timeRemaining was just reset above), and the match
     // sits paused behind the 3-2-1 countdown, so the clocks start at GO.
-    this.playerSpawnReadyAt.clear();
-    this.playerSpawnCooldownLen.clear();
-    for (const type of TRIBE_ROSTERS[getPlayerTribe()]) this.armPlayerSpawnCooldown(type);
+    for (const side of ['player', 'enemy'] as const) {
+      this.spawnReadyAt[side].clear();
+      this.spawnCooldownLen[side].clear();
+      for (const type of TRIBE_ROSTERS[tribeForSide(side)]) this.armSpawnCooldown(side, type);
+    }
 
     this.notifyCpuCharsMs    = 0;
     this.notifyCpuStrategyMs = 0;

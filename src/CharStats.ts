@@ -1,4 +1,4 @@
-import { charConfig, charCost, charDisplayName, charIcon, charUiColor } from './constants';
+import { charConfig, charCost, charDisplayName, charIcon, charUiColor, charSpawnCooldown, charIsUnique } from './constants';
 import type { Tribe } from './Tribes';
 import type { AttackStyle } from './gameConfig';
 
@@ -37,6 +37,8 @@ export interface CharStatSheet {
   color:       string;
   cost:        number;
   role:        string;
+  /** Special character — one living instance per side (config `unique`). */
+  special:     boolean;
   bars:        StatBar[];
   /** Secondary numeric rows (accuracy, fire rate, knockback…). */
   rows:        { label: string; value: string }[];
@@ -101,8 +103,14 @@ export function charStatSheet(tribe: Tribe, type: string, scale: StatScale): Cha
     { label: 'Accuracy',     value: `${Math.round((1 - cfg.critical) * 100)}%` },
   ];
   if (cfg.knockback > 0) rows.push({ label: 'Knockback', value: `${cfg.knockback}` });
+  // Purchase cooldown: how long the spawn card locks after each buy (and at
+  // match start). Shown for every type so the player can compare.
+  const cooldown = charSpawnCooldown(tribe, type);
+  rows.push({ label: 'Purchase cooldown', value: cooldown > 0 ? `${round1(cooldown)}s` : 'None' });
 
+  const special = charIsUnique(tribe, type);
   const traits: string[] = [];
+  if (special) traits.push('★ Special — only one on the field at a time');
   if ((cfg.burstCount ?? 1) > 1) traits.push(`🔁 ${cfg.burstCount}-round burst`);
   if ((cfg.shotsBeforeCooldown ?? 0) > 0 && (cfg.cooldownSec ?? 0) > 0)
     traits.push(`🧰 ${cfg.shotsBeforeCooldown} shots, ${round1(cfg.cooldownSec!)}s reload`);
@@ -121,6 +129,7 @@ export function charStatSheet(tribe: Tribe, type: string, scale: StatScale): Cha
     color: charUiColor(tribe, type),
     cost:  charCost(tribe, type),
     role:  STYLE_LABEL[cfg.attackStyle] ?? cfg.attackStyle,
+    special,
     bars, rows, traits,
   };
 }

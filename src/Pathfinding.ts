@@ -380,9 +380,14 @@ export class NavGraph {
             jumpTriggerX = actualLandX + hDist;
           }
         } else {
-          // One-way platform: characters can walk under it, so trigger directly
-          // below the intended landing spot.
-          jumpTriggerX = approachFromLeft ? landX - hDist : landX + hDist;
+          // One-way platform: characters can walk under it, and air steering
+          // (Character.syncToBody) parks the jumper over landX once it gets
+          // there, so ANY takeoff within the arc's horizontal reach lands on
+          // the spot. Take off from the point nearest to where the character
+          // already is. The old fixed full-arc lead (landX ∓ hDist) usually
+          // sat behind the character or past the platform's end, so units
+          // walked to the edge of their platform before jumping.
+          jumpTriggerX = Math.max(landX - hDist, Math.min(landX + hDist, curX));
         }
 
         // Clamp the trigger to the source surface's x-span so the character

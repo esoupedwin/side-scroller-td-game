@@ -1015,6 +1015,15 @@
         margin: 1px 0 9px;
         font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase;
         color: #8aa0b6;
+        display: flex; align-items: center; gap: 7px;
+      }
+      /* "★ Special" — one-on-the-field character (config `unique`). */
+      .ls-special-tag {
+        font-size: 10px; font-weight: 800; letter-spacing: 0.08em;
+        padding: 2px 7px; border-radius: 999px;
+        background: rgba(255, 209, 102, 0.16);
+        border: 1px solid rgba(255, 209, 102, 0.55);
+        color: #ffd166;
       }
       .ls-bar-row { margin-bottom: 7px; }
       .ls-bar-top {
@@ -1045,6 +1054,11 @@
         background: rgba(127, 212, 255, 0.12);
         border: 1px solid rgba(127, 212, 255, 0.3);
         color: #cfe2ff;
+      }
+      .ls-trait.special {
+        background: rgba(255, 209, 102, 0.14);
+        border-color: rgba(255, 209, 102, 0.5);
+        color: #ffe3a3;
       }
       .lo-hint {
         margin: -4px 0 0; text-align: center;

@@ -2336,6 +2336,16 @@ export class Character {
     }
     if (this.isAirborne) {
       const xBefore = this.x;
+      // Air steering for planned jumps: once the arc has carried the character
+      // over the step's landing x, stop drifting and let gravity set it down
+      // there. Lets the planner take off from wherever the character stands
+      // (within arc reach) instead of a fixed full-arc lead. Random / evasive
+      // jumps have no active jump step and keep their ballistic drift.
+      const step = this.path[this.pathIdx];
+      if (step?.action === 'jump' && this.jumpVx !== 0) {
+        const rem = step.targetX - this.x;
+        if (Math.abs(rem) <= Math.abs(this.jumpVx) * dt) { this.x = step.targetX; this.jumpVx = 0; }
+      }
       this.x += this.jumpVx * dt;
       // Enforce tower faces while airborne (clamp in update() runs before syncToBody).
       if (this.x < this.boundL) { this.x = this.boundL; this.jumpVx = 0; }

@@ -173,18 +173,21 @@ export const GameConfig = {
         hp:          130, speed: 85, attackRange: 190, attackPower: 20,
         fireRate:    0.7, cost: 90, critical: 0.10, knockback: 350,
         shotsBeforeCooldown: 3, cooldownSec: 2,  // 3 blasts, then a 2 s reload
+        spawnCooldownSec: 20
       },
       grenadier: {
         id:          'grenadier' as const,
         attackStyle: 'grenade' as const, icon: '💣', uiColor: '#6b7a2a',
         hp:          110, speed: 65, attackRange: 280, attackPower: 55,
         fireRate:    2, cost: 90, critical: 0.08, knockback: 0,
+        spawnCooldownSec: 50
       },
       rocketeer: {
         id:          'rocketeer' as const,
         attackStyle: 'rocket' as const, icon: '🚀', uiColor: '#cc4400',
         hp:          120, speed: 68, attackRange: 260, attackPower: 70,
         fireRate:    3.5, cost: 120, critical: 0.06, knockback: 0,
+        spawnCooldownSec: 70
       },
       pirateking: {
         id:          'pirateking' as const,
@@ -237,6 +240,7 @@ export const GameConfig = {
         hp:          70, speed: 50, attackRange: 532, attackPower: 35,
         fireRate:    3.1, cost: 100, critical: 0.05, knockback: 0,
         spriteFolder: 'Sniper',  // asset folder is capitalised on disk
+        spawnCooldownSec: 40
       },
       knight: {
         id:          'knight' as const,
@@ -251,6 +255,7 @@ export const GameConfig = {
         attackStyle: 'grenade' as const, icon: '💣', uiColor: '#6b7a2a',
         hp:          80, speed: 65, attackRange: 280, attackPower: 55,
         fireRate:    2, cost: 90, critical: 0.08, knockback: 0,
+        spawnCooldownSec: 50
       },
       rocketeer: {
         id:          'rocketeer' as const,
@@ -458,10 +463,10 @@ export const GameConfig = {
   economy: {
     startingCoins:      150,
     passiveIncomeRate:  0.8,
-    // After the player buys a unit, that type's spawn card locks for this long
+    // After a side buys a unit, that type locks for this long for that side
     // (game time — pauses with the match). A character block can override it
-    // with its own spawnCooldownSec. Player-side only; the CPU is paced by
-    // its own spawn timer.
+    // with its own spawnCooldownSec. Applies to the player's spawn cards AND
+    // the CPU's buy order (Game.spawnCpu skips cooling types).
     spawnCooldownSec:   10,
     coinValue:          30,
     killReward:         2,

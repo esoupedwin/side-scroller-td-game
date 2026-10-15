@@ -401,16 +401,19 @@ function renderStatSheet(tribe: Tribe, type: string) {
     </div>`).join('');
   const rows = sheet.rows.map(r =>
     `<div class="ls-row"><span>${escHtml(r.label)}</span><b>${escHtml(r.value)}</b></div>`).join('');
+  // The "★ Special" trait is the first entry when present; it gets the gold
+  // treatment so it reads as a class of unit rather than a weapon quirk.
   const traits = sheet.traits.length
-    ? `<div class="ls-traits">${sheet.traits.map(t => `<span class="ls-trait">${escHtml(t)}</span>`).join('')}</div>`
+    ? `<div class="ls-traits">${sheet.traits.map(t => `<span class="ls-trait${t.startsWith('★') ? ' special' : ''}">${escHtml(t)}</span>`).join('')}</div>`
     : '';
+  const specialTag = sheet.special ? '<span class="ls-special-tag">★ Special</span>' : '';
   loadoutStats.innerHTML = `
     <div class="ls-head">
       <span class="ls-icon">${escHtml(sheet.icon)}</span>
       <span class="ls-name" style="color:${sheet.color}">${escHtml(sheet.name)}</span>
       <span class="ls-cost">🪙 ${sheet.cost}</span>
     </div>
-    <div class="ls-role">${escHtml(sheet.role)}</div>
+    <div class="ls-role">${escHtml(sheet.role)}${specialTag}</div>
     ${bars}
     <div class="ls-rows">${rows}</div>
     ${traits}`;
