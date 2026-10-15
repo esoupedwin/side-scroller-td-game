@@ -3,6 +3,7 @@ import { loadFittedTexture } from './SkinTextures';
 import {
   TOWER_WIDTH, TOWER_HEIGHT, TOWER_HP,
   TOWER_ATTACK_RANGE, TOWER_ATTACK_POWER, TOWER_FIRE_RATE,
+  TOWER_HIT_SHAKE_SEC, TOWER_HIT_SHAKE_AMP, TOWER_HIT_SHAKE_HZ,
   PLAYER_COLOR, ENEMY_COLOR,
 } from './constants';
 import type { Character } from './Character';
@@ -31,11 +32,18 @@ export class Tower {
   private bar:               PIXI.Graphics;
   private hpText:            PIXI.Text;
   private body:              PIXI.Graphics;
+  // Tower art (Graphics body + skin sprite) lives in its own sub-container so
+  // the hit shake can jolt the building without dragging the HP bar along.
+  private readonly art:      PIXI.Container;
+  private shakeTimer = 0;   // seconds of hit shake left (0 = still)
+  private shakePhase = 0;
   private lastDrawnTowerRatio = -1;
 
-  // HP bar dimensions — 1.4× height, 1.2× width relative to the original design
-  private static readonly BAR_H = Math.round(10 * 1.4);                   // 14 px
-  private static readonly BAR_W = Math.round((TOWER_WIDTH + 8) * 1.8);    // ~158 px
+  // HP bar dimensions — 1.4× height, 1.2× width relative to the original
+  // design, then the whole bar (and its label) scaled up another 40 %.
+  private static readonly BAR_SCALE = 1.4;
+  private static readonly BAR_H = Math.round(10 * 1.4 * Tower.BAR_SCALE);                // 20 px
+  private static readonly BAR_W = Math.round((TOWER_WIDTH + 8) * 1.8 * Tower.BAR_SCALE); // ~222 px
 
   /** Resolved rendered skin width (template w or TOWER_WIDTH fallback). */
   private readonly skinW_resolved: number;
@@ -52,6 +60,8 @@ export class Tower {
     this.baseY   = baseY;
     this.centerY = baseY - TOWER_HEIGHT * 0.5;
     this.container = new PIXI.Container();
+    this.art       = new PIXI.Container();
+    this.container.addChild(this.art);
 
     const tpl     = getTowerTemplate(tribe);
     const skinUrl = tpl.skin;
@@ -80,7 +90,7 @@ export class Tower {
 
     this.body.x = cx;
     this.body.y = baseY - TOWER_HEIGHT;
-    this.container.addChild(this.body);
+    this.art.addChild(this.body);
 
     if (skinUrl) {
       const sw   = skinW ?? TOWER_WIDTH;
@@ -99,7 +109,7 @@ export class Tower {
           sprite.width  = sw;
           sprite.height = sh;
           if (flip) sprite.scale.x = -sprite.scale.x;
-          this.container.addChildAt(sprite, 0);
+          this.art.addChildAt(sprite, 0);
         })
         .catch(() => { /* keep Graphics body */ });
     }
@@ -118,7 +128,7 @@ export class Tower {
 
     // HP numeric overlay
     this.hpText = new PIXI.Text('', {
-      fontSize: 13,
+      fontSize: Math.round(13 * Tower.BAR_SCALE),   // 18 px — keeps the label proportional to the bar
       fill: 0xffffff,
       fontWeight: 'bold',
       stroke: 0x000000,
@@ -182,6 +192,22 @@ export class Tower {
   takeDamage(dmg: number) {
     this.hp = Math.max(0, this.hp - dmg);
     this.drawBar();
+    // Jolt the building. Restarting (not extending) keeps a sustained
+    // barrage reading as a continuous rattle at full amplitude.
+    if (dmg > 0 && this.hp > 0) this.shakeTimer = TOWER_HIT_SHAKE_SEC;
+  }
+
+  /** Call each tick: drives the hit-shake offset on the tower art (not the
+   *  HP bar) and settles it back to rest when the shake runs out. */
+  tickShake(dt: number) {
+    if (this.shakeTimer <= 0) return;
+    this.shakeTimer = Math.max(0, this.shakeTimer - dt);
+    if (this.shakeTimer === 0) { this.art.x = 0; this.art.y = 0; this.shakePhase = 0; return; }
+    this.shakePhase += dt;
+    const falloff = this.shakeTimer / TOWER_HIT_SHAKE_SEC;      // 1 → 0 over the shake
+    const w       = this.shakePhase * Math.PI * 2 * TOWER_HIT_SHAKE_HZ;
+    this.art.x = Math.sin(w) * TOWER_HIT_SHAKE_AMP * falloff;
+    this.art.y = Math.cos(w * 1.31) * TOWER_HIT_SHAKE_AMP * 0.35 * falloff;
   }
 
   get isDead() { return this.hp <= 0; }

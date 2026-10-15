@@ -2195,7 +2195,10 @@ export class Game {
       });
     }
 
-    // Tower fire — inline both branches; no per-tick closure or object spread.
+    // Tower hit shake (visual only) + tower fire — inline both branches; no
+    // per-tick closure or object spread.
+    this.playerTower.tickShake(dt);
+    this.enemyTower.tickShake(dt);
     const shotP = this.playerTower.tryFire(dt, this.enemyLive);
     if (shotP) this.fireProjectile({
       sx: shotP.sx, sy: shotP.sy, tx: shotP.tx, ty: shotP.ty, damage: shotP.damage,

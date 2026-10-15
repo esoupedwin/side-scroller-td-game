@@ -29,6 +29,12 @@ export const GameConfig = {
     attackRange: 300,   // px — horizontal range of tower fire
     attackPower: 40,    // damage per projectile
     fireRate:    1.0,   // seconds between shots
+    // Hit feedback (Tower.tickShake): every hit sets the tower art vibrating
+    // for hitShakeSec, amplitude decaying to zero over that time. The HP bar
+    // stays still. A hit mid-shake restarts the timer at full amplitude.
+    hitShakeSec: 0.3,   // s
+    hitShakeAmp: 5,     // px — peak horizontal amplitude
+    hitShakeHz:  26,    // vibration frequency
   },
 
   characters: {

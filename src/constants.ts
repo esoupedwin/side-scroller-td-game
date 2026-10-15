@@ -113,6 +113,9 @@ export const TOWER_HP           = towers.hp;
 export const TOWER_ATTACK_RANGE = towers.attackRange;
 export const TOWER_ATTACK_POWER = towers.attackPower;
 export const TOWER_FIRE_RATE    = towers.fireRate;
+export const TOWER_HIT_SHAKE_SEC = towers.hitShakeSec;
+export const TOWER_HIT_SHAKE_AMP = towers.hitShakeAmp;
+export const TOWER_HIT_SHAKE_HZ  = towers.hitShakeHz;
 
 export const PLAYER_TOWER_X = towers.playerX;
 export const ENEMY_TOWER_X  = towers.enemyX;
