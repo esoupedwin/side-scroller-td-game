@@ -283,6 +283,8 @@ export class Game {
   private hoverBox:  PIXI.Graphics | null = null;   // built with the scene in build()
   private hoverChar: Character | null = null;
   private pointerClient: { x: number; y: number } | null = null;   // null while the pointer is off the canvas
+  private canvasRectCache: { rect: DOMRect; at: number } | null = null;   // tickHover's rect, refreshed ≤ 4×/s
+  private readonly scratchPt = new PIXI.Point();
   private baseTimeScale = 1;   // what setTimeScale() asked for; the ring's slow-mo composes on top
 
   private readonly onPointerDown = (e: PointerEvent) => {
@@ -339,11 +341,10 @@ export class Game {
 
   /** Client (CSS px) → world coordinates through the canvas fit scale, the
    *  stage, and the zoomed/scrolled world container. */
-  private clientToWorld(clientX: number, clientY: number): PIXI.Point {
-    const rect = (this.app.view as HTMLCanvasElement).getBoundingClientRect();
+  private clientToWorld(clientX: number, clientY: number, rect = (this.app.view as HTMLCanvasElement).getBoundingClientRect()): PIXI.Point {
     const sx = rect.width  > 0 ? (clientX - rect.left) * VIEWPORT_WIDTH  / rect.width  : 0;
     const sy = rect.height > 0 ? (clientY - rect.top)  * VIEWPORT_HEIGHT / rect.height : 0;
-    return this.world.toLocal(new PIXI.Point(sx, sy));
+    return this.world.toLocal(this.scratchPt.set(sx, sy), undefined, this.scratchPt);
   }
 
   /** The live player unit whose drawn art (visualBounds, plus CHAR_CMD_HIT_SLOP)
@@ -390,7 +391,12 @@ export class Game {
     const canvas = this.app.view as HTMLCanvasElement;
     let hover: Character | null = null;
     if (this.pointerClient && !this.isDragging && !this.isOver) {
-      const w = this.clientToWorld(this.pointerClient.x, this.pointerClient.y);
+      // getBoundingClientRect() forces a synchronous layout whenever the HUD has
+      // dirtied the DOM — not something to do 60×/s. The canvas only moves on a
+      // resize, so a rect a quarter-second old is as good as a fresh one.
+      const now = performance.now();
+      if (!this.canvasRectCache || now - this.canvasRectCache.at > 250) this.canvasRectCache = { rect: canvas.getBoundingClientRect(), at: now };
+      const w = this.clientToWorld(this.pointerClient.x, this.pointerClient.y, this.canvasRectCache.rect);
       hover = this.playerCharAt(w.x, w.y);
       if (hover === this.cmdChar) hover = null;
     }

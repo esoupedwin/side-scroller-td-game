@@ -1,27 +1,35 @@
 import * as PIXI from 'pixi.js';
-import { DMG_LABEL_LIFETIME, DMG_LABEL_RISE, DMG_LABEL_FONT_SIZE, DMG_LABEL_STROKE } from './constants';
+import { DMG_LABEL_LIFETIME, DMG_LABEL_RISE, DMG_LABEL_FONT_SIZE, DMG_LABEL_STROKE, GAME_ZOOM } from './constants';
+import { getRenderScale } from './resolution';
 
-// Per-color TextStyle cache. Each PIXI.Text otherwise wraps its inline style
-// object in a fresh TextStyle and re-resolves font metrics on construction;
-// sharing a cached style across labels of the same color elides that work
-// and the inline object allocation per label. There are typically only
-// 3 colors in flight (player, enemy, miss-grey).
-const TEXT_STYLE_CACHE = new Map<number, PIXI.TextStyle>();
-function getDamageStyle(color: number): PIXI.TextStyle {
-  let s = TEXT_STYLE_CACHE.get(color);
-  if (!s) {
-    s = new PIXI.TextStyle({
-      fontSize:        DMG_LABEL_FONT_SIZE,
-      fontWeight:      'bold',
-      fontFamily:      'Segoe UI, sans-serif',
-      fill:            color,
-      stroke:          0x000000,
-      strokeThickness: DMG_LABEL_STROKE,
-      dropShadow:      false,
-    });
-    TEXT_STYLE_CACHE.set(color, s);
-  }
-  return s;
+// Damage numbers are BitmapText, not PIXI.Text. A PIXI.Text rasterises its
+// string onto a fresh canvas and uploads it as a new GPU texture on first
+// render, then frees both about a second later — once per hit. In a busy
+// fight that is tens of canvas draws, texImage2D uploads and texture destroys
+// per second, visible in profiles as texture churn and GC. A bitmap font
+// rasterises each glyph once; every label after that is a few quads from the
+// shared atlas, and its colour is a per-label tint.
+const FONT_NAME = 'coin-damage';
+let fontReady = false;
+
+function ensureFont(): void {
+  if (fontReady) return;
+  fontReady = true;
+  PIXI.BitmapFont.from(FONT_NAME, {
+    fontSize:        DMG_LABEL_FONT_SIZE,
+    fontWeight:      'bold',
+    fontFamily:      'Segoe UI, sans-serif',
+    fill:            0xffffff,   // white, so `tint` gives the per-label colour …
+    stroke:          0x000000,   // … while the black outline stays black under any tint
+    strokeThickness: DMG_LABEL_STROKE,
+  }, {
+    // Digits plus the words the game floats ("Missed", "Blocked", rank names).
+    chars:      [...PIXI.BitmapFont.ALPHANUMERIC, '+-!?.%×'],
+    // Glyphs are rasterised at this multiple of the font size so they stay
+    // crisp under the world zoom and a supersampled backing store.
+    resolution: Math.min(4, Math.max(1, Math.ceil(GAME_ZOOM * getRenderScale()))),
+    padding:    DMG_LABEL_STROKE + 2,
+  });
 }
 
 export class DamageLabel {
@@ -32,10 +40,11 @@ export class DamageLabel {
   private startY:  number;
 
   constructor(x: number, y: number, amount: number, color: number, label?: string) {
+    ensureFont();
     this.startY    = y;
     this.container = new PIXI.Container();
 
-    const text = new PIXI.Text(label ?? String(Math.round(amount)), getDamageStyle(color));
+    const text = new PIXI.BitmapText(label ?? String(Math.round(amount)), { fontName: FONT_NAME, fontSize: DMG_LABEL_FONT_SIZE, tint: color });
     text.anchor.set(0.5, 1);
     this.container.addChild(text);
     this.container.x = x;

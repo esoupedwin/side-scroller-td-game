@@ -392,8 +392,12 @@ export class Character {
   private lastAppliedTint   = -1;    // last tint written to tintTargets; applyTint skips same-value writes
   // Sweat droplets that bead beside the head and drip while low on health.
   // Created lazily (most characters never get this low), cleared when healed/dead.
-  private sweatGfx:         PIXI.Graphics | null = null;
-  private sweatDrops:       { x: number; y: number; vx: number; vy: number; age: number; ttl: number; r: number }[] = [];
+  // Sweat beads: each bead is a once-drawn Graphics (unit teardrop + glint)
+  // scaled to its radius and moved per frame, pooled across spawns — the layer
+  // used to be cleared and redrawn every tick for every badly-hurt unit.
+  private sweatGfx:         PIXI.Container | null = null;
+  private sweatPool:        PIXI.Graphics[] = [];
+  private sweatDrops:       { x: number; y: number; vx: number; vy: number; age: number; ttl: number; r: number; node: PIXI.Graphics }[] = [];
   private sweatSpawnTimer   = 0;
   // Last facing direction applied to sprite.scale.x. 0 = uninitialised, forces
   // the first apply. Used by tickAnimSprite to skip the per-tick scale write
@@ -3367,7 +3371,7 @@ export class Character {
     if (!low) { if (this.sweatGfx) this.clearSweat(); return; }
 
     if (!this.sweatGfx) {
-      this.sweatGfx = new PIXI.Graphics();
+      this.sweatGfx = new PIXI.Container();
       // Render above the body but below the HP bar / label.
       const idx = this.barBg ? this.container.getChildIndex(this.barBg) : this.container.children.length;
       this.container.addChildAt(this.sweatGfx, idx);
@@ -3387,6 +3391,7 @@ export class Character {
         age: 0,
         ttl: 0.55 + Math.random() * 0.25,
         r:   2.4 + Math.random() * 1.2,
+        node: this.takeSweatNode(),
       });
     };
 
@@ -3399,34 +3404,44 @@ export class Character {
       if (Math.random() < 0.5 && this.sweatDrops.length < 8) spawnDrop(-sideSign);
     }
 
-    const g = this.sweatGfx;
-    g.clear();
     for (let i = this.sweatDrops.length - 1; i >= 0; i--) {
       const d = this.sweatDrops[i];
       d.age += dt;
-      if (d.age >= d.ttl) { this.sweatDrops.splice(i, 1); continue; }
+      if (d.age >= d.ttl) { this.releaseSweatNode(d.node); this.sweatDrops.splice(i, 1); continue; }
       d.vy += 170 * dt;                  // gravity — bead pops up then arcs back down
       d.vx *= Math.pow(0.12, dt);        // air drag bleeds the outward fling over time
       d.x  += d.vx * dt;
       d.y  += d.vy * dt;
-      const t     = d.age / d.ttl;
-      const alpha = t < 0.15 ? t / 0.15 : (1 - t);   // quick fade-in, fade-out toward the end
-      // Teardrop: round bottom + a pointed top.
-      g.beginFill(0x9fd8ff, alpha * 0.9);
-      g.drawCircle(d.x, d.y, d.r);
-      g.drawPolygon([ d.x - d.r * 0.6, d.y, d.x, d.y - d.r * 1.9, d.x + d.r * 0.6, d.y ]);
-      g.endFill();
-      // Glint highlight.
-      g.beginFill(0xffffff, alpha * 0.8);
-      g.drawCircle(d.x - d.r * 0.32, d.y - d.r * 0.32, d.r * 0.35);
-      g.endFill();
+      const t = d.age / d.ttl;
+      d.node.alpha = t < 0.15 ? t / 0.15 : (1 - t);   // quick fade-in, fade-out toward the end
+      d.node.position.set(d.x, d.y);
+      d.node.scale.set(d.r);
     }
+  }
+
+  /** A pooled bead: unit teardrop (round bottom + pointed top) with a glint,
+   *  drawn once; tickSweat scales it to the bead's radius and moves it. */
+  private takeSweatNode(): PIXI.Graphics {
+    let g = this.sweatPool.pop();
+    if (!g) {
+      g = new PIXI.Graphics();
+      g.beginFill(0x9fd8ff, 0.9).drawCircle(0, 0, 1).drawPolygon([-0.6, 0, 0, -1.9, 0.6, 0]).endFill();
+      g.beginFill(0xffffff, 0.8).drawCircle(-0.32, -0.32, 0.35).endFill();
+      this.sweatGfx!.addChild(g);
+    }
+    g.visible = true;
+    return g;
+  }
+
+  private releaseSweatNode(g: PIXI.Graphics): void {
+    g.visible = false;
+    this.sweatPool.push(g);
   }
 
   /** Remove all sweat beads (healed above the threshold, or died). */
   private clearSweat(): void {
+    for (const d of this.sweatDrops) this.releaseSweatNode(d.node);
     this.sweatDrops.length = 0;
-    this.sweatGfx?.clear();
     this.sweatSpawnTimer = 0;
   }
 

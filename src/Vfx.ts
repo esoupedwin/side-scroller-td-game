@@ -251,19 +251,38 @@ const SPARK_SEED   = Math.PI / 7;  // rotate rays so they don't line up with the
 class HitSpark implements VfxEffect {
   container: PIXI.Container;
   isDone   = false;
-  private g:     PIXI.Graphics;   // additive: flash, rays, ring
+  // Drawn once at full size; update() only scales and fades three layers. The
+  // old clear()+redraw of spokes and arcs every frame was one of the top
+  // Graphics-geometry-rebuild sources in a busy fight (~20 rebuilds/s alone).
+  // Scaling means spoke and ring strokes start thin and reach nominal width at
+  // full size rather than starting at full width — invisible at 200 ms.
+  private core: PIXI.Graphics;
+  private rays: PIXI.Graphics;
+  private ring: PIXI.Graphics;
   private life = 0;
-  private rot:   number;
 
   constructor(x: number, y: number) {
     this.container = new PIXI.Container();
     this.container.x = x;
     this.container.y = y;
-    this.rot = Math.random() * Math.PI;
-    this.g = new PIXI.Graphics();
+    const rot = Math.random() * Math.PI;
     // Additive so the impact reads as a bright pop against bodies and sky alike.
-    this.g.blendMode = PIXI.BLEND_MODES.ADD;
-    this.container.addChild(this.g);
+    this.core = new PIXI.Graphics(); this.core.blendMode = PIXI.BLEND_MODES.ADD;
+    this.core.beginFill(0xffffff, 0.95).drawCircle(0, 0, 1).endFill();   // unit disc, scaled per frame
+    this.rays = new PIXI.Graphics(); this.rays.blendMode = PIXI.BLEND_MODES.ADD;
+    // Radial spokes — alternating long/short for a starburst feel, at full length.
+    for (let i = 0; i < SPARK_RAYS; i++) {
+      const a  = rot + SPARK_SEED + (i / SPARK_RAYS) * Math.PI * 2;
+      const cx = Math.cos(a), sy = Math.sin(a);
+      const rl = i % 2 === 0 ? SPARK_LEN_1 : SPARK_LEN_1 * 0.62;
+      this.rays.lineStyle(i % 2 === 0 ? 2.4 : 1.4, SPARK_COLOR, 1);
+      this.rays.moveTo(cx * rl * 0.25, sy * rl * 0.25);
+      this.rays.lineTo(cx * rl,        sy * rl);
+    }
+    this.rays.lineStyle(0);
+    this.ring = new PIXI.Graphics(); this.ring.blendMode = PIXI.BLEND_MODES.ADD;
+    this.ring.lineStyle(2, 0xffe6a0, 0.8).drawCircle(0, 0, RING_R1).lineStyle(0);
+    this.container.addChild(this.core, this.rays, this.ring);
   }
 
   update(dt: number): void {
@@ -276,26 +295,16 @@ class HitSpark implements VfxEffect {
     const ringR  = RING_R0    + (RING_R1    - RING_R0)    * ease;
     const alpha  = 1 - t;
 
-    this.g.clear();
     // White core pop — bright, very short
     const ct = Math.min(1, this.life / 0.06);
-    this.g.beginFill(0xffffff, (1 - ct) * 0.95);
-    this.g.drawCircle(0, 0, 7 * (1 - ct) + 3);
-    this.g.endFill();
+    this.core.visible = ct < 1;
+    if (ct < 1) { this.core.alpha = 1 - ct; this.core.scale.set(7 * (1 - ct) + 3); }
 
-    // Radial spokes — alternating long/short for a starburst feel
-    for (let i = 0; i < SPARK_RAYS; i++) {
-      const a   = this.rot + SPARK_SEED + (i / SPARK_RAYS) * Math.PI * 2;
-      const cx  = Math.cos(a), sy = Math.sin(a);
-      const rl  = i % 2 === 0 ? len : len * 0.62;
-      this.g.lineStyle(i % 2 === 0 ? 2.4 : 1.4, SPARK_COLOR, alpha);
-      this.g.moveTo(cx * rl * 0.25, sy * rl * 0.25);
-      this.g.lineTo(cx * rl,        sy * rl);
-    }
+    this.rays.scale.set(len / SPARK_LEN_1);
+    this.rays.alpha = alpha;
     // Expanding shock ring
-    this.g.lineStyle(Math.max(1, 3 * (1 - t)), 0xffe6a0, alpha * 0.8);
-    this.g.drawCircle(0, 0, ringR);
-    this.g.lineStyle(0);
+    this.ring.scale.set(ringR / RING_R1);
+    this.ring.alpha = alpha;
   }
 }
 
@@ -321,17 +330,36 @@ const DEATH_FLASH_R    = 26;
 class DeathBurst implements VfxEffect {
   container: PIXI.Container;
   isDone   = false;
-  private g:     PIXI.Graphics;
+  // Each pellet is a once-drawn Graphics moved per frame — the burst used to
+  // rebuild all 32 discs every tick for 0.6 s per death.
+  private flash:   PIXI.Graphics;
+  private pellets: PIXI.Container;
+  private nodes:   { g: PIXI.Graphics; dx: number; dy: number }[] = [];   // velocity (px/s) per pellet
   private life = 0;
-  private tint:  number;
 
   constructor(x: number, y: number, side: 'player' | 'enemy') {
-    this.tint = side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const tint = side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
     this.container = new PIXI.Container();
     this.container.x = x;
     this.container.y = y;
-    this.g = new PIXI.Graphics();
-    this.container.addChild(this.g);
+    this.flash   = new PIXI.Graphics().beginFill(0xffffff).drawCircle(0, 0, DEATH_FLASH_R).endFill();
+    this.pellets = new PIXI.Container();
+    this.container.addChild(this.flash, this.pellets);
+    // Each pellet: side-tinted disc with a white core, so a glance at the burst
+    // still says which side just lost a unit.
+    const step = (Math.PI * 2) / DEATH_RAYS;
+    const add = (a: number, speed: number, r: number) => {
+      const g = new PIXI.Graphics();
+      g.beginFill(tint).drawCircle(0, 0, r).endFill();
+      g.beginFill(0xffffff).drawCircle(0, 0, r * 0.55).endFill();
+      this.pellets.addChild(g);
+      this.nodes.push({ g, dx: Math.cos(a) * speed, dy: Math.sin(a) * speed });
+    };
+    for (let i = 0; i < DEATH_RAYS; i++) {
+      const aO = i * step;
+      add(aO,              DEATH_SPD_OUTER, DEATH_R_OUTER);
+      add(aO + step * 0.5, DEATH_SPD_INNER, DEATH_R_INNER);   // inner ring sits between the outer spokes
+    }
   }
 
   update(dt: number): void {
@@ -341,38 +369,16 @@ class DeathBurst implements VfxEffect {
 
     // Full brightness for most of the flight, then a quick wink-out — a long
     // fade would read as smoke rather than as the retro pellet burst.
-    const alpha = t < DEATH_FADE_FROM ? 1 : 1 - (t - DEATH_FADE_FROM) / (1 - DEATH_FADE_FROM);
-    const dOuter = DEATH_SPD_OUTER * this.life;
-    const dInner = DEATH_SPD_INNER * this.life;
-
-    this.g.clear();
+    this.pellets.alpha = t < DEATH_FADE_FROM ? 1 : 1 - (t - DEATH_FADE_FROM) / (1 - DEATH_FADE_FROM);
+    for (const n of this.nodes) n.g.position.set(n.dx * this.life, n.dy * this.life);
 
     // White pop at the centre, covering the frame the body disappears on.
-    if (this.life < DEATH_FLASH_DUR) {
+    this.flash.visible = this.life < DEATH_FLASH_DUR;
+    if (this.flash.visible) {
       const ft = this.life / DEATH_FLASH_DUR;
-      this.g.beginFill(0xffffff, 1 - ft);
-      this.g.drawCircle(0, 0, DEATH_FLASH_R * (1 - ft * 0.5));
-      this.g.endFill();
+      this.flash.alpha = 1 - ft;
+      this.flash.scale.set(1 - ft * 0.5);
     }
-
-    // Each pellet: side-tinted disc with a white core, so a glance at the burst
-    // still says which side just lost a unit.
-    const step = (Math.PI * 2) / DEATH_RAYS;
-    for (let i = 0; i < DEATH_RAYS; i++) {
-      const aO = i * step;
-      const aI = aO + step * 0.5;   // inner ring sits between the outer spokes
-      this.drawPellet(Math.cos(aO) * dOuter, Math.sin(aO) * dOuter, DEATH_R_OUTER, alpha);
-      this.drawPellet(Math.cos(aI) * dInner, Math.sin(aI) * dInner, DEATH_R_INNER, alpha);
-    }
-  }
-
-  private drawPellet(x: number, y: number, r: number, alpha: number): void {
-    this.g.beginFill(this.tint, alpha);
-    this.g.drawCircle(x, y, r);
-    this.g.endFill();
-    this.g.beginFill(0xffffff, alpha);
-    this.g.drawCircle(x, y, r * 0.55);
-    this.g.endFill();
   }
 }
 
@@ -392,20 +398,38 @@ const GLOW_COLOR_CORE  = 0xffffff;  // white-hot centre
 class MuzzleGlow implements VfxEffect {
   container: PIXI.Container;
   isDone   = false;
-  private g:    PIXI.Graphics;
+  // Drawn once; update() only changes scale and alpha (the flash lasts ~7
+  // frames and used to rebuild five shapes on each of them).
+  private glow:  PIXI.Graphics;   // soft discs — scaled by `grow`
+  private spike: PIXI.Graphics;   // forward barrel spike, unit length — scaled in x as it shortens
+  private star:  PIXI.Graphics;   // rear + vertical spikes (fixed)
+  private core:  PIXI.Graphics;
   private life = 0;
-  private dir:  1 | -1;
 
   constructor(x: number, y: number, dir: 1 | -1 = 1) {
-    this.dir = dir;
     this.container = new PIXI.Container();
     this.container.x = x;
     this.container.y = y;
-    this.g = new PIXI.Graphics();
     // Additive blend brightens what's behind the disc — the body sprite under
     // the glow reads as lit, the open background only picks up a faint warmth.
-    this.g.blendMode = PIXI.BLEND_MODES.ADD;
-    this.container.addChild(this.g);
+    const add = () => { const g = new PIXI.Graphics(); g.blendMode = PIXI.BLEND_MODES.ADD; this.container.addChild(g); return g; };
+    // Soft glow discs (relative alphas baked in; the layer alpha fades them together)
+    this.glow = add();
+    this.glow.beginFill(GLOW_COLOR_OUTER, 1).drawCircle(0, 0, GLOW_R_OUTER).endFill();
+    this.glow.beginFill(GLOW_COLOR_MID, 0.8).drawCircle(0, 0, GLOW_R_MID).endFill();
+    // Forward-biased 4-point flash star — long horizontal spike (down the
+    // barrel), short vertical ones. Reads as a directional muzzle flash.
+    const spikeS = GLOW_R_OUTER * 0.6, fwd = dir;
+    this.spike = add();
+    this.spike.beginFill(GLOW_COLOR_MID, 1).drawPolygon([fwd, 0, 0, -spikeS * 0.5, 0, spikeS * 0.5]).endFill();
+    this.star = add();
+    this.star.beginFill(GLOW_COLOR_MID, 1);
+    this.star.drawPolygon([0, -spikeS * 0.5, -fwd * spikeS * 0.7, 0, 0, spikeS * 0.5]);   // short rear spike
+    this.star.drawPolygon([0, -spikeS, spikeS * 0.35, 0, 0, spikeS, -spikeS * 0.35, 0]);  // vertical short spikes
+    this.star.endFill();
+    // White-hot core on top
+    this.core = add();
+    this.core.beginFill(GLOW_COLOR_CORE, 0.7).drawCircle(0, 0, GLOW_R_CORE).endFill();
   }
 
   update(dt: number): void {
@@ -414,34 +438,10 @@ class MuzzleGlow implements VfxEffect {
     if (t >= 1) { this.isDone = true; return; }
     const alpha = (1 - t) * 0.9;
     const grow  = 0.7 + 0.3 * (1 - t);  // pops big then settles
-
-    this.g.clear();
-    // Soft glow discs
-    this.g.beginFill(GLOW_COLOR_OUTER, alpha);       this.g.drawCircle(0, 0, GLOW_R_OUTER * grow); this.g.endFill();
-    this.g.beginFill(GLOW_COLOR_MID,   alpha * 0.8); this.g.drawCircle(0, 0, GLOW_R_MID   * grow); this.g.endFill();
-
-    // Forward-biased 4-point flash star — long horizontal spikes (down the
-    // barrel), short vertical ones. Reads as a directional muzzle flash.
-    const spikeL = GLOW_R_OUTER * 1.8 * (1 - t) + 8;
-    const spikeS = GLOW_R_OUTER * 0.6;
-    const fwd    = this.dir;
-    this.g.beginFill(GLOW_COLOR_MID, alpha);
-    this.g.drawPolygon([
-      fwd * spikeL, 0,          // forward tip (long, down the barrel)
-      0,            -spikeS * 0.5,
-      -fwd * spikeS * 0.7, 0,   // short rear spike
-      0,            spikeS * 0.5,
-    ]);
-    this.g.drawPolygon([        // vertical short spikes
-      0, -spikeS,
-      spikeS * 0.35, 0,
-      0, spikeS,
-      -spikeS * 0.35, 0,
-    ]);
-    this.g.endFill();
-
-    // White-hot core on top
-    this.g.beginFill(GLOW_COLOR_CORE, alpha * 0.7); this.g.drawCircle(0, 0, GLOW_R_CORE * grow); this.g.endFill();
+    this.glow.scale.set(grow); this.glow.alpha = alpha;
+    this.spike.scale.x = GLOW_R_OUTER * 1.8 * (1 - t) + 8;   // spike length in px (unit polygon)
+    this.spike.alpha = this.star.alpha = alpha;
+    this.core.scale.set(grow); this.core.alpha = alpha;
   }
 }
 
@@ -638,14 +638,21 @@ interface Ember { x: number; y: number; vx: number; vy: number; }
 class Explosion implements VfxEffect {
   container: PIXI.Container;
   isDone   = false;
-  private smokeG: PIXI.Graphics;
-  private fireG:  PIXI.Graphics;
-  private glowG:  PIXI.Graphics;
-  private sparkG: PIXI.Graphics;
+  // Every layer except the shockwave ring is drawn ONCE in the constructor and
+  // animated by scale / alpha / position in update(). A grenadier volley used
+  // to cost ~130 Graphics geometry rebuilds per second from these four layers
+  // alone. The ring keeps its per-frame redraw: its stroke thins as it grows,
+  // which a scale cannot express.
+  private fire:   PIXI.Container;
+  private shells: PIXI.Graphics[];   // three concentric unit discs, each with its own alpha
+  private core:   PIXI.Graphics;
+  private ring:   PIXI.Graphics;
+  private sparks: PIXI.Container;
+  private smoke:  PIXI.Container;
   private life = 0;
   private r:     number;
-  private embers: Ember[]                          = [];
-  private puffs:  { x: number; y: number; r: number }[] = [];
+  private embers: (Ember & { node: PIXI.Container; tail: PIXI.Graphics })[] = [];
+  private puffs:  { g: PIXI.Graphics; y: number }[] = [];
 
   constructor(x: number, y: number, radius: number) {
     this.r = radius;
@@ -653,25 +660,48 @@ class Explosion implements VfxEffect {
     this.container.x = x;
     this.container.y = y;
 
-    this.smokeG = new PIXI.Graphics();                                              // normal
-    this.fireG  = new PIXI.Graphics();                                              // normal (opaque fire)
-    this.glowG  = new PIXI.Graphics(); this.glowG.blendMode  = PIXI.BLEND_MODES.ADD;
-    this.sparkG = new PIXI.Graphics(); this.sparkG.blendMode = PIXI.BLEND_MODES.ADD;
-    this.container.addChild(this.smokeG, this.fireG, this.glowG, this.sparkG);
+    // Smoke (normal blend): four puffs at base size; grown, lifted and faded per frame.
+    this.smoke = new PIXI.Container();
+    this.smoke.visible = false;
+    for (let i = 0; i < 4; i++) {
+      const g = new PIXI.Graphics().beginFill(0x3a3a3a).drawCircle(0, 0, radius * (0.3 + Math.random() * 0.35)).endFill();
+      g.x = (Math.random() - 0.5) * radius;
+      g.y = (Math.random() - 0.5) * radius * 0.6;
+      this.smoke.addChild(g);
+      this.puffs.push({ g, y: g.y });
+    }
 
+    // Fireball (normal blend, opaque): unit discs, the group scaled to the shell radius.
+    this.fire = new PIXI.Container();
+    this.shells = [[0xd02808, 1], [0xff7a18, 0.7], [0xffd23a, 0.42]].map(([color, k]) => {
+      const g = new PIXI.Graphics().beginFill(color).drawCircle(0, 0, k).endFill();
+      this.fire.addChild(g);
+      return g;
+    });
+
+    // Hot core + shockwave ring (additive highlights).
+    this.core = new PIXI.Graphics(); this.core.blendMode = PIXI.BLEND_MODES.ADD;
+    this.core.beginFill(0xffffff).drawCircle(0, 0, radius * 0.55).endFill();
+    this.ring = new PIXI.Graphics(); this.ring.blendMode = PIXI.BLEND_MODES.ADD;
+
+    // Embers (additive): per ember a unit-length tail stretched to EXP_SPARK_TAIL
+    // seconds of velocity each frame, plus a fixed bright head.
+    this.sparks = new PIXI.Container();
     for (let i = 0; i < EXP_SPARKS; i++) {
       const a  = Math.random() * Math.PI * 2;
       const sp = (0.7 + Math.random() * 1.1) * radius * 5;  // px/s
+      const node = new PIXI.Container();
+      const tail = new PIXI.Graphics(); tail.blendMode = PIXI.BLEND_MODES.ADD;
+      tail.lineStyle(2, 0xffd66b, 1).moveTo(-1, 0).lineTo(0, 0).lineStyle(0);
+      const head = new PIXI.Graphics(); head.blendMode = PIXI.BLEND_MODES.ADD;
+      head.beginFill(0xffe9a0).drawCircle(0, 0, 1.8).endFill();
+      node.addChild(tail, head);
+      this.sparks.addChild(node);
       // Slight upward bias (proportional to speed) so embers arc up before gravity pulls them back.
-      this.embers.push({ x: 0, y: 0, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - sp * 0.3 });
+      this.embers.push({ x: 0, y: 0, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - sp * 0.3, node, tail });
     }
-    for (let i = 0; i < 4; i++) {
-      this.puffs.push({
-        x: (Math.random() - 0.5) * radius,
-        y: (Math.random() - 0.5) * radius * 0.6,
-        r: radius * (0.3 + Math.random() * 0.35),
-      });
-    }
+
+    this.container.addChild(this.smoke, this.fire, this.core, this.ring, this.sparks);
   }
 
   update(dt: number): void {
@@ -681,67 +711,56 @@ class Explosion implements VfxEffect {
     const R = this.r;
 
     // ── Fireball (opaque, normal blend, front-loaded) ──
-    this.fireG.clear();
     const ft = this.life / 0.34;
+    this.fire.visible = ft < 1;
     if (ft < 1) {
       const fa = (1 - ft) * (1 - ft);             // hold bright then drop off fast
-      const shellR = R * (0.35 + 0.8 * ft);
-      this.fireG.beginFill(0xd02808, Math.min(1, fa + 0.15)); this.fireG.drawCircle(0, 0, shellR);        this.fireG.endFill();
-      this.fireG.beginFill(0xff7a18, Math.min(1, fa + 0.2));  this.fireG.drawCircle(0, 0, shellR * 0.7);  this.fireG.endFill();
-      this.fireG.beginFill(0xffd23a, Math.min(1, fa + 0.25)); this.fireG.drawCircle(0, 0, shellR * 0.42); this.fireG.endFill();
+      this.fire.scale.set(R * (0.35 + 0.8 * ft));
+      this.shells[0].alpha = Math.min(1, fa + 0.15);
+      this.shells[1].alpha = Math.min(1, fa + 0.2);
+      this.shells[2].alpha = Math.min(1, fa + 0.25);
     }
 
     // ── Hot core + shockwave (additive highlights) ──
-    this.glowG.clear();
     const ct = this.life / 0.09;
-    if (ct < 1) {
-      this.glowG.beginFill(0xffffff, (1 - ct) * 0.95);
-      this.glowG.drawCircle(0, 0, R * 0.55 * (0.6 + ct));
-      this.glowG.endFill();
-    }
+    this.core.visible = ct < 1;
+    if (ct < 1) { this.core.alpha = (1 - ct) * 0.95; this.core.scale.set(0.6 + ct); }
     const st = this.life / 0.36;
     if (st < 1) {
       const ringR = R * (0.5 + 1.7 * st);
-      this.glowG.lineStyle(Math.max(1, 6 * (1 - st)), 0xfff0c0, (1 - st) * 0.85);
-      this.glowG.drawCircle(0, 0, ringR);
-      this.glowG.lineStyle(0);
+      this.ring.clear();
+      this.ring.lineStyle(Math.max(1, 6 * (1 - st)), 0xfff0c0, (1 - st) * 0.85);
+      this.ring.drawCircle(0, 0, ringR);
+      this.ring.lineStyle(0);
+    } else if (this.ring.visible) {
+      this.ring.visible = false;
     }
 
     // ── Embers (additive streaks) ──
-    this.sparkG.clear();
     const sa = Math.max(0, 1 - this.life / 0.55);
+    this.sparks.visible = sa > 0;
     if (sa > 0) {
-      // Advance physics, then draw all streaks under one line style, then all
-      // bright heads under one fill — avoids re-setting Graphics state per ember.
+      this.sparks.alpha = sa;
       for (const e of this.embers) {
         e.vy += EXP_SPARK_GRAV * dt;
         e.x  += e.vx * dt;
         e.y  += e.vy * dt;
+        e.node.position.set(e.x, e.y);
+        e.node.rotation = Math.atan2(e.vy, e.vx);
+        e.tail.scale.x  = Math.hypot(e.vx, e.vy) * EXP_SPARK_TAIL;
       }
-      this.sparkG.lineStyle(2, 0xffd66b, sa);
-      for (const e of this.embers) {
-        this.sparkG.moveTo(e.x - e.vx * EXP_SPARK_TAIL, e.y - e.vy * EXP_SPARK_TAIL);
-        this.sparkG.lineTo(e.x, e.y);
-      }
-      this.sparkG.lineStyle(0);
-      this.sparkG.beginFill(0xffe9a0, sa);
-      for (const e of this.embers) this.sparkG.drawCircle(e.x, e.y, 1.8);
-      this.sparkG.endFill();
     }
 
     // ── Smoke (normal blend) — ramps in as the fireball dies, then rises/fades.
     // Sits behind the opaque fireball, so it only becomes visible once the fire
     // thins out (no muddy grey over the initial flash).
-    this.smokeG.clear();
     const ramp = Math.min(1, this.life / 0.25);          // fade in over first 0.25s
     const ma   = 0.42 * ramp * (1 - t) * (1 - t);
+    this.smoke.visible = ma > 0.01;
     if (ma > 0.01) {
-      const grow = 0.8 + t * 1.1;
-      for (const p of this.puffs) {
-        this.smokeG.beginFill(0x3a3a3a, ma);
-        this.smokeG.drawCircle(p.x, p.y - t * R * 0.6, p.r * grow);
-        this.smokeG.endFill();
-      }
+      this.smoke.alpha = ma;
+      const grow = 0.8 + t * 1.1, rise = t * R * 0.6;
+      for (const p of this.puffs) { p.g.scale.set(grow); p.g.y = p.y - rise; }
     }
   }
 }
