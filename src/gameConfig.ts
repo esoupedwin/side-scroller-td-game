@@ -49,6 +49,7 @@ export const GameConfig = {
     hpBarWidth:         28,     // px
     hpBarHeight:        5,      // px
     harassSafetyBuffer: 40,  // px outside enemy tower range where harass units hold
+    playerSpawnBehavior: 'collecting' as const,  // behaviour a player-bought unit starts with (CPU units get theirs from the AI on its next tick)
     collectCampOffset:  50,  // px on its own side of the coin box an idle collector waits ('smartCollect') — first to the next drop
     collectContestMargin: 0.85, // 'smartCollect': a coin an enemy collector reaches in under this fraction of our travel time is deprioritised
     collectDangerPx:    140,  // 'smartCollect': a coin with an enemy COMBAT unit this close is deprioritised, and a camp spot this close to one is abandoned for a fallback nearer home

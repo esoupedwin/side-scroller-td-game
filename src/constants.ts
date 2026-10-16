@@ -371,6 +371,7 @@ export const SIEGE_MARGIN           = ch.siegeMargin;
 export const COLLECT_CAMP_OFFSET    = ch.collectCampOffset;
 export const COLLECT_CONTEST_MARGIN = ch.collectContestMargin;
 export const COLLECT_DANGER_PX      = ch.collectDangerPx;
+export const PLAYER_SPAWN_BEHAVIOR  = ch.playerSpawnBehavior;
 export const HARASS_RALLY_OFFSET    = ch.harassRallyOffset;
 export const HARASS_GROUP_DIST      = ch.harassGroupDist;
 export const HARASS_RALLY_TOLERANCE = ch.harassRallyTolerance;

@@ -40,7 +40,7 @@ import { CharCommandRing, type CharCommand } from './CharCommandRing';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM, CAMERA_MAX_PAN_DOWN,
-  CHAR_CMD_SLOW_MO, CHAR_CMD_FOLLOW_RATE, CHAR_CMD_TAP_PX, CHAR_CMD_HIT_SLOP,
+  CHAR_CMD_SLOW_MO, CHAR_CMD_FOLLOW_RATE, CHAR_CMD_TAP_PX, CHAR_CMD_HIT_SLOP, PLAYER_SPAWN_BEHAVIOR,
   CAMERA_TOWER_BOTTOM_GAP, TEXTURE_GC_IDLE_SEC, CPU_SPRITE_RETRY_MS,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
@@ -1009,6 +1009,7 @@ export class Game {
     // body from overlapping the tower physics box.
     const spawnX  = this.playerTower.spawnX + config.width / 2;
     const c = new Character('player', spawnX, this.playerTower.spawnY, config, this.allocateCharId(), pickName(), this.physics, getSpriteSet(tribeForSide('player'), type), this.mapGroundY);
+    c.behavior = PLAYER_SPAWN_BEHAVIOR;   // a fresh unit goes for coins until the player says otherwise
     this.characters.push(c);
     this.unitLayer.addChild(c.container);
     this.hud.add(c);
