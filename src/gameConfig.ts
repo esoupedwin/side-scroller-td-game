@@ -218,7 +218,7 @@ export const GameConfig = {
       pirateking: {
         id:          'pirateking' as const,
         attackStyle: 'bullet' as const, icon: '🤠', uiColor: '#b8860b',
-        hp:          105, speed: 100, attackRange: 280, attackPower: 7,
+        hp:          145, speed: 100, attackRange: 280, attackPower: 9,
         fireRate:    2.4, cost: 100, critical: 0.09, knockback: 100,
         burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
         projectileScale: 2,   // bullets drawn 2× size (cosmetic)
