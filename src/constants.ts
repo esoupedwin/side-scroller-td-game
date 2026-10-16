@@ -116,6 +116,7 @@ export const TOWER_FIRE_RATE    = towers.fireRate;
 export const TOWER_HIT_SHAKE_SEC = towers.hitShakeSec;
 export const TOWER_HIT_SHAKE_AMP = towers.hitShakeAmp;
 export const TOWER_HIT_SHAKE_HZ  = towers.hitShakeHz;
+export const TOWER_ARROW_SCALE   = towers.arrowScale;
 export const TOWER_COLLAPSE_COLS      = towers.collapse.cols;
 export const TOWER_COLLAPSE_ROWS      = towers.collapse.rows;
 export const TOWER_COLLAPSE_GRAVITY   = towers.collapse.gravity;

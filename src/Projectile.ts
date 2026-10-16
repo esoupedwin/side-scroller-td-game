@@ -63,6 +63,7 @@ export class Projectile {
     kind:   ProjectileKind = 'arrow',
     shooter: Character | null = null,
     groundY: number = GROUND_Y,
+    scale?:  number,   // cosmetic size; defaults to the shooter's config projectileScale
   ) {
     this.side    = side;
     this.damage  = damage;
@@ -85,7 +86,7 @@ export class Projectile {
 
     this.container = new PIXI.Container();
     this.gfx       = new PIXI.Graphics();
-    this.gfx.scale.set(shooter?.config.projectileScale ?? 1);   // per-unit cosmetic size (e.g. pirateking 2×)
+    this.gfx.scale.set(scale ?? shooter?.config.projectileScale ?? 1);   // cosmetic size (pirateking 2×, tower arrows 3×)
     this.container.addChild(this.gfx);
 
     if (kind === 'bullet') {

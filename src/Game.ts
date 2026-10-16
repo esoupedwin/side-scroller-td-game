@@ -42,7 +42,7 @@ import {
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM, CAMERA_MAX_PAN_DOWN,
   CHAR_CMD_SLOW_MO, CHAR_CMD_FOLLOW_RATE, CHAR_CMD_TAP_PX, CHAR_CMD_HIT_SLOP, PLAYER_SPAWN_BEHAVIOR,
   CAMERA_TOWER_BOTTOM_GAP, TEXTURE_GC_IDLE_SEC, CPU_SPRITE_RETRY_MS,
-  TOWER_WIDTH,
+  TOWER_WIDTH, TOWER_ARROW_SCALE,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   charConfig, charCost, charSpawnCooldown, charIsUnique,
   GRENADE_FUSE_S, GRENADE_SPLASH_R, GRENADE_GRAVITY, GRENADE_MAX_VX, GRENADE_SPLASH_MIN_FRAC,
@@ -2349,12 +2349,12 @@ export class Game {
     const shotP = this.playerTower.tryFire(dt, this.enemyLive);
     if (shotP) this.fireProjectile({
       sx: shotP.sx, sy: shotP.sy, tx: shotP.tx, ty: shotP.ty, damage: shotP.damage,
-      side: 'player', projectileKind: 'arrow',
+      side: 'player', projectileKind: 'arrow', projectileScale: TOWER_ARROW_SCALE,
     });
     const shotE = this.enemyTower.tryFire(dt, this.playerLive);
     if (shotE) this.fireProjectile({
       sx: shotE.sx, sy: shotE.sy, tx: shotE.tx, ty: shotE.ty, damage: shotE.damage,
-      side: 'enemy', projectileKind: 'arrow',
+      side: 'enemy', projectileKind: 'arrow', projectileScale: TOWER_ARROW_SCALE,
     });
 
     // Spawn coins dropped or thrown by characters (scan all — some may have just died)
@@ -3204,7 +3204,7 @@ export class Game {
         'gun_fire',
         req.sx,
       );
-      const p = new Projectile(req.side, req.sx, req.sy, req.tx, req.ty, req.damage, req.projectileKind, req.shooter ?? null, this.mapGroundY);
+      const p = new Projectile(req.side, req.sx, req.sy, req.tx, req.ty, req.damage, req.projectileKind, req.shooter ?? null, this.mapGroundY, req.projectileScale);
       this.projectiles.push(p);
       this.projLayer.addChild(p.container);
     }

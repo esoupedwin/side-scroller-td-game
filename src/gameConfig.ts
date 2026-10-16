@@ -35,6 +35,7 @@ export const GameConfig = {
     hitShakeSec: 0.3,   // s
     hitShakeAmp: 5,     // px — peak horizontal amplitude
     hitShakeHz:  26,    // vibration frequency
+    arrowScale:  3,     // tower arrows drawn this many times normal size (cosmetic — hit detection unchanged)
     // Destruction (Tower.collapse): at 0 HP the tower art is cut into a
     // cols × rows grid of debris that breaks apart bottom row first, flies
     // outward, falls under gravity, bounces once or twice and settles on the

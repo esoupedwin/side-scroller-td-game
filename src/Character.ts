@@ -198,6 +198,7 @@ export interface FireRequest {
   damage:         number;
   projectileKind: 'arrow' | 'bullet' | 'grenade' | 'rocket';
   shooter?:       Character;
+  projectileScale?: number;   // cosmetic size override (tower shots); else the shooter's config value
 }
 
 /** Context passed to Character.update() each tick. */
