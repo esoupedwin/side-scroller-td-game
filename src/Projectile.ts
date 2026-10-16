@@ -48,6 +48,9 @@ export class Projectile {
   // harmless free-flight body (velocity + gravity) that fades out over
   // PROJ_RICOCHET_LIFE_SEC — no further character/tower hits.
   private ricochet: { vx: number; vy: number; age: number } | null = null;
+  // Per-map ground surface. Normal flight ends at ty, so only the ricochet's
+  // free fall needs it (same per-map plumbing as Grenade).
+  private readonly groundY: number;
   // One-shot flag drained by Game.ts right after a deflection so it can lift
   // the container out of the projectile layer and draw it above everything.
   private ricochetJustStarted = false;
@@ -59,11 +62,13 @@ export class Projectile {
     damage: number,
     kind:   ProjectileKind = 'arrow',
     shooter: Character | null = null,
+    groundY: number = GROUND_Y,
   ) {
     this.side    = side;
     this.damage  = damage;
     this.kind    = kind;
     this.shooter = shooter;
+    this.groundY = groundY;
     this.sx = sx; this.sy = sy;
     this.tx = tx; this.ty = ty;
     this.x  = sx; this.y  = sy;
@@ -283,7 +288,7 @@ export class Projectile {
     this.x += r.vx * dt;
     this.y += r.vy * dt;
 
-    if (this.y >= GROUND_Y) { this.isDead = true; return; }
+    if (this.y >= this.groundY) { this.isDead = true; return; }
     for (const b of blocks) {
       if (this.x >= b.x && this.x <= b.x + b.width &&
           this.y >= b.y && this.y <= b.y + b.height) {

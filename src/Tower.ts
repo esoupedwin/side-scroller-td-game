@@ -194,7 +194,13 @@ export class Tower {
     this.drawBar();
     // Jolt the building. Restarting (not extending) keeps a sustained
     // barrage reading as a continuous rattle at full amplitude.
-    if (dmg > 0 && this.hp > 0) this.shakeTimer = TOWER_HIT_SHAKE_SEC;
+    if (this.hp <= 0) {
+      // tick() stops driving tickShake once the match is over — settle the art
+      // now so a tower killed mid-jolt isn't frozen off-centre on the game-over screen.
+      this.shakeTimer = 0; this.shakePhase = 0; this.art.x = 0; this.art.y = 0;
+    } else if (dmg > 0) {
+      this.shakeTimer = TOWER_HIT_SHAKE_SEC;
+    }
   }
 
   /** Call each tick: drives the hit-shake offset on the tower art (not the

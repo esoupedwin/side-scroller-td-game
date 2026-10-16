@@ -59,11 +59,15 @@ const enemyHpLabelEl  = document.getElementById('enemy-hp-label')!;
 // exists (same optional-art pattern as the loadout grid). Rebuilt on every
 // tribe/loadout change by syncSpawnButtonVisibility().
 const spawnBtns = new Map<string, HTMLButtonElement>();
+// Each card's purchase-cooldown readout — cached here because refreshSpawnButtons()
+// polls at 10 Hz and shouldn't query the DOM per card per tick.
+const spawnCdEls = new Map<string, HTMLElement>();
 
 function rebuildSpawnButtons() {
   const tribe = getPlayerTribe();
   uiOverlay.replaceChildren();
   spawnBtns.clear();
+  spawnCdEls.clear();
   lastDisabledByBtn.clear();
   for (const t of TRIBE_ROSTERS[tribe]) {
     if (!loadout.has(t)) continue;   // only the picked loadout gets buttons
@@ -99,6 +103,7 @@ function rebuildSpawnButtons() {
     btn.addEventListener('click', () => game.spawnPlayer(t as CharTypeName));
     uiOverlay.appendChild(btn);
     spawnBtns.set(t, btn);
+    spawnCdEls.set(t, cd);
   }
   // Fresh buttons start enabled — sync disabled state to the current balance.
   handleCoinsChanged(lastKnownCoins);
@@ -1565,7 +1570,7 @@ function refreshSpawnButtons() {
     // Countdown text + recharge sweep, or the "on the field" badge. Writes are
     // guarded so a ready card costs nothing per poll.
     const label = deployed ? 'ON FIELD' : onCooldown ? `${Math.ceil(cd.remaining)}s` : '';
-    const cdEl  = btn.querySelector<HTMLElement>('.spawn-cd');
+    const cdEl  = spawnCdEls.get(t);
     if (cdEl && cdEl.textContent !== label) cdEl.textContent = label;
     if (btn.classList.contains('on-cooldown') !== onCooldown) btn.classList.toggle('on-cooldown', onCooldown);
     if (btn.classList.contains('deployed')    !== deployed)   btn.classList.toggle('deployed', deployed);
