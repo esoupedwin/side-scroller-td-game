@@ -15,6 +15,12 @@ export const GameConfig = {
   // long: within a match nothing is evicted, and match switches unload sets
   // explicitly anyway. PIXI's own default idle is 1 hour.
   spriteAtlasGpuOnly: true,
+  // In-match sheet repacks (a CPU type's first buy, lazy carry anims) yield to
+  // the next animation frame once a slice of atlas blitting has run this many
+  // ms, so a 30-frame sheet is spread over several frames instead of landing
+  // as one 25-30 ms hitch. Pre-match bulk loads (ensureSpriteSets) ignore it —
+  // nothing is rendering that could hitch. Infinity disables slicing.
+  spriteAtlasSliceMs: 4,
   textureGcIdleSec:   600,
   worldWidth: W,
   groundY:   H - 80,

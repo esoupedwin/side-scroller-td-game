@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import { TRIBE_ROSTERS, type Tribe } from './Tribes';
-import { charConfig, charSpriteFolder, GAME_ZOOM, SPRITE_ATLAS_HEADROOM, SPRITE_ATLAS_GPU_ONLY, SPRITE_ATLAS_LOWMEM_SCALE } from './constants';
+import { charConfig, charSpriteFolder, GAME_ZOOM, SPRITE_ATLAS_HEADROOM, SPRITE_ATLAS_GPU_ONLY, SPRITE_ATLAS_LOWMEM_SCALE, SPRITE_ATLAS_SLICE_MS } from './constants';
 import { getTextureScale } from './resolution';
 
 // Each character renders as two stacked PIXI.AnimatedSprite layers that
@@ -242,6 +242,18 @@ const ATLAS_SCALE_HEADROOM  = SPRITE_ATLAS_HEADROOM;   // texels per rendered px
 // its sheet if one is ever needed again (context loss, a very long idle).
 const ATLAS_GPU_ONLY = SPRITE_ATLAS_GPU_ONLY;
 
+// ── In-match load slicing ─────────────────────────────────────────────────────
+// A sheet repack is a software blit of every frame (drawAtlas) — a few ms per
+// sheet on a desktop, 25-30 ms in one frame on a throttled phone. Pre-match
+// bulk loads (ensureSpriteSets) run flat out: the "Loading…" button is up and
+// nothing renders. Everything else (a CPU type's first buy, lazy carry anims)
+// happens mid-match, where that blit is a visible hitch, so drawAtlas yields
+// to the next animation frame whenever a slice exceeds ATLAS_SLICE_MS.
+const ATLAS_SLICE_MS = SPRITE_ATLAS_SLICE_MS;
+let bulkLoadsInFlight = 0;
+const sliceInMatch = () => bulkLoadsInFlight === 0 && Number.isFinite(ATLAS_SLICE_MS);
+const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+
 /** Largest scale (≤ 1) a frame of height `fh` needs so it still renders with
  *  ATLAS_SCALE_HEADROOM texels per device pixel at the current resolution. */
 function atlasScaleFor(tribe: Tribe, type: string, animDef: SpriteLayerAnimDef, fh: number): number {
@@ -301,13 +313,24 @@ async function drawAtlas(
   if (!ctx) throw new Error('[sprites] 2d context unavailable');
   ctx.imageSmoothingEnabled = scale < 1;
   ctx.imageSmoothingQuality = 'high';
+  // Mid-match, spread the blit over frames (see ATLAS_SLICE_MS). The rAF
+  // continuation runs after the game's own ticker callback for that frame, so
+  // each slice lands in the frame's leftover budget rather than ahead of it.
+  const slice = sliceInMatch();
+  let sliceStart = performance.now();
   for (let i = 0; i < probe.frameCount; i++) {
     const b = probe.boxes[i], d = layout.place[i];
     const cx = (i % FRAMES_PER_ROW) * fw, cy = Math.floor(i / FRAMES_PER_ROW) * fh;
     ctx.drawImage(source, cx + b.x, cy + b.y, b.width, b.height, d.x, d.y, d.width, d.height);
+    if (slice && performance.now() - sliceStart >= ATLAS_SLICE_MS && i + 1 < probe.frameCount) {
+      await nextFrame();
+      sliceStart = performance.now();
+    }
   }
   // Same construction as PIXI's own loader (bitmap + default alphaMode) so the
-  // edge-alpha pipeline is unchanged.
+  // edge-alpha pipeline is unchanged. createImageBitmap copies the canvas
+  // synchronously before its async part — mid-match that copy gets its own frame.
+  if (slice) await nextFrame();
   try {
     return await createImageBitmap(canvas);
   } finally {
@@ -408,6 +431,7 @@ async function packFrames(
     scaleMode: PIXI.SCALE_MODES.NEAREST,
     mipmap:    PIXI.MIPMAP_MODES.OFF,
   });
+  if (sliceInMatch()) await nextFrame();   // the GL upload is one more single-call phase
   eagerUpload(base);   // no-op unless ATLAS_GPU_ONLY
 
   // `orig` keeps the pre-existing inset cell size so spriteScale tuning holds;
@@ -446,11 +470,16 @@ interface LoadedLayerAnim {
 // (enough to get the tab killed on a 4 GB phone) and it is what inflated the
 // GPU transfer pool above. Decode + pack a few at a time instead; the sheets
 // still stream in well under the squad screen's "Loading…" moment.
+// Mid-match the limit drops to one: each sheet has a few unsplittable
+// single-call phases (probe blit + readback, createImageBitmap, the GL
+// upload), and three sheets landing those in the same frame measured as
+// 100 ms frame gaps on a throttled CPU. Serialised, each phase gets its own
+// frame (see the sliceInMatch() yields in loadLayerAnimNow / packFrames).
 const SHEET_LOAD_CONCURRENCY = 3;
 let sheetSlotsInUse = 0;
 const sheetWaiters: (() => void)[] = [];
 async function withSheetSlot<T>(fn: () => Promise<T>): Promise<T> {
-  if (sheetSlotsInUse >= SHEET_LOAD_CONCURRENCY) await new Promise<void>(r => sheetWaiters.push(r));
+  while (sheetSlotsInUse >= (sliceInMatch() ? 1 : SHEET_LOAD_CONCURRENCY)) await new Promise<void>(r => sheetWaiters.push(r));
   sheetSlotsInUse++;
   try { return await fn(); }
   finally { sheetSlotsInUse--; sheetWaiters.shift()?.(); }
@@ -485,7 +514,11 @@ async function loadLayerAnimNow(
   const rows  = animDef.rows ?? Math.max(1, Math.round(texture.height / FRAME_HEIGHT_PX));
   const fw    = Math.floor(texture.width  / FRAMES_PER_ROW);
   const fh    = Math.floor(texture.height / rows);
+  // Mid-match the decode just completed in this frame's microtasks; give the
+  // probe (one downscaled blit + readback) a frame of its own before the repack.
+  if (sliceInMatch()) await nextFrame();
   const probe = probeSheet(texture, rows, fw, fh);
+  if (sliceInMatch()) await nextFrame();   // the probe was this frame's share; the repack starts in the next
   const frameCount = probe?.frameCount ?? rows * FRAMES_PER_ROW;
 
   if (REPACK_SHEETS && probe) {
@@ -633,9 +666,14 @@ export function isSpriteSetReady(tribe: Tribe, type: string): boolean {
 
 /** Load every listed set in parallel; resolves once all are cached. */
 export async function ensureSpriteSets(keys: Iterable<SpriteSetKey>): Promise<void> {
-  const tasks: Promise<unknown>[] = [];
-  for (const { tribe, type } of keys) tasks.push(loadSpriteSet(tribe, type));
-  await Promise.all(tasks);
+  bulkLoadsInFlight++;   // unsliced: pre-match, nothing is rendering (see ATLAS_SLICE_MS)
+  try {
+    const tasks: Promise<unknown>[] = [];
+    for (const { tribe, type } of keys) tasks.push(loadSpriteSet(tribe, type));
+    await Promise.all(tasks);
+  } finally {
+    bulkLoadsInFlight--;
+  }
 }
 
 /**
