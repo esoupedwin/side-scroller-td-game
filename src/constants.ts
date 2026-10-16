@@ -116,6 +116,17 @@ export const TOWER_FIRE_RATE    = towers.fireRate;
 export const TOWER_HIT_SHAKE_SEC = towers.hitShakeSec;
 export const TOWER_HIT_SHAKE_AMP = towers.hitShakeAmp;
 export const TOWER_HIT_SHAKE_HZ  = towers.hitShakeHz;
+export const TOWER_COLLAPSE_COLS      = towers.collapse.cols;
+export const TOWER_COLLAPSE_ROWS      = towers.collapse.rows;
+export const TOWER_COLLAPSE_GRAVITY   = towers.collapse.gravity;
+export const TOWER_COLLAPSE_VX_MIN    = towers.collapse.vxMin;
+export const TOWER_COLLAPSE_VX_MAX    = towers.collapse.vxMax;
+export const TOWER_COLLAPSE_POP_MIN   = towers.collapse.popVyMin;
+export const TOWER_COLLAPSE_POP_MAX   = towers.collapse.popVyMax;
+export const TOWER_COLLAPSE_SPIN_MAX  = towers.collapse.spinMax;
+export const TOWER_COLLAPSE_ROW_DELAY = towers.collapse.rowDelaySec;
+export const TOWER_COLLAPSE_BOUNCE    = towers.collapse.bounce;
+export const TOWER_COLLAPSE_SETTLE_VY = towers.collapse.settleVy;
 
 export const PLAYER_TOWER_X = towers.playerX;
 export const ENEMY_TOWER_X  = towers.enemyX;

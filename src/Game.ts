@@ -1998,6 +1998,10 @@ export class Game {
    *   • Coin culling so finished coins disappear normally
    */
   private tickGameOver(dt: number, deltaMS: number): void {
+    // The fallen tower keeps crumbling onto the ground behind the result screen.
+    this.playerTower.tickCollapse(dt);
+    this.enemyTower.tickCollapse(dt);
+
     // Coin drops keep firing.
     this.coinDropTimer += deltaMS;
     if (this.coinDropTimer >= this.coinDropInterval) {

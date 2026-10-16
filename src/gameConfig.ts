@@ -35,6 +35,23 @@ export const GameConfig = {
     hitShakeSec: 0.3,   // s
     hitShakeAmp: 5,     // px — peak horizontal amplitude
     hitShakeHz:  26,    // vibration frequency
+    // Destruction (Tower.collapse): at 0 HP the tower art is cut into a
+    // cols × rows grid of debris that breaks apart bottom row first, flies
+    // outward, falls under gravity, bounces once or twice and settles on the
+    // ground as rubble for the game-over screen.
+    collapse: {
+      cols:        3,
+      rows:        6,
+      gravity:     1100,  // px/s²
+      vxMin:       40,    // px/s — outward speed range of a piece (away from the tower centre)
+      vxMax:       170,
+      popVyMin:    0,     // px/s — initial upward kick range
+      popVyMax:    190,
+      spinMax:     5,     // rad/s — random spin magnitude cap
+      rowDelaySec: 0.07,  // s between successive rows letting go (bottom first)
+      bounce:      0.35,  // vertical restitution on landing
+      settleVy:    70,    // px/s — a landing slower than this comes to rest instead of bouncing
+    },
   },
 
   characters: {

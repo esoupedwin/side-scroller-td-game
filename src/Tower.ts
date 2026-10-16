@@ -4,6 +4,9 @@ import {
   TOWER_WIDTH, TOWER_HEIGHT, TOWER_HP,
   TOWER_ATTACK_RANGE, TOWER_ATTACK_POWER, TOWER_FIRE_RATE,
   TOWER_HIT_SHAKE_SEC, TOWER_HIT_SHAKE_AMP, TOWER_HIT_SHAKE_HZ,
+  TOWER_COLLAPSE_COLS, TOWER_COLLAPSE_ROWS, TOWER_COLLAPSE_GRAVITY,
+  TOWER_COLLAPSE_VX_MIN, TOWER_COLLAPSE_VX_MAX, TOWER_COLLAPSE_POP_MIN, TOWER_COLLAPSE_POP_MAX,
+  TOWER_COLLAPSE_SPIN_MAX, TOWER_COLLAPSE_ROW_DELAY, TOWER_COLLAPSE_BOUNCE, TOWER_COLLAPSE_SETTLE_VY,
   PLAYER_COLOR, ENEMY_COLOR,
 } from './constants';
 import type { Character } from './Character';
@@ -17,6 +20,18 @@ export interface TowerShot {
 }
 
 export type Side = 'player' | 'enemy';
+
+/** One chunk of a collapsing tower (see Tower.collapse). */
+interface DebrisPiece {
+  node:    PIXI.Container;   // Sprite (skin sub-rect) or Graphics (fallback), pivot at its centre
+  halfW:   number;
+  halfH:   number;
+  vx:      number;
+  vy:      number;
+  spin:    number;           // rad/s
+  delay:   number;           // s until this piece lets go (bottom rows first)
+  settled: boolean;
+}
 
 export class Tower {
   readonly side: Side;
@@ -37,6 +52,8 @@ export class Tower {
   private readonly art:      PIXI.Container;
   private shakeTimer = 0;   // seconds of hit shake left (0 = still)
   private shakePhase = 0;
+  private skin: PIXI.Sprite | null = null;   // loaded skin sprite, if the tribe has one
+  private debris: DebrisPiece[] | null = null;   // non-null once the tower has collapsed
   private lastDrawnTowerRatio = -1;
 
   // HP bar dimensions — 1.4× height, 1.2× width relative to the original
@@ -101,6 +118,7 @@ export class Tower {
       const flip = side === 'enemy';
       loadFittedTexture(skinUrl, sw, sh)
         .then(tex => {
+          if (this.debris) return;   // destroyed before the skin arrived — stay rubble
           this.body.visible = false;
           const sprite = new PIXI.Sprite(tex);
           sprite.anchor.set(0.5, 0);
@@ -109,6 +127,7 @@ export class Tower {
           sprite.width  = sw;
           sprite.height = sh;
           if (flip) sprite.scale.x = -sprite.scale.x;
+          this.skin = sprite;
           this.art.addChildAt(sprite, 0);
         })
         .catch(() => { /* keep Graphics body */ });
@@ -198,6 +217,7 @@ export class Tower {
       // tick() stops driving tickShake once the match is over — settle the art
       // now so a tower killed mid-jolt isn't frozen off-centre on the game-over screen.
       this.shakeTimer = 0; this.shakePhase = 0; this.art.x = 0; this.art.y = 0;
+      this.collapse();
     } else if (dmg > 0) {
       this.shakeTimer = TOWER_HIT_SHAKE_SEC;
     }
@@ -214,6 +234,96 @@ export class Tower {
     const w       = this.shakePhase * Math.PI * 2 * TOWER_HIT_SHAKE_HZ;
     this.art.x = Math.sin(w) * TOWER_HIT_SHAKE_AMP * falloff;
     this.art.y = Math.cos(w * 1.31) * TOWER_HIT_SHAKE_AMP * 0.35 * falloff;
+  }
+
+  /**
+   * Break the tower into debris. The intact art (skin sprite or Graphics body)
+   * is hidden and replaced by a cols × rows grid of pieces covering the same
+   * box — sub-rect textures of the skin when one is loaded, flat colour
+   * rectangles otherwise. Each piece gets an outward velocity, an upward kick
+   * and a spin; rows let go bottom-first so the top visibly drops as the base
+   * gives way. tickCollapse() then runs the fall.
+   */
+  private collapse() {
+    if (this.debris) return;
+    const cols = TOWER_COLLAPSE_COLS, rows = TOWER_COLLAPSE_ROWS;
+    const skin = this.skin;
+    // Box the debris covers: the skin's drawn rect, or the Graphics body box.
+    const boxW = skin ? this.skinW_resolved : TOWER_WIDTH;
+    const boxH = skin ? this.skinH_resolved : TOWER_HEIGHT;
+    const left = this.x - boxW / 2, top = this.baseY - boxH;
+    const pw = boxW / cols, ph = boxH / rows;
+    const flip  = skin ? skin.scale.x < 0 : false;
+    const color = this.side === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
+    const rand  = (a: number, b: number) => a + Math.random() * (b - a);
+
+    this.body.visible = false;
+    if (skin) skin.visible = false;
+    this.debris = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        let node: PIXI.Container;
+        if (skin) {
+          // Source cell: the enemy skin is mirrored, so screen column c shows
+          // source column (cols-1-c); the piece keeps the mirror via scale.x.
+          const f  = skin.texture.frame, sc = flip ? cols - 1 - c : c;
+          const sub = new PIXI.Texture(skin.texture.baseTexture,
+            new PIXI.Rectangle(f.x + sc * f.width / cols, f.y + r * f.height / rows, f.width / cols, f.height / rows));
+          const s = new PIXI.Sprite(sub);
+          s.anchor.set(0.5);
+          s.width = pw; s.height = ph;
+          if (flip) s.scale.x = -s.scale.x;
+          node = s;
+        } else {
+          const g = new PIXI.Graphics();
+          g.beginFill(color, 0.9).drawRect(-pw / 2, -ph / 2, pw, ph).endFill();
+          node = g;
+        }
+        node.position.set(left + (c + 0.5) * pw, top + (r + 0.5) * ph);
+        this.art.addChild(node);
+        // Outward: away from the centre column; the middle column picks a side.
+        const dir = c < (cols - 1) / 2 ? -1 : c > (cols - 1) / 2 ? 1 : (Math.random() < 0.5 ? -1 : 1);
+        this.debris.push({
+          node, halfW: pw / 2, halfH: ph / 2,
+          vx:    dir * rand(TOWER_COLLAPSE_VX_MIN, TOWER_COLLAPSE_VX_MAX),
+          vy:    -rand(TOWER_COLLAPSE_POP_MIN, TOWER_COLLAPSE_POP_MAX),
+          spin:  rand(-TOWER_COLLAPSE_SPIN_MAX, TOWER_COLLAPSE_SPIN_MAX),
+          delay: (rows - 1 - r) * TOWER_COLLAPSE_ROW_DELAY,
+          settled: false,
+        });
+      }
+    }
+  }
+
+  /** Call each tick after the tower has died (Game.tickGameOver): advances
+   *  the debris until every piece has come to rest on the ground. */
+  tickCollapse(dt: number) {
+    if (!this.debris) return;
+    for (const p of this.debris) {
+      if (p.settled) continue;
+      if (p.delay > 0) { p.delay -= dt; continue; }
+      p.vy += TOWER_COLLAPSE_GRAVITY * dt;
+      p.node.x += p.vx * dt;
+      p.node.y += p.vy * dt;
+      p.node.rotation += p.spin * dt;
+      // Rest height follows the piece's rotated extent so flat and upright
+      // pieces both sit on the ground line.
+      const rot   = p.node.rotation;
+      const restY = this.baseY - (p.halfH * Math.abs(Math.cos(rot)) + p.halfW * Math.abs(Math.sin(rot)));
+      if (p.node.y >= restY && p.vy > 0) {
+        p.node.y = restY;
+        if (p.vy > TOWER_COLLAPSE_SETTLE_VY) {
+          p.vy = -p.vy * TOWER_COLLAPSE_BOUNCE;
+          p.vx *= 0.5; p.spin *= 0.5;
+        } else {
+          p.vy = 0; p.vx = 0; p.spin = 0;
+          // Lie flat-ish: snap to the nearest quarter turn so the rubble stacks cleanly.
+          p.node.rotation = Math.round(rot / (Math.PI / 2)) * (Math.PI / 2);
+          p.node.y = this.baseY - (Math.abs(Math.cos(p.node.rotation)) > 0.5 ? p.halfH : p.halfW);
+          p.settled = true;
+        }
+      }
+    }
   }
 
   get isDead() { return this.hp <= 0; }
