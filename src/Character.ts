@@ -15,7 +15,7 @@ import {
   WAVE_ARRIVE_TOL, COLLECT_CAMP_OFFSET, COLLECT_CONTEST_MARGIN, COLLECT_DANGER_PX,
   HARASS_RALLY_OFFSET, HARASS_GROUP_DIST, HARASS_RALLY_TOLERANCE,
   COIN_THROW_VX, COIN_THROW_VY, COIN_THROW_SCAN_RANGE, COIN_THROW_HOLD_SEC, COIN_THROW_MIN_DIST, COIN_THROW_MAX_Y_GAP,
-  COIN_PICK_DIST_OFFSET,
+  COIN_PICK_DIST_OFFSET, COIN_CARRY_OFFSET_X, COIN_CARRY_OFFSET_Y,
   PROMO_KILL_AP, PROMO_COIN_AP, PROMO_THRESHOLDS,
   PROMO_HP_BOOST, PROMO_SPEED_BOOST, PROMO_ATK_BOOST,
   POWERUP_SPEED_MULT, POWERUP_SPEED_DUR_S, POWERUP_ATK_MULT,
@@ -888,6 +888,7 @@ export class Character {
     if (bodyChanged || facingChanged) body.scale.x = this.bodyBaseScale * facingDir;
     if (legsChanged || facingChanged) legs.scale.x = this.legsBaseScale * facingDir;
     this.lastAppliedFacingDir = facingDir;
+    if (facingChanged && this.coinCarryGfx) this.coinCarryGfx.x = COIN_CARRY_OFFSET_X * facingDir;   // keep the coin on the leading arm
 
     this.updateLocomotionFps();
   }
@@ -1974,8 +1975,10 @@ export class Character {
     g.beginFill(outer);   g.drawCircle(0, 0, 7);   g.endFill();
     g.beginFill(mid);     g.drawCircle(0, 0, 5);   g.endFill();
     g.beginFill(hi, 0.8); g.drawCircle(-2, -2, 2); g.endFill();
-    g.x = 0;
-    g.y = 6;   // held low, around the character's arms/hands while carried
+    // Held low and ahead of the body, on the leading arm; follows the facing
+    // flip (tickAnimSprite re-offsets it whenever facingDir changes).
+    g.x = COIN_CARRY_OFFSET_X * (this.lastAppliedFacingDir || this.lastMoveDir);
+    g.y = COIN_CARRY_OFFSET_Y;
     this.coinCarryGfx = g;
     this.container.addChild(g);
 

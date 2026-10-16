@@ -45,6 +45,8 @@ export const GameConfig = {
     pickupDist:         22,     // px — how close a character must be to grab a coin
     depositDist:        28,     // px — how close to the tower to deposit a coin
     coinCarrySpeedMult:       0.6,  // speed multiplier while carrying a coin
+    coinCarryOffsetX:         10,   // px the carried coin sits ahead of the body centre, toward the facing direction — on the leading arm
+    coinCarryOffsetY:         6,    // px below the config head the carried coin is held (low, at arm height)
     coinRecoveryCooldownSec:  2,    // seconds after dropping a coin before pickup is allowed
     hpBarWidth:         28,     // px
     hpBarHeight:        5,      // px
