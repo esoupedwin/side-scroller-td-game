@@ -6,7 +6,7 @@ import {
   CHEAT_CLOCK_SKIP_SEC,
   CHEAT_CLOCK_SKIP_BIG_SEC,
   CHEAT_SELF_PLAY_SPEED, CPU_PROFILES, type CpuProfile,
-  TRIBE_POWER_UPS, TRIBE_PU_IDS, TRIBE_PU_PLAYER_DEFAULT,
+  TRIBE_POWER_UPS, TRIBE_PU_IDS, TRIBE_PU_PLAYER_DEFAULT, CHAR_CMD_SLOW_MO,
   type CharTypeName, type TribePowerUpId,
 } from './constants';
 import { getOwnedCards, loadLoadout, saveLoadout } from './CardCollection';
@@ -834,7 +834,7 @@ window.addEventListener('keydown', (e) => {
   const cmdModal = document.getElementById('cmd-modal')!;
   const cmdList  = document.getElementById('cmd-list')!;
   const cmdEmpty = document.getElementById('cmd-empty')!;
-  const SLOW_MO_SCALE = 0.2;   // 5× slower than normal
+  const SLOW_MO_SCALE = CHAR_CMD_SLOW_MO;   // shared with the click-to-command ring (gameConfig.ui.command)
   const REFRESH_MS    = 150;   // re-poll HP / behavior labels at this cadence
 
   type Bhv = 'attacking' | 'collecting' | 'harass' | 'defend' | 'rush';
@@ -949,6 +949,7 @@ window.addEventListener('keydown', (e) => {
     // is incoherent, and the pause overlay would visually conflict).
     if (cmdOpen || gameOver || game.paused) return;
     cmdOpen = true;
+    game.cancelCharCommand();   // one command UI at a time
     game.setTimeScale(SLOW_MO_SCALE);
     rebuildCmdRows();
     cmdModal.style.display = 'flex';

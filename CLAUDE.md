@@ -22,6 +22,7 @@ Source files import only from `constants.ts`, never directly from `gameConfig.ts
 | `src/Game.ts` | Tick loop, spawn, coin drops, power-up drops, projectile fire, culling |
 | `src/Character.ts` | Per-character state machine, physics, behavior |
 | `src/CharacterHUD.ts` | Player-side HP card panel |
+| `src/CharCommandRing.ts` | Click-to-command ring: world-space collect / defend / rush buttons over a tapped player unit (`Game.openCharCommand` owns selection, slow-mo via `applyTimeScale`, camera follow) |
 | `src/Coin.ts` | Coin physics, lifetime, pickup flag |
 | `src/PowerUp.ts` | Power-up physics, visual, pickup, effects |
 | `src/Projectile.ts` | Arc projectile movement and splash damage |

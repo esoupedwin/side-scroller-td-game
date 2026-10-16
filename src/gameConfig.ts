@@ -537,6 +537,19 @@ export const GameConfig = {
       fontSize:    26,   // px — doubled from 13 so hit numbers read at a glance (also sizes "Missed" / "Blocked" / rank words)
       strokeWidth: 4,    // px outline — scaled with the font so the fill stays legible over busy backgrounds
     },
+    // Click-to-command (Game.openCharCommand + CharCommandRing): tapping a
+    // player unit slows time, eases the camera onto it, and shows three
+    // command buttons on an arc above its head. slowMoScale is shared with the
+    // Z-key command panel.
+    command: {
+      slowMoScale:  0.2,   // ticker speed while a command UI is open (5× slower)
+      followRate:   6,     // 1/s — camera eases onto the selected unit at this exponential rate (real time, unaffected by slow-mo)
+      tapMaxPx:     8,     // CSS px — a press that travels further than this is a camera drag, not a tap
+      buttonRadius: 26,    // world px — command button circle radius (×GAME_ZOOM on screen)
+      arcRadius:    80,    // world px — buttons sit this far from the point above the unit's head
+      headGap:      36,    // world px — that point sits this far above the unit's sprite top (clears the name tag + HP bar)
+      hitSlopPx:    6,     // world px — padding around a unit's body for the selection tap
+    },
   },
 
   loadout: {

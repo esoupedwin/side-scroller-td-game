@@ -36,9 +36,11 @@ import type { BlockData } from './Block';
 import type { CollisionBoxData } from './CollisionBox';
 import { NavGraph } from './Pathfinding';
 import { Diagnostics } from './Diagnostics';
+import { CharCommandRing, type CharCommand } from './CharCommandRing';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM, CAMERA_MAX_PAN_DOWN,
+  CHAR_CMD_SLOW_MO, CHAR_CMD_FOLLOW_RATE, CHAR_CMD_TAP_PX, CHAR_CMD_HIT_SLOP,
   CAMERA_TOWER_BOTTOM_GAP, TEXTURE_GC_IDLE_SEC, CPU_SPRITE_RETRY_MS,
   TOWER_WIDTH,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
@@ -266,9 +268,26 @@ export class Game {
   private dragStartCameraX    = 0;
   private dragStartCameraY    = 0;
   private dragCssScale        = 1;   // on-screen px per logical px, snapshotted at drag start
+  private pointerMoved        = false;   // press travelled past CHAR_CMD_TAP_PX — a drag, not a tap
+
+  // ── Click-to-command ──────────────────────────────────────────────────────
+  // Tap a player unit: time slows (CHAR_CMD_SLOW_MO), the camera eases onto it,
+  // and a CharCommandRing (collect / defend / rush) appears over its head.
+  // Pressing a button sets the behaviour and ends the mode; pressing anywhere
+  // else ends it too (and that press pans / re-selects as usual).
+  private cmdRing: CharCommandRing | null = null;   // built with the scene in build()
+  private cmdChar: Character | null = null;
+  private baseTimeScale = 1;   // what setTimeScale() asked for; the ring's slow-mo composes on top
 
   private readonly onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0) return;   // primary button only — don't fight right-click menus
+    this.pointerMoved = false;
+    if (this.cmdChar && this.cmdRing) {
+      const w = this.clientToWorld(e.clientX, e.clientY);
+      const cmd = this.cmdRing.hitTest(w.x, w.y);
+      if (cmd) { this.issueCharCommand(cmd); return; }   // a button press is not a drag
+      this.closeCharCommand();   // anywhere else leaves the mode; a tap on another unit re-selects on release
+    }
     this.isDragging       = true;
     this.dragStartClientX = e.clientX;
     this.dragStartClientY = e.clientY;
@@ -291,16 +310,76 @@ export class Game {
     // the snapshotted on-screen scale and by GAME_ZOOM so 1 screen px maps to 1 world px.
     const dx = (e.clientX - this.dragStartClientX) / this.dragCssScale;
     const dy = (e.clientY - this.dragStartClientY) / this.dragCssScale;
+    if (!this.pointerMoved && Math.hypot(e.clientX - this.dragStartClientX, e.clientY - this.dragStartClientY) > CHAR_CMD_TAP_PX) this.pointerMoved = true;
     this.cameraX = this.dragStartCameraX - dx / GAME_ZOOM;
     this.cameraY = this.dragStartCameraY + dy / GAME_ZOOM;
     // tick() runs the clamp on every frame, so we don't need to clamp here.
   };
 
-  private readonly onPointerUp = () => {
+  private readonly onPointerUp = (e: PointerEvent) => {
     if (!this.isDragging) return;
     this.isDragging = false;
     (this.app.view as HTMLCanvasElement).style.cursor = 'grab';
+    // A press that didn't travel is a tap: on a player unit it opens the ring.
+    if (e.type === 'pointerup' && !this.pointerMoved && !this.isOver && !this.isPaused) {
+      const w = this.clientToWorld(e.clientX, e.clientY);
+      const c = this.playerCharAt(w.x, w.y);
+      if (c) this.openCharCommand(c);
+    }
   };
+
+  /** Client (CSS px) → world coordinates through the canvas fit scale, the
+   *  stage, and the zoomed/scrolled world container. */
+  private clientToWorld(clientX: number, clientY: number): PIXI.Point {
+    const rect = (this.app.view as HTMLCanvasElement).getBoundingClientRect();
+    const sx = rect.width  > 0 ? (clientX - rect.left) * VIEWPORT_WIDTH  / rect.width  : 0;
+    const sy = rect.height > 0 ? (clientY - rect.top)  * VIEWPORT_HEIGHT / rect.height : 0;
+    return this.world.toLocal(new PIXI.Point(sx, sy));
+  }
+
+  /** The live player unit whose drawn art (visualBounds, plus CHAR_CMD_HIT_SLOP)
+   *  contains the world point — nearest box centre wins when sprites overlap. */
+  private playerCharAt(wx: number, wy: number): Character | null {
+    let best: Character | null = null, bestD = Infinity;
+    for (const c of this.playerLive) {
+      const b = c.visualBounds;
+      if (wx < b.left - CHAR_CMD_HIT_SLOP || wx > b.right  + CHAR_CMD_HIT_SLOP) continue;
+      if (wy < b.top  - CHAR_CMD_HIT_SLOP || wy > b.bottom + CHAR_CMD_HIT_SLOP) continue;
+      const d = Math.abs(wx - (b.left + b.right) / 2) + Math.abs(wy - (b.top + b.bottom) / 2);
+      if (d < bestD) { best = c; bestD = d; }
+    }
+    return best;
+  }
+
+  private openCharCommand(c: Character) {
+    if (!this.cmdRing) return;
+    this.cmdChar = c;
+    this.cmdRing.show(c);
+    this.applyTimeScale();
+  }
+
+  private closeCharCommand() {
+    if (!this.cmdChar) return;
+    this.cmdChar = null;
+    this.cmdRing?.hide();
+    this.applyTimeScale();
+  }
+
+  private issueCharCommand(cmd: CharCommand) {
+    if (this.cmdChar && !this.cmdChar.isDead) this.cmdChar.behavior = cmd;
+    this.closeCharCommand();
+  }
+
+  /** Leave click-to-command mode (no-op when it isn't open). The Z-key command
+   *  panel calls this so the two command UIs never show at once. */
+  cancelCharCommand(): void { this.closeCharCommand(); }
+
+  /** Effective ticker speed: the caller's time scale, further slowed while a
+   *  unit is selected for command. */
+  private applyTimeScale() {
+    const s = this.cmdChar ? Math.min(this.baseTimeScale, CHAR_CMD_SLOW_MO) : this.baseTimeScale;
+    this.app.ticker.speed = Math.max(0.01, s);
+  }
 
   private nextCharId  = 1;
   private freeCharIds: number[] = [];
@@ -650,6 +729,9 @@ export class Game {
     // added after the labels) so a deflected shot is never hidden mid-flight.
     this.ricochetLayer = new PIXI.Container();
     this.world.addChild(this.ricochetLayer);
+    // Click-to-command ring — world space so it tracks its unit for free.
+    this.cmdRing = new CharCommandRing();
+    this.world.addChild(this.cmdRing.container);
     const towerTop = this.mapGroundY - TOWER_HEIGHT;
     this.playerTowerAABB = {
       left:  m.playerTowerX - TOWER_WIDTH / 2,
@@ -1013,6 +1095,7 @@ export class Game {
   togglePause() {
     if (this.isOver) return;
     this.isPaused = !this.isPaused;
+    if (this.isPaused) this.closeCharCommand();   // slow-mo + pause is incoherent
     for (const c of this.characters) {
       if (this.isPaused) c.pauseAnimations();
       else               c.resumeAnimations();
@@ -1030,7 +1113,8 @@ export class Game {
    *  delta — every dt-driven sub-system (physics, characters, timers) slows
    *  proportionally without needing its own time-scale knob. */
   setTimeScale(s: number): void {
-    this.app.ticker.speed = Math.max(0.01, s);
+    this.baseTimeScale = s;
+    this.applyTimeScale();
   }
 
   /** Live (non-dead) player-side characters. Snapshot is rebuilt each tick
@@ -1941,6 +2025,16 @@ export class Game {
     if (this.keysDown.has('ArrowRight')) this.cameraX += CAMERA_SPEED * dt;
     if (this.keysDown.has('ArrowUp'))    this.cameraY += CAMERA_SPEED * dt;
     if (this.keysDown.has('ArrowDown'))  this.cameraY -= CAMERA_SPEED * dt;
+    // Click-to-command follow: ease the view onto the selected unit in real
+    // time (deltaMS is already slowed by the ring's own slow-mo).
+    if (this.cmdChar) {
+      if (this.cmdChar.isDead) this.closeCharCommand();
+      else {
+        const realDt = Math.min(this.app.ticker.elapsedMS / 1000, 1 / 30);
+        const target = this.cmdChar.x - VIEWPORT_WIDTH / GAME_ZOOM / 2;
+        this.cameraX += (target - this.cameraX) * (1 - Math.exp(-CHAR_CMD_FOLLOW_RATE * realDt));
+      }
+    }
     this.cameraX = Math.max(0, Math.min(this.mapDef.worldWidth - VIEWPORT_WIDTH / GAME_ZOOM, this.cameraX));
     // Y: positive cameraY = scrolled up (world Y=0 toward canvas top); negative = scrolled down.
     // world.y = zoom_anchor + cameraY*GAME_ZOOM, so larger cameraY raises the world on screen.
@@ -2204,6 +2298,9 @@ export class Game {
         blocks:    this.blockData,
       });
     }
+
+    // Command ring tracks its unit after the unit has moved this tick.
+    this.cmdRing?.update(this.cmdChar);
 
     // Tower hit shake (visual only) + tower fire — inline both branches; no
     // per-tick closure or object spread.
@@ -3077,6 +3174,7 @@ export class Game {
 
   private end(winner: 'player' | 'enemy', reason: 'tower' | 'timeout') {
     this.isOver = true;
+    this.closeCharCommand();   // restores the time scale; no commands to issue now
     this.stopBerserk(false);   // tickBerserk no longer runs — don't leave the box frozen mid-shake
     // Push one final HP sync before tick() starts early-exiting at `isOver`:
     // the killing blow lands after this tick already ran its notify pass, so
@@ -3129,6 +3227,8 @@ export class Game {
       setEnemyTribe(mapDef.enemyTowerTribe   ?? 'lapinor');
     }
     this.app.ticker.remove(this.tickFn);
+    this.closeCharCommand();
+    this.cmdRing?.destroy(); this.cmdRing = null;   // build() makes a fresh one
 
     for (const c of this.characters)    { c.destroy(); }
     for (const p of this.projectiles)   { p.destroy(); }

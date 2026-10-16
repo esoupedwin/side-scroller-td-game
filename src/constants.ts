@@ -252,6 +252,13 @@ export const PROJ_RICOCHET_GRAVITY       = proj.ricochet.gravity;
 export const PROJ_RICOCHET_LIFE_SEC      = proj.ricochet.lifeSec;
 
 // ── UI ───────────────────────────────────────────────────────────────────────
+export const CHAR_CMD_SLOW_MO     = ui.command.slowMoScale;
+export const CHAR_CMD_FOLLOW_RATE = ui.command.followRate;
+export const CHAR_CMD_TAP_PX      = ui.command.tapMaxPx;
+export const CHAR_CMD_BTN_RADIUS  = ui.command.buttonRadius;
+export const CHAR_CMD_ARC_RADIUS  = ui.command.arcRadius;
+export const CHAR_CMD_HEAD_GAP    = ui.command.headGap;
+export const CHAR_CMD_HIT_SLOP    = ui.command.hitSlopPx;
 export const DMG_LABEL_LIFETIME  = ui.damageLabel.lifetimeSec;
 export const DMG_LABEL_RISE      = ui.damageLabel.risePx;
 export const DMG_LABEL_FONT_SIZE = ui.damageLabel.fontSize;

@@ -36,14 +36,35 @@ import { spawnSlashArc, spawnHitSpark, spawnMuzzleGlow, spawnShotgunBlast, spawn
 
 export const RANK_NAMES = ['Private', 'Corporal', 'Sergeant', 'Captain'] as const;
 
-/** Icon shown next to the character's name in-world, reflecting current behavior. */
-const BEHAVIOR_ICON: Record<'attacking' | 'collecting' | 'harass' | 'defend' | 'rush', string> = {
+type BehaviorName = 'attacking' | 'collecting' | 'harass' | 'defend' | 'rush';
+
+/** Emoji shown next to the character's name in-world for behaviours that have
+ *  no PNG icon (and as the stand-in while the PNGs are still loading). */
+const BEHAVIOR_ICON: Record<BehaviorName, string> = {
   attacking:  '⚔',
   collecting: '💰',
   harass:     '🎯',
   defend:     '🛡',
   rush:       '⚡',
 };
+// PNG icons for the behaviours the click-to-command ring issues — the small
+// variants of its button art. Shared UI art, loaded once at module import so it
+// is resident before the first unit spawns.
+const BEHAVIOR_ICON_FILE: Partial<Record<BehaviorName, string>> = {
+  collecting: 'command_collect_small',
+  defend:     'command_defend_small',
+  rush:       'command_rush_small',
+};
+const behaviorIconTextures = new Map<BehaviorName, PIXI.Texture>();
+const behaviorIconsReady: Promise<void> = Promise.all(
+  (Object.entries(BEHAVIOR_ICON_FILE) as [BehaviorName, string][]).map(([bhv, file]) =>
+    PIXI.Assets.load<PIXI.Texture>(`/sprites/misc/${file}.png`)
+      .then(t => { behaviorIconTextures.set(bhv, t); })
+      .catch(() => { /* missing art — the emoji stays */ }),
+  ),
+).then(() => {});
+const LABEL_ICON_PX  = 14;   // icon height — a touch taller than the 12 px label font
+const LABEL_ICON_GAP = 3;    // px between icon and name
 
 // Physics collision box is taller than the visual character so projectiles and
 // stacking interactions register reliably even when sprite art is small. Visual
@@ -282,6 +303,7 @@ export class Character {
   get currentAP(): number { return this.ap; }
   private rankGfx!:     PIXI.Graphics;
   private idLabel!:     PIXI.Text;
+  private behaviorIcon!: PIXI.Sprite;   // PNG behaviour icon left of the name (hidden when the emoji is used)
   private promoAnimGfx: PIXI.Graphics | null = null;
   private promoAnimTimer = -1;
 
@@ -527,19 +549,57 @@ export class Character {
     this.container.addChild(this.rankGfx);
     this.drawRankBadge();
 
-    this.idLabel = new PIXI.Text(this.labelText(), {
+    this.idLabel = new PIXI.Text(this.name, {
       fontSize:        12,
       fontWeight:      'bold',
       fill:            0xffffff,
       stroke:          0x000000,
       strokeThickness: 2,
     });
-    this.idLabel.anchor.set(0.5, 1);
-    this.idLabel.x = 0;
+    this.idLabel.anchor.set(0, 1);   // x is laid out by refreshLabel() so icon + name centre as a group
     this.idLabel.y = this.hpBarOffsetY() - 2;
     this.container.addChild(this.idLabel);
+    this.behaviorIcon = new PIXI.Sprite(PIXI.Texture.EMPTY);
+    this.behaviorIcon.anchor.set(0, 1);
+    this.behaviorIcon.y = this.idLabel.y;
+    this.behaviorIcon.visible = false;
+    this.container.addChild(this.behaviorIcon);
+    this.refreshLabel();
+    // Spawned before the icons finished loading: swap the emoji out once they land.
+    if (behaviorIconTextures.size === 0) behaviorIconsReady.then(() => { if (!this.container.destroyed) this.refreshLabel(); });
 
     this.syncPosition();
+  }
+
+  /**
+   * The unit's on-screen art box in world coordinates. For sprite-rendered
+   * units it is the union of the body and legs layers' alpha-trimmed frame
+   * boxes — the atlas repack stores each frame's art rect as `texture.trim`
+   * inside the padded cell (`orig`), and the sprite's own bounds would report
+   * the whole cell. The art is drawn at config.height × spriteScale, so this
+   * box is taller than the config body box and includes the head. Graphics
+   * units fall back to the config box. Used for the click-to-command tap.
+   */
+  get visualBounds(): { left: number; right: number; top: number; bottom: number } {
+    let left = this.x - this.config.width / 2, right = this.x + this.config.width / 2;
+    let top  = this.y - this.config.height,    bottom = this.y;
+    let any = false;
+    for (const s of [this.bodySprite, this.legsSprite]) {
+      if (!s) continue;
+      const tex  = s.texture, orig = tex.orig;
+      const trim = tex.trim ?? new PIXI.Rectangle(0, 0, orig.width, orig.height);
+      // Art rect in sprite-local units (anchor-relative), then the facing flip.
+      const sx = Math.abs(s.scale.x), flip = Math.sign(s.scale.x) || 1, sy = s.scale.y;
+      const lx0 = (trim.x - s.anchor.x * orig.width) * sx * flip;
+      const lx1 = (trim.x + trim.width - s.anchor.x * orig.width) * sx * flip;
+      const cx  = this.x + s.x, cy = this.y - this.config.height + s.y;   // container origin is the config head
+      const L = cx + Math.min(lx0, lx1), R = cx + Math.max(lx0, lx1);
+      const T = cy + (trim.y - s.anchor.y * orig.height) * sy;
+      const B = cy + (trim.y + trim.height - s.anchor.y * orig.height) * sy;
+      if (!any) { left = L; right = R; top = T; bottom = B; any = true; }
+      else { left = Math.min(left, L); right = Math.max(right, R); top = Math.min(top, T); bottom = Math.max(bottom, B); }
+    }
+    return { left, right, top, bottom };
   }
 
   // â”€â”€ Diagnostic introspection (read-only snapshot of internal state) â”€â”€â”€â”€â”€â”€â”€â”€
@@ -598,13 +658,22 @@ export class Character {
    *  avoid double-targeting the same enemy in updateDefending. */
   get claimedIntruder(): Character | null { return this.defendTargetIntruder; }
 
-  /** "<behavior-icon> <name>", shown above the HP bar. */
-  private labelText(): string {
-    return `${BEHAVIOR_ICON[this._behavior]} ${this.name}`;
-  }
-
+  /** Behaviour icon + name above the HP bar: the PNG when art exists for the
+   *  current behaviour, else the emoji inline in the text. Centred as a pair. */
   private refreshLabel(): void {
-    if (this.idLabel) this.idLabel.text = this.labelText();
+    if (!this.idLabel) return;
+    const tex = behaviorIconTextures.get(this._behavior);
+    this.idLabel.text = tex ? this.name : `${BEHAVIOR_ICON[this._behavior]} ${this.name}`;
+    if (tex) {
+      this.behaviorIcon.texture = tex;
+      this.behaviorIcon.height  = LABEL_ICON_PX;
+      this.behaviorIcon.width   = LABEL_ICON_PX * tex.width / tex.height;
+    }
+    this.behaviorIcon.visible = tex !== undefined;
+    const iconW  = tex ? this.behaviorIcon.width + LABEL_ICON_GAP : 0;
+    const totalW = iconW + this.idLabel.width;
+    this.behaviorIcon.x = -totalW / 2;
+    this.idLabel.x      = -totalW / 2 + iconW;
   }
 
   // â”€â”€ Sprite builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
