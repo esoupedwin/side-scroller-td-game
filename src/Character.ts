@@ -160,6 +160,9 @@ export interface CharacterConfig {
   // uses the GUNSLINGER_BURST_* constants; this copy exists so the CPU's
   // attribute-driven valuation can derive true sustained DPS from config alone.
   burstCount?:          number;
+  // Visual size multiplier for this unit's bullets / arrows (Projectile scales
+  // its graphic by it). Purely cosmetic — hit detection is unchanged. Unset → 1.
+  projectileScale?:     number;
   // Poison: a direct hit from this unit applies a damage-over-time effect to the
   // victim — `poisonDamage` HP every `poisonIntervalSec`, `poisonTicks` times.
   // All three must be > 0 for poison to apply. Optional so unconfigured types

@@ -85,6 +85,7 @@ export class Projectile {
 
     this.container = new PIXI.Container();
     this.gfx       = new PIXI.Graphics();
+    this.gfx.scale.set(shooter?.config.projectileScale ?? 1);   // per-unit cosmetic size (e.g. pirateking 2×)
     this.container.addChild(this.gfx);
 
     if (kind === 'bullet') {

@@ -261,6 +261,11 @@ export const CHAR_CMD_BTN_RADIUS  = ui.command.buttonRadius;
 export const CHAR_CMD_ARC_RADIUS  = ui.command.arcRadius;
 export const CHAR_CMD_HEAD_GAP    = ui.command.headGap;
 export const CHAR_CMD_HIT_SLOP    = ui.command.hitSlopPx;
+export const CHAR_CMD_BOX_WIDTH   = ui.command.boxWidth;
+export const CHAR_CMD_BOX_HEIGHT  = ui.command.boxHeight;
+export const CHAR_CMD_BOX_PAD     = ui.command.boxPad;
+export const CHAR_CMD_BOX_CORNER  = ui.command.boxCorner;
+export const CHAR_CMD_BOX_LINE    = ui.command.boxLine;
 export const DMG_LABEL_LIFETIME  = ui.damageLabel.lifetimeSec;
 export const DMG_LABEL_RISE      = ui.damageLabel.risePx;
 export const DMG_LABEL_FONT_SIZE = ui.damageLabel.fontSize;
@@ -410,6 +415,7 @@ type RawCharCfg = {
   width?: number; height?: number;
   shotsBeforeCooldown?: number; cooldownSec?: number;
   burstCount?: number;
+  projectileScale?: number;
   poisonDamage?: number; poisonTicks?: number; poisonIntervalSec?: number;
   blockChance?: number; blockPercent?: number;
   spawnCooldownSec?: number;
@@ -434,7 +440,8 @@ function toCharConfig(c: RawCharCfg): CharacterConfig {
     shotsBeforeCooldown: c.shotsBeforeCooldown,
     cooldownSec:         c.cooldownSec,
     burstCount:          c.burstCount,
-    poisonDamage:      c.poisonDamage,
+    projectileScale:     c.projectileScale,
+    poisonDamage:     c.poisonDamage,
     poisonTicks:       c.poisonTicks,
     poisonIntervalSec: c.poisonIntervalSec,
     blockChance:       c.blockChance,

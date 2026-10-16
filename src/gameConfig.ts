@@ -204,6 +204,7 @@ export const GameConfig = {
         hp:          105, speed: 100, attackRange: 280, attackPower: 7,
         fireRate:    2.4, cost: 100, critical: 0.09, knockback: 100,
         burstCount:  3, burstIntervalSec: 0.09,  // 3-round burst per trigger pull
+        projectileScale: 2,   // bullets drawn 2× size (cosmetic)
         spawnCooldownSec: 90,
         unique: true,   // special character — one on the field at a time; re-buy only after it dies
       },
@@ -552,6 +553,15 @@ export const GameConfig = {
       arcRadius:    80,    // world px — buttons sit this far from the point above the unit's head
       headGap:      36,    // world px — that point sits this far above the unit's sprite top (clears the name tag + HP bar)
       hitSlopPx:    6,     // world px — padding around a unit's body for the selection tap
+      // Corner-bracket box drawn around a unit while it is hovered or selected.
+      // One fixed size for every type (centred on the unit, bottom at its feet)
+      // so the frame reads the same whichever unit is picked — sized to the
+      // standard 70 × 92 px infantry art.
+      boxWidth:     70,    // world px
+      boxHeight:    92,    // world px — measured up from the feet
+      boxPad:       6,     // world px — gap between that box and the brackets
+      boxCorner:    14,    // world px — length of each bracket arm
+      boxLine:      3,     // world px — bracket stroke width
     },
   },
 

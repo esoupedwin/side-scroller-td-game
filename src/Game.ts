@@ -36,7 +36,7 @@ import type { BlockData } from './Block';
 import type { CollisionBoxData } from './CollisionBox';
 import { NavGraph } from './Pathfinding';
 import { Diagnostics } from './Diagnostics';
-import { CharCommandRing, type CharCommand } from './CharCommandRing';
+import { CharCommandRing, drawCornerBox, unitBox, type CharCommand } from './CharCommandRing';
 import {
   PLAYER_COLOR, ENEMY_COLOR,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM, CAMERA_MAX_PAN_DOWN,
@@ -277,6 +277,12 @@ export class Game {
   // else ends it too (and that press pans / re-selects as usual).
   private cmdRing: CharCommandRing | null = null;   // built with the scene in build()
   private cmdChar: Character | null = null;
+  // Hover highlight: the last pointer position over the canvas is re-hit-tested
+  // every tick (units walk under a resting cursor), drawing a corner-bracket
+  // box around the hovered player unit and switching the cursor to a pointer.
+  private hoverBox:  PIXI.Graphics | null = null;   // built with the scene in build()
+  private hoverChar: Character | null = null;
+  private pointerClient: { x: number; y: number } | null = null;   // null while the pointer is off the canvas
   private baseTimeScale = 1;   // what setTimeScale() asked for; the ring's slow-mo composes on top
 
   private readonly onPointerDown = (e: PointerEvent) => {
@@ -302,6 +308,9 @@ export class Game {
     c.style.cursor = 'grabbing';
     c.setPointerCapture?.(e.pointerId);
   };
+
+  private readonly onCanvasPointerMove  = (e: PointerEvent) => { this.pointerClient = { x: e.clientX, y: e.clientY }; };
+  private readonly onCanvasPointerLeave = () => { this.pointerClient = null; };
 
   private readonly onPointerMove = (e: PointerEvent) => {
     if (!this.isDragging) return;
@@ -373,6 +382,26 @@ export class Game {
   /** Leave click-to-command mode (no-op when it isn't open). The Z-key command
    *  panel calls this so the two command UIs never show at once. */
   cancelCharCommand(): void { this.closeCharCommand(); }
+
+  /** Hover highlight + cursor, from the last pointer position over the canvas.
+   *  Nothing is hovered while dragging, when the game is over, or over the
+   *  selected unit (its ring already boxes it). */
+  private tickHover() {
+    const canvas = this.app.view as HTMLCanvasElement;
+    let hover: Character | null = null;
+    if (this.pointerClient && !this.isDragging && !this.isOver) {
+      const w = this.clientToWorld(this.pointerClient.x, this.pointerClient.y);
+      hover = this.playerCharAt(w.x, w.y);
+      if (hover === this.cmdChar) hover = null;
+    }
+    if (hover !== this.hoverChar) {
+      this.hoverChar = hover;
+      if (!this.isDragging) canvas.style.cursor = hover ? 'pointer' : 'grab';
+    }
+    if (!this.hoverBox) return;
+    if (hover) { drawCornerBox(this.hoverBox, unitBox(hover), 0, 0, 0.75); this.hoverBox.visible = true; }
+    else if (this.hoverBox.visible) this.hoverBox.visible = false;
+  }
 
   /** Effective ticker speed: the caller's time scale, further slowed while a
    *  unit is selected for command. */
@@ -612,6 +641,8 @@ export class Game {
     const canvasEl = this.app.view as HTMLCanvasElement;
     canvasEl.style.cursor = 'grab';
     canvasEl.addEventListener('pointerdown', this.onPointerDown);
+    canvasEl.addEventListener('pointermove',  this.onCanvasPointerMove);
+    canvasEl.addEventListener('pointerleave', this.onCanvasPointerLeave);
     window.addEventListener('pointermove',   this.onPointerMove);
     window.addEventListener('pointerup',     this.onPointerUp);
     window.addEventListener('pointercancel', this.onPointerUp);
@@ -732,6 +763,9 @@ export class Game {
     // Click-to-command ring — world space so it tracks its unit for free.
     this.cmdRing = new CharCommandRing();
     this.world.addChild(this.cmdRing.container);
+    this.hoverBox = new PIXI.Graphics();
+    this.hoverBox.visible = false;
+    this.world.addChild(this.hoverBox);
     const towerTop = this.mapGroundY - TOWER_HEIGHT;
     this.playerTowerAABB = {
       left:  m.playerTowerX - TOWER_WIDTH / 2,
@@ -2302,6 +2336,7 @@ export class Game {
 
     // Command ring tracks its unit after the unit has moved this tick.
     this.cmdRing?.update(this.cmdChar);
+    this.tickHover();
 
     // Tower hit shake (visual only) + tower fire — inline both branches; no
     // per-tick closure or object spread.
@@ -3230,6 +3265,7 @@ export class Game {
     this.app.ticker.remove(this.tickFn);
     this.closeCharCommand();
     this.cmdRing?.destroy(); this.cmdRing = null;   // build() makes a fresh one
+    this.hoverBox?.destroy(); this.hoverBox = null; this.hoverChar = null;
 
     for (const c of this.characters)    { c.destroy(); }
     for (const p of this.projectiles)   { p.destroy(); }
