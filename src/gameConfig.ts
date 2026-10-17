@@ -21,6 +21,15 @@ export const GameConfig = {
   // as one 25-30 ms hitch. Pre-match bulk loads (ensureSpriteSets) ignore it —
   // nothing is rendering that could hitch. Infinity disables slicing.
   spriteAtlasSliceMs: 4,
+  // Idle-type eviction (Game.tickSpriteEviction): a loaded set whose type has
+  // had no living unit for spriteIdleEvictSec is unloaded — atlases, frames,
+  // lazy carry/throw anims — and the next buy reloads it through the normal
+  // first-buy path (the CPU waits via spriteSetPending; a player spawn renders
+  // Graphics until it lands). The player's picked loadout is pinned
+  // (main.ts launchMatch → Game.pinSpriteSets). Measured mid-match: 212 of
+  // 414 MB of resident atlases belonged to types with no living unit.
+  spriteIdleEvictSec:  45,
+  spriteEvictSweepSec: 5,
   textureGcIdleSec:   600,
   worldWidth: W,
   groundY:   H - 80,

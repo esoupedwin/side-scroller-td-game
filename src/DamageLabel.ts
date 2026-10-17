@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import { DMG_LABEL_LIFETIME, DMG_LABEL_RISE, DMG_LABEL_FONT_SIZE, DMG_LABEL_STROKE, GAME_ZOOM } from './constants';
-import { getRenderScale } from './resolution';
+import { getTextureScale } from './resolution';
 
 // Damage numbers are BitmapText, not PIXI.Text. A PIXI.Text rasterises its
 // string onto a fresh canvas and uploads it as a new GPU texture on first
@@ -26,8 +26,9 @@ function ensureFont(): void {
     // Digits plus the words the game floats ("Missed", "Blocked", rank names).
     chars:      [...PIXI.BitmapFont.ALPHANUMERIC, '+-!?.%×'],
     // Glyphs are rasterised at this multiple of the font size so they stay
-    // crisp under the world zoom and a supersampled backing store.
-    resolution: Math.min(4, Math.max(1, Math.ceil(GAME_ZOOM * getRenderScale()))),
+    // crisp under the world zoom at what the display can show (texture scale,
+    // not render scale — a supersampled backing store adds no visible detail).
+    resolution: Math.min(3, Math.max(1, Math.ceil(GAME_ZOOM * getTextureScale()))),
     padding:    DMG_LABEL_STROKE + 2,
   });
 }

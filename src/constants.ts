@@ -100,6 +100,8 @@ export const TEXTURE_GC_IDLE_SEC = GameConfig.textureGcIdleSec;
 export const SPRITE_ATLAS_HEADROOM = isTouchDevice ? GameConfig.mobile.atlasHeadroom : 1.25;
 export const SPRITE_ATLAS_GPU_ONLY = GameConfig.spriteAtlasGpuOnly;
 export const SPRITE_ATLAS_SLICE_MS = GameConfig.spriteAtlasSliceMs;
+export const SPRITE_IDLE_EVICT_SEC  = GameConfig.spriteIdleEvictSec;
+export const SPRITE_EVICT_SWEEP_SEC = GameConfig.spriteEvictSweepSec;
 const deviceMemoryGB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
 export const SPRITE_ATLAS_LOWMEM_SCALE =
   isTouchDevice && deviceMemoryGB !== undefined && deviceMemoryGB <= 4 ? GameConfig.mobile.lowMemoryAtlasScale : 1;

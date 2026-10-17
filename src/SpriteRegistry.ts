@@ -251,8 +251,23 @@ const ATLAS_GPU_ONLY = SPRITE_ATLAS_GPU_ONLY;
 // to the next animation frame whenever a slice exceeds ATLAS_SLICE_MS.
 const ATLAS_SLICE_MS = SPRITE_ATLAS_SLICE_MS;
 let bulkLoadsInFlight = 0;
-const sliceInMatch = () => bulkLoadsInFlight === 0 && Number.isFinite(ATLAS_SLICE_MS);
-const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+let loadSlicingEnabled = true;
+/** Game switches slicing off while fast-forwarding (self-play): its clock is a
+ *  Worker interval and the tab is often hidden, so frame-paced yields would only
+ *  hold the CPU's buys (spriteSetPending) back for many game-seconds. */
+export function setSpriteLoadSlicing(enabled: boolean): void { loadSlicingEnabled = enabled; }
+const sliceInMatch = () => loadSlicingEnabled && bulkLoadsInFlight === 0 && Number.isFinite(ATLAS_SLICE_MS);
+// Yield to the next frame when the page is drawing (so a slice lands in the
+// frame's leftover budget), but never wait on rAF alone: Chrome stops rAF in a
+// hidden tab and runs it at ~1 Hz in an occluded window, which would park an
+// in-match load until the player comes back. A 250 ms timer backstops it.
+const nextFrame = () => new Promise<void>(resolve => {
+  if (document.hidden) { setTimeout(resolve, 0); return; }
+  let done = false;
+  const finish = () => { if (!done) { done = true; resolve(); } };
+  requestAnimationFrame(finish);
+  setTimeout(finish, 250);
+});
 
 /** Largest scale (≤ 1) a frame of height `fh` needs so it still renders with
  *  ATLAS_SCALE_HEADROOM texels per device pixel at the current resolution. */
@@ -701,7 +716,19 @@ export async function unloadSpriteSetsExcept(keep: Iterable<SpriteSetKey>): Prom
     const def = SPRITE_DEFS[tribe]?.[type];
     if (def) paths.push(...sheetPaths(def));
   }
-  if (paths.length > 0) await PIXI.Assets.unload(paths).catch(() => {});
+  // Repacked sheets were unloaded right after packing; only the fallback
+  // (raw-sheet) path still has one in the cache. Unloading a missing id just
+  // logs an Assets warning, so skip those.
+  const cached = paths.filter(p => PIXI.Assets.cache.has(p));
+  if (cached.length > 0) await PIXI.Assets.unload(cached).catch(() => {});
+}
+
+/** Every set currently in the cache (loaded or known-missing) — the universe
+ *  Game.tickSpriteEviction decides over. */
+export function cachedSpriteSetKeys(): SpriteSetKey[] {
+  const keys: SpriteSetKey[] = [];
+  for (const k of cache.keys()) { const [tribe, type] = k.split(':') as [Tribe, string]; keys.push({ tribe, type }); }
+  return keys;
 }
 
 /**

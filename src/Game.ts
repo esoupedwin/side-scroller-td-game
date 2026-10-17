@@ -28,7 +28,7 @@ import { Platform } from './Platform';
 import { Block } from './Block';
 import { Decor, DECOR_FRONT_Z } from './Decor';
 import { pickName } from './names';
-import { getSpriteSet, isSpriteSetReady, loadSpriteSet, setSpriteRenderer } from './SpriteRegistry';
+import { getSpriteSet, isSpriteSetReady, loadSpriteSet, setSpriteRenderer, cachedSpriteSetKeys, unloadSpriteSetsExcept, setSpriteLoadSlicing, type SpriteSetKey } from './SpriteRegistry';
 import { tribeForSide, TRIBE_ROSTERS, getPlayerTribe, getEnemyTribe, setPlayerTribe, setEnemyTribe, type Tribe } from './Tribes';
 import { getRenderScale } from './resolution';
 import type { PlatformData } from './Platform';
@@ -41,7 +41,7 @@ import {
   PLAYER_COLOR, ENEMY_COLOR,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, GAME_HEIGHT, GAME_DURATION_SEC, GAME_ZOOM, CAMERA_MAX_PAN_DOWN,
   CHAR_CMD_SLOW_MO, CHAR_CMD_FOLLOW_RATE, CHAR_CMD_TAP_PX, CHAR_CMD_HIT_SLOP, PLAYER_SPAWN_BEHAVIOR,
-  CAMERA_TOWER_BOTTOM_GAP, TEXTURE_GC_IDLE_SEC, CPU_SPRITE_RETRY_MS,
+  CAMERA_TOWER_BOTTOM_GAP, TEXTURE_GC_IDLE_SEC, CPU_SPRITE_RETRY_MS, SPRITE_IDLE_EVICT_SEC, SPRITE_EVICT_SWEEP_SEC,
   TOWER_WIDTH, TOWER_ARROW_SCALE,
   GROUND_Y, TOWER_HEIGHT, TOWER_HP,
   charConfig, charCost, charSpawnCooldown, charIsUnique,
@@ -275,6 +275,17 @@ export class Game {
   // and a CharCommandRing (collect / defend / rush) appears over its head.
   // Pressing a button sets the behaviour and ends the mode; pressing anywhere
   // else ends it too (and that press pans / re-selects as usual).
+  // ── Idle sprite-set eviction ──────────────────────────────────────────────
+  // Sprite atlases are ~95 % of the game's memory, and mid-match more than half
+  // of them belonged to types with no living unit. Every SPRITE_EVICT_SWEEP_SEC
+  // of game time, any cached set that is not pinned (the player's loadout) and
+  // has had no living unit for SPRITE_IDLE_EVICT_SEC is unloaded; the next buy
+  // reloads it through the first-buy path (under fast-forward that reload is
+  // unsliced, so it costs the CPU the same spriteSetPending wait as a first buy).
+  private pinnedSpriteKeys = new Set<string>();
+  private spriteLastAlive  = new Map<string, number>();   // "tribe:type" → elapsedSeconds last seen alive
+  private spriteEvictMs    = 0;
+
   private cmdRing: CharCommandRing | null = null;   // built with the scene in build()
   private cmdChar: Character | null = null;
   // Hover highlight: the last pointer position over the canvas is re-hit-tested
@@ -383,6 +394,32 @@ export class Game {
   /** Leave click-to-command mode (no-op when it isn't open). The Z-key command
    *  panel calls this so the two command UIs never show at once. */
   cancelCharCommand(): void { this.closeCharCommand(); }
+
+  /** Sets that must stay resident for the match regardless of use — the
+   *  player's picked loadout, which spawns on a button press and must be ready. */
+  pinSpriteSets(keys: Iterable<SpriteSetKey>): void {
+    this.pinnedSpriteKeys.clear();
+    for (const { tribe, type } of keys) this.pinnedSpriteKeys.add(`${tribe}:${type}`);
+  }
+
+  private tickSpriteEviction(deltaMS: number): void {
+    this.spriteEvictMs += deltaMS;
+    if (this.spriteEvictMs < SPRITE_EVICT_SWEEP_SEC * 1000) return;
+    this.spriteEvictMs = 0;
+    const now = this.elapsedSeconds;
+    for (const c of this.liveChars) this.spriteLastAlive.set(`${tribeForSide(c.side)}:${c.config.id}`, now);
+    const keep: SpriteSetKey[] = [];
+    let evicting = 0;
+    for (const k of cachedSpriteSetKeys()) {
+      const id = `${k.tribe}:${k.type}`;
+      const seen = this.spriteLastAlive.get(id);
+      // Never seen alive (e.g. loaded for a buy that hasn't spawned yet) → keep.
+      if (this.pinnedSpriteKeys.has(id) || seen === undefined || now - seen < SPRITE_IDLE_EVICT_SEC) { keep.push(k); continue; }
+      this.spriteLastAlive.delete(id);
+      evicting++;
+    }
+    if (evicting > 0) void unloadSpriteSetsExcept(keep);
+  }
 
   /** Hover highlight + cursor, from the last pointer position over the canvas.
    *  Nothing is hovered while dragging, when the game is over, or over the
@@ -1184,6 +1221,7 @@ export class Game {
    *  is capped at 50 ms of work so rendering and input still get a turn. */
   setFastForward(steps: number): void {
     this.fastForward = Math.max(1, Math.floor(steps));
+    setSpriteLoadSlicing(this.fastForward === 1);   // frame-paced load slicing only makes sense on the rAF clock
     if (this.fastForward > 1 && !this.ffWorker) {
       const src = 'setInterval(() => postMessage(0), 1000 / 60)';
       this.ffWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
@@ -2298,6 +2336,7 @@ export class Game {
     const runCollectAI = this.cpuCollectAIMs >= 250;
     if (runCollectAI) this.cpuCollectAIMs = 0;
     if (runCollectAI) this.tickCpuCollectAI('enemy', this.enemyLive, liveCoins);
+    this.tickSpriteEviction(deltaMS);
     this.tickCpuBehaviorAI('enemy', this.enemyLive, this.playerLive);
     if (this.cpuVsCpu) {
       if (runCollectAI) this.tickCpuCollectAI('player', this.playerLive, liveCoins);
@@ -3348,6 +3387,8 @@ export class Game {
     }
 
     this.notifyCpuCharsMs    = 0;
+    this.spriteEvictMs       = 0;
+    this.spriteLastAlive.clear();
     this.notifyCpuStrategyMs = 0;
     this.cpuStanceMs         = 0;
     this.cpuCollectAIMs      = 0;

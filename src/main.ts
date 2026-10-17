@@ -608,6 +608,7 @@ function launchMatch(keys: SpriteSetKey[], mapDef?: MatchMapDef) {
   syncSpawnButtonVisibility();
   refreshCostLabels();
   void unloadSpriteSetsExcept(keys);
+  game.pinSpriteSets(keys);   // the loadout stays resident; everything else is evicted when idle
 }
 // Bumped whenever the loadout screen (re)opens, so a Start that's still
 // loading sheets when a tribe/map change re-opens the screen stands down.
